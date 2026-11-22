@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NextRequest } from 'next/server';
@@ -30,6 +30,14 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBacke
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: publishMutation }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
+const recoveryReads = vi.hoisted(() => ({ surfaces: [] as string[] }));
+vi.mock('@/lib/runtimes/shared/owned-session/automatic-recovery', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/runtimes/shared/owned-session/automatic-recovery')>();
+  return { ...actual, readOwnedRecoveryState: (surfaceId: string, options?: { includeArchived?: boolean }) => {
+    recoveryReads.surfaces.push(surfaceId);
+    return actual.readOwnedRecoveryState(surfaceId, options);
+  } };
+});
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] }, reasoningEfforts: { 'gpt-5.6-terra': ['low'] } }) }));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-worker-return-')));
 const data = join(root, 'data'); const repo = join(data, 'repo'); const bin = join(root, 'codex');
@@ -59,7 +67,7 @@ const { fastDelegationCapability } = await import('@/lib/orchestrator/fast-deleg
 const { GET: transcriptRoute } = await import('@/app/api/runtime/transcript/route');
 const owned = await import('@/lib/codex/owned');
 const { createSharedWorkerHeartbeat } = await import('@/lib/ws-server/shared-worker-heartbeat');
-const { listSharedWorkerReturns, stopSharedWorkerReturns } = await import('@/lib/orchestrator/shared-worker-returns');
+const { listSharedWorkerReturns, reconcileSharedWorkerReturns, stopSharedWorkerReturns } = await import('@/lib/orchestrator/shared-worker-returns');
 const { readSharedCheckoutTeam } = await import('@/lib/orchestrator/shared-checkout-team');
 const { getSqlite, closeDb } = await import('@/lib/db');
 const { readPersistedLlmChat } = await import('@/lib/llm/chat-history-store');
@@ -174,4 +182,28 @@ it('stops polling a shared worker once its result reached the parent, keeps poll
   } finally {
     for (const surface of [first, second, running]) supervisor.unregisterWatchedAgent(surface);
   }
+}, 30_000);
+
+it('reads a worker\'s session again only when its session record or stored results change', async () => {
+  busy = true;
+  const worker = await launch('unchanged');
+  const returnHooks = { ...hooks, run: vi.fn(async () => {}) };
+  await reconcileSharedWorkerReturns(returnHooks);
+  expect(listSharedWorkerReturns(parent).filter(row => row.surface_id === worker)).toHaveLength(1);
+  await reconcileSharedWorkerReturns(returnHooks);
+
+  // Nothing about the worker changed: its session is not read again.
+  recoveryReads.surfaces.length = 0;
+  await reconcileSharedWorkerReturns(returnHooks);
+  await reconcileSharedWorkerReturns(returnHooks);
+  expect(recoveryReads.surfaces.filter(surface => surface === worker)).toEqual([]);
+
+  // A session save replaces its record; the next pass reads it once.
+  const file = join(data, 'owned-codex', worker.slice('codex-owned:'.length), 'session.json');
+  writeFileSync(`${file}.tmp`, readFileSync(file)); renameSync(`${file}.tmp`, file);
+  await reconcileSharedWorkerReturns(returnHooks);
+  await reconcileSharedWorkerReturns(returnHooks);
+  expect(recoveryReads.surfaces.filter(surface => surface === worker)).toEqual([worker]);
+  expect(returnHooks.run).not.toHaveBeenCalled();
+  expect(listSharedWorkerReturns(parent).filter(row => row.surface_id === worker)).toHaveLength(1);
 }, 30_000);

@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { readOwnedRecoveryState } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
+import { archiveRootForOwnedSessionRoot } from '@/lib/runtimes/shared/owned-session/archive';
+import { ownedRoots } from '@/lib/runtimes/shared/owned-session-index';
 import { manualReviewRequested } from '@/lib/lane/review-mode';
 import { resolveReviewContinuationSync } from '@/lib/operator/defaults';
 import { assertSharedCheckoutOwner, readActiveSharedCheckoutTeam } from './shared-checkout-team';
@@ -25,6 +29,26 @@ export interface SharedWorkerReturnHooks {
   changed?(surfaceId: string): void;
 }
 let reconciling = false;
+/** Per parent, the evidence stamp at which its worker last had nothing new to record. */
+const settledEvidence = new Map<string, string>();
+
+/**
+ * Everything the record step reads about one worker: its session record, live
+ * or archived (session saves replace the file), and its stored results. Finding
+ * a session reads every session record in the store, so an unchanged stamp
+ * skips that read.
+ */
+async function workerEvidenceStamp(db: ReturnType<typeof getSqlite>, surfaceId: string): Promise<string> {
+  const root = ownedRoots().find(entry => surfaceId.startsWith(entry.marker));
+  const name = root ? surfaceId.slice(root.marker.length) : '';
+  const files = root && /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name)
+    ? [join(root.root, name, 'session.json'), join(archiveRootForOwnedSessionRoot(root.root), name, 'session.json')]
+    : [];
+  const sessions = await Promise.all(files.map(file => stat(file).then(info => `${info.ino}:${info.size}:${info.mtimeMs}`, () => 'x')));
+  const results = db.prepare('SELECT COUNT(*) AS count, MAX(updated_at) AS at FROM shared_worker_returns WHERE surface_id = ?')
+    .get(surfaceId) as { count: number; at: number | null };
+  return `${root?.marker ?? '-'}|${sessions.join('|')}|${results.count}:${results.at ?? ''}`;
+}
 
 export function registerSharedWorkerParent(input: {
   repoPath: string; surfaceId: string; origin: ReviewChatOrigin;
@@ -126,12 +150,19 @@ export async function reconcileSharedWorkerReturns(hooks: SharedWorkerReturnHook
   const deliveries: Promise<void>[] = [];
   try {
     const parents = db.prepare('SELECT * FROM shared_worker_parents').all() as ParentRow[];
+    for (const surfaceId of settledEvidence.keys()) {
+      if (!parents.some(parent => parent.surface_id === surfaceId)) settledEvidence.delete(surfaceId);
+    }
     for (const parent of parents) {
       if (!activeMembership(parent)) continue;
+      const evidence = await workerEvidenceStamp(db, parent.surface_id);
+      if (settledEvidence.get(parent.surface_id) === evidence) continue;
       const state = await readOwnedRecoveryState(parent.surface_id, { includeArchived: true });
-      if (!state.owned || !state.runId || !state.outcome || state.outcome === 'running') continue;
-      if (db.prepare('SELECT 1 FROM shared_worker_returns WHERE surface_id = ? AND run_id = ?')
-        .get(parent.surface_id, state.runId)) continue;
+      if (!state.owned || !state.runId || !state.outcome || state.outcome === 'running'
+        || db.prepare('SELECT 1 FROM shared_worker_returns WHERE surface_id = ? AND run_id = ?').get(parent.surface_id, state.runId)) {
+        settledEvidence.set(parent.surface_id, evidence);
+        continue;
+      }
       const entries = await hooks.readTranscript(parent.surface_id, 80);
       const current = await readOwnedRecoveryState(parent.surface_id, { includeArchived: true });
       if (!current.owned || current.runId !== state.runId || current.outcome !== state.outcome) continue;
