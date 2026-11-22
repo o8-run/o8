@@ -682,7 +682,8 @@ fn read(state: &mut State, body: &Value) {
 }
 
 /// Reads the update state about once a minute, and every second while the
-/// native updater installs and the window is in front.
+/// native updater installs and the window is in front. A window nobody can see
+/// reads it only while an install runs.
 fn check(s: &mut Shell, cx: &mut Context<Shell>) {
     let connected = s.connected;
     let state = s.features.get::<State>();
@@ -695,6 +696,11 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
         read_identity(s, cx);
     }
     let state = s.features.get::<State>();
+    // Nobody can see the window and no install the user started is running:
+    // the status waits, and the first tick after it shows reads it once.
+    if crate::foreground::hidden() && state.phase.is_none() && !state.applying {
+        return;
+    }
     let every = crate::foreground::cadence(Duration::from_secs(
         if state.phase.is_some() || state.applying {
             1
