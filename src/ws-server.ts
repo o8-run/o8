@@ -89,7 +89,7 @@ import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
 import { noteActivity, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
-import { hasLaneBlockingIdle, hasOutstandingReview } from '@/lib/lane/outstanding-review';
+import { hasOutstandingReview, laneBlockingIdle } from '@/lib/lane/outstanding-review';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
 import { recordLaneEvent } from '@/lib/lane/events';
@@ -3501,7 +3501,7 @@ function startHeadlessTickBridge(intervalMs: number) {
     void triggerHeadlessSprintTick()
       .then((result) => {
         // A launch is work progress: wake any loop paused at rest.
-        if ((result as { launched?: number } | undefined)?.launched) noteActivity();
+        if ((result as { launched?: number } | undefined)?.launched) noteActivity(Date.now(), 'headless launch');
         headlessWorkPending = (result as { pending?: boolean } | undefined)?.pending !== false;
         recordBridgeChannelSuccess('headless-tick');
         const success = recordRealtimeBridgeSuccess(headlessTickBridgeBackoff);
@@ -6569,7 +6569,7 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 // ── Server startup ──
 
 const httpServer = createServer(async (req, res) => {
-  noteRequest(req.headers, req.method);
+  noteRequest(req.headers, req.method, req.url);
   if (handleTokenProjectionRequest(req, res, isAuthorizedInternalRequest)) return;
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
@@ -7684,7 +7684,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('message', (raw) => {
-    noteActivity();
+    noteActivity(Date.now(), 'socket message');
     void withWsHealthHandler('ws-message', () => handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString()));
   });
 
@@ -8591,7 +8591,7 @@ async function bootstrapWsServer() {
   // Idle-safe loops pause while no session runs, nothing launched lately and
   // no client is active; any of those wakes them at once.
   startIdleGate({
-    liveSessions: () => orchestratorInflightAborts.size > 0 || hasLaneBlockingIdle(),
+    liveSessions: () => (orchestratorInflightAborts.size > 0 ? 'orchestrator turn in flight' : null) ?? laneBlockingIdle(),
   });
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
