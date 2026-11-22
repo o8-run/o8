@@ -4,7 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { NextRequest } from 'next/server';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+
+const registryLookups = vi.hoisted(() => ({ packets: [] as string[] }));
+vi.mock('@/lib/orchestrator/mission-registry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orchestrator/mission-registry')>();
+  return { ...actual, findMissionRegistryEntryByPacketId: (...args: Parameters<typeof actual.findMissionRegistryEntryByPacketId>) => {
+    registryLookups.packets.push(args[0]);
+    return actual.findMissionRegistryEntryByPacketId(...args);
+  } };
+});
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-problem-service-'));
 const repoPath = join(dataDir, 'repo');
@@ -587,6 +596,42 @@ describe('problem dossier remedy lifecycle', () => {
       missionId: expect.stringMatching(/^problem-test-/),
       status: 'active',
     });
+  });
+
+  it('scans stored missions for a linked remedy again only after a stored mission changes', async () => {
+    await resetFixture();
+    const dossier = createDossier('stored mission scan fixture', 'pkt-scan');
+    const accepted = await acceptProblemDossier(dossier.id);
+    const taskId = accepted.dossier.linkedTaskId!;
+    const captured: { state: Parameters<typeof recordOutgoingMissionSnapshot>[0] | null } = { state: null };
+    await withLockedState((state) => { captured.state = structuredClone(state); });
+    const outgoing = captured.state;
+    if (!outgoing) throw new Error('Outgoing mission snapshot was not captured.');
+    recordOutgoingMissionSnapshot(outgoing);
+    await withLockedState((state) => {
+      state.missionId = 'problem-test-scan-current';
+      state.packets = [];
+      state.updatedAt = new Date().toISOString();
+    });
+
+    await reconcileProblemDossiers();
+    registryLookups.packets.length = 0;
+    await reconcileProblemDossiers();
+    await reconcileProblemDossiers();
+    // Nothing stored changed: the remedy's stored mission is not scanned again.
+    expect(registryLookups.packets.filter((id) => id === taskId)).toEqual([]);
+    expect(listProblemRemedies(dossier.id)[0]).toMatchObject({ taskId, status: 'active' });
+
+    // The stored mission records the remedy failing: the next pass reads it.
+    const failed = structuredClone(outgoing);
+    const packet = failed.packets.find((candidate) => candidate.id === taskId)!;
+    packet.status = 'failed';
+    packet.blockedReason = 'The remedy failed its checks.';
+    failed.updatedAt = new Date(Date.now() + 1_000).toISOString();
+    recordOutgoingMissionSnapshot(failed);
+    await reconcileProblemDossiers();
+    expect(registryLookups.packets.filter((id) => id === taskId)).toEqual([taskId]);
+    expect(listProblemRemedies(dossier.id)[0]).toMatchObject({ taskId, status: 'failed' });
   });
 
   it('reopens the same persisted dossier after the database process singleton restarts', async () => {
