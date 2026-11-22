@@ -4,7 +4,9 @@ import { recurring } from '@/lib/background-work/ledger';
 import type Database from 'better-sqlite3';
 
 import { getSqlite } from '@/lib/db';
+import { statSync } from 'node:fs';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { getLegacyOperatorDefaultsPath, getOperatorDefaultsTomlPath } from '@/lib/settings/operator-defaults-store';
 import { fetchNextJson } from '@/lib/ws-server/next-fetch';
 import {
   attentionEventIsCurrent,
@@ -83,7 +85,31 @@ export interface BroadcastSpeakerTickResult {
   generated: string[];
 }
 
+function settingsFileStamp(path: string): string {
+  try {
+    const info = statSync(path);
+    return `${info.ino}:${info.size}:${info.mtimeMs}`;
+  } catch {
+    return '-';
+  }
+}
+
+/** The voice settings and the settings files they were read from; every edit to either file changes the stamp. */
+let cachedVoiceSettings: { stamp: string; settings: BroadcastVoiceSettings } | null = null;
+
+/**
+ * The speaker checks its settings every second. Reading them parses the
+ * settings files, so reuse the last answer while neither file has changed.
+ */
 function voiceSettings(): BroadcastVoiceSettings {
+  const stamp = `${settingsFileStamp(getOperatorDefaultsTomlPath())}|${settingsFileStamp(getLegacyOperatorDefaultsPath())}`;
+  if (cachedVoiceSettings?.stamp === stamp) return cachedVoiceSettings.settings;
+  const settings = readVoiceSettings();
+  cachedVoiceSettings = { stamp, settings };
+  return settings;
+}
+
+function readVoiceSettings(): BroadcastVoiceSettings {
   const values = getOperatorDefaultsSync().values;
   return {
     broadcastVoice: values.broadcastVoice,
