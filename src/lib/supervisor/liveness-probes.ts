@@ -1,3 +1,4 @@
+import { getSqlite } from '@/lib/db';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { probeBranchMerged } from '@/lib/orchestrator/branch-merge-probe';
@@ -5,6 +6,8 @@ import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-pl
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import {
+  buildOutsideHumanWaitingInbox,
+  collapseActiveInboxIncidents,
   listInboxItems,
   resolveInboxItem,
   type SupervisorInboxItem,
@@ -384,9 +387,44 @@ function expireWhenSubjectGone(item: SupervisorInboxItem, context: ProbeContext)
   return true;
 }
 
+/** What the probes read when the last timed sweep resolved nothing, and when an expiry falls due. */
+let lastProbeInputs: string | null = null;
+let nextExpiryAt = Infinity;
+
+/**
+ * Everything a probe reads, apart from the clock: each open incident with a
+ * packet, that packet, and the packet's latest lane. Null when an open
+ * merge_blocked incident needs git ancestry, which this does not stamp.
+ */
+function probeInputs(packetById: Map<string, OrchestratorPacket>): { inputs: string; expiresAt: number } | null {
+  const statuses = [...ACTIVE_INCIDENT_STATUSES];
+  const rows = getSqlite().prepare(`
+    SELECT id, kind, status, packet_id, repo_path, created_at, payload FROM supervisor_inbox
+    WHERE packet_id IS NOT NULL AND status IN (${statuses.map(() => '?').join(', ')}) ORDER BY id
+  `).all(...statuses) as Array<{ id: string; kind: string; packet_id: string; created_at: string }>;
+  if (rows.some((row) => row.kind === 'merge_blocked')) return null;
+  let expiresAt = Infinity;
+  const parts = rows.map((row) => {
+    const packet = packetById.get(row.packet_id);
+    if (!packet) expiresAt = Math.min(expiresAt, Date.parse(row.created_at) + PACKET_GONE_TTL_MS);
+    const lane = findLatestLaneByPacket(row.packet_id);
+    return JSON.stringify([row, packet ?? null, lane && [lane.id, lane.status, lane.sessionKey, lane.worktreePath]]);
+  });
+  return { inputs: parts.join('\n'), expiresAt: Number.isFinite(expiresAt) ? expiresAt : Infinity };
+}
+
 export async function runLivenessProbeSweep(input: { now?: Date } = {}): Promise<LivenessProbeSweepResult> {
   const now = input.now ?? new Date();
   const state = readOrchestratorControlPlaneState();
+  // The timed sweep skips its probes while nothing they read has changed and
+  // no expiry is due. The inbox reconcile it triggers still runs.
+  const timed = input.now === undefined;
+  const probed = timed ? probeInputs(new Map(state.packets.map((packet) => [packet.id, packet] as const))) : null;
+  if (probed && probed.inputs === lastProbeInputs && now.getTime() < nextExpiryAt) {
+    buildOutsideHumanWaitingInbox();
+    collapseActiveInboxIncidents();
+    return { scanned: 0, resolved: 0, stayed: 0 };
+  }
   const context: ProbeContext = {
     now,
     nowMs: now.getTime(),
@@ -396,18 +434,23 @@ export async function runLivenessProbeSweep(input: { now?: Date } = {}): Promise
     .filter((item) => ACTIVE_INCIDENT_STATUSES.has(item.status));
 
   let resolved = 0;
+  let failed = false;
   for (const item of items) {
     try {
       if (await probeItem(item, context)) {
         resolved += 1;
       }
     } catch (error) {
+      failed = true;
       console.warn(
         `[supervisor-liveness] probe failed for ${item.kind} item ${item.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
 
+  // A resolution changes the inputs and a failed probe retries: read them again next time.
+  lastProbeInputs = resolved === 0 && !failed && probed ? probed.inputs : null;
+  nextExpiryAt = probed?.expiresAt ?? Infinity;
   return {
     scanned: items.length,
     resolved,

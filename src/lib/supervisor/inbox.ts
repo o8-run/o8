@@ -16,6 +16,7 @@ import {
 import type { OutsiderAttentionThreadKind } from './outsider-attention';
 import {
   ACTIVE_OUTSIDE_INCIDENT_STATUSES,
+  outsideHumanWaitingInputs,
   parseOutsideIncidentPayload,
   reconcileOutsideHumanWaitingInbox,
 } from './outsider-inbox-builder';
@@ -580,13 +581,23 @@ function payloadStringFromRaw(rawPayload: string, key: string): string | null {
   }
 }
 
+/** The inputs the last default reconcile saw, and when its answer next changes with them. */
+let outsideWaitingInputs: string | null = null;
+let outsideWaitingNextAt = Infinity;
+
 export function buildOutsideHumanWaitingInbox(
-  now = new Date(),
+  now?: Date,
   thresholdMs?: number,
 ): { created: number; resolved: number } {
   ensureSupervisorInboxTable();
-  return reconcileOutsideHumanWaitingInbox({
-    now,
+  // Every inbox read and the heal-bot's liveness sweep call this. With the
+  // same inputs and no thread crossing a time boundary the answer is the same.
+  const current = now === undefined && thresholdMs === undefined;
+  if (current && outsideWaitingInputs === outsideHumanWaitingInputs() && Date.now() < outsideWaitingNextAt) {
+    return { created: 0, resolved: 0 };
+  }
+  const { created, resolved, nextChangeAt } = reconcileOutsideHumanWaitingInbox({
+    now: now ?? new Date(),
     thresholdMs,
     enqueue: enqueueInboxItem,
     resolve: (id, resolvedAt, payload, insiderReplyAt) => resolveInboxItem(id, null, {
@@ -598,6 +609,9 @@ export function buildOutsideHumanWaitingInbox(
       resolvedAt,
     }),
   });
+  // Read after the reconcile so its own inbox writes are part of the stamp.
+  if (current) { outsideWaitingInputs = outsideHumanWaitingInputs(); outsideWaitingNextAt = nextChangeAt; }
+  return { created, resolved };
 }
 
 export function listActiveOutsideHumanWaitingThreadNumbers(

@@ -213,4 +213,47 @@ describe('outside human waiting inbox real path', () => {
       .filter((row) => row.kind === 'outside_human_waiting')
       .map((row) => row.status)).toEqual(['resolved', 'resolved']);
   });
+
+  it('reruns the default reconcile only when a mirrored thread or the inbox changes, or a waiting hour ticks over', () => {
+    persistIssue();
+    const prepare = vi.spyOn(getSqlite(), 'prepare');
+    const threadReads = () => prepare.mock.calls.filter(([sql]) => String(sql).includes('UNION ALL')).length;
+    const cards = () => (getSqlite().prepare(
+      "SELECT payload FROM supervisor_inbox WHERE kind = 'outside_human_waiting' AND status = 'human_required'",
+    ).all() as Array<{ payload: string }>).map((row) => JSON.parse(row.payload).body);
+    try {
+      buildOutsideHumanWaitingInbox();
+      expect(cards()).toEqual(['Clarify the extension contract · waiting 30h']);
+      expect(threadReads()).toBe(1);
+
+      // Same mirror, same inbox, same whole hour: the mirror is not read again.
+      vi.setSystemTime(NOW.getTime() + 30 * 60_000);
+      buildOutsideHumanWaitingInbox();
+      expect(threadReads()).toBe(1);
+
+      // The thread's next whole hour of waiting falls due.
+      vi.setSystemTime(NOW.getTime() + 60 * 60_000);
+      buildOutsideHumanWaitingInbox();
+      expect(threadReads()).toBe(2);
+      expect(cards()).toEqual(['Clarify the extension contract · waiting 31h']);
+      buildOutsideHumanWaitingInbox();
+      expect(threadReads()).toBe(2);
+
+      // An insider reply reaches the mirror: the next call clears the card.
+      updateGitHubThreadAttention({
+        repoFullName: 'example/widgets',
+        kind: 'issue',
+        number: 41,
+        lastHumanCommentAuthorLogin: 'outside-issue-author',
+        lastHumanCommentAuthorAssociation: 'CONTRIBUTOR',
+        lastHumanCommentAt: WAITING_SINCE,
+        lastInsiderCommentAt: INSIDER_REPLY_AT,
+      });
+      buildOutsideHumanWaitingInbox();
+      expect(threadReads()).toBe(3);
+      expect(cards()).toEqual([]);
+    } finally {
+      prepare.mockRestore();
+    }
+  });
 });
