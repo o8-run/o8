@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -75,6 +75,18 @@ export function getLegacyOperatorDefaultsPath(): string {
 
 export function getOperatorDefaultsTomlPath(): string {
   return path.join(getDataDir(), SETTINGS_TOML_FILE);
+}
+
+/** Identity, size and change time of both settings files; any edit to either changes it. */
+export function operatorDefaultsFilesStamp(): string {
+  return [getOperatorDefaultsTomlPath(), getLegacyOperatorDefaultsPath()].map((file) => {
+    try {
+      const info = statSync(file);
+      return `${info.ino}:${info.size}:${info.mtimeMs}`;
+    } catch {
+      return '-';
+    }
+  }).join('|');
 }
 
 function isMissingFile(error: unknown): boolean {

@@ -152,6 +152,7 @@ import {
 } from './lib/lane/orchestrator-session';
 import { getCodexOrchestratorSession, rehydrateCodexOrchestratorTurns } from './lib/lane/codex-orchestrator-session';
 import { openCodexAppThreadReader, syncCodexAppThreads } from './lib/codex/app-thread-sync';
+import { operatorDefaultsFilesStamp } from './lib/settings/operator-defaults-store';
 import {
   getActiveOrchestratorBackend,
   getOrchestratorBackend,
@@ -5611,8 +5612,15 @@ function startPollingLoops() {
   // the operator adds from the Codex app (desktop or phone) into the o8 chat,
   // then tell an open chat to reload. The history poll above pushes the update.
   let codexAppSyncInFlight = false;
+  // Read the toggle again only when a settings file changes, not every tick.
+  let codexAppToggle: { stamp: string; on: boolean } | null = null;
+  const codexAppSyncOn = () => {
+    const stamp = operatorDefaultsFilesStamp();
+    if (codexAppToggle?.stamp !== stamp) codexAppToggle = { stamp, on: resolveCodexAppThreadsSync() };
+    return codexAppToggle.on;
+  };
   recurring('codex-app-thread-sync', () => {
-    if (codexAppSyncInFlight || !resolveCodexAppThreadsSync()) return;
+    if (codexAppSyncInFlight || !codexAppSyncOn()) return;
     codexAppSyncInFlight = true;
     void syncCodexAppThreads({
       isBusy: (state) => getCodexOrchestratorSession(state.repoPath, state.tabId)?.status === 'busy',
