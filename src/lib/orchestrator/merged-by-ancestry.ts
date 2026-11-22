@@ -13,6 +13,7 @@ import {
   readOrchestratorControlPlaneState,
   withLockedState,
 } from '@/lib/orchestrator/control-plane';
+import { refreshAncestryOriginBase } from '@/lib/orchestrator/merged-by-ancestry-base';
 import { MergedByAncestryBackoff } from '@/lib/orchestrator/merged-by-ancestry-backoff';
 import { persistReleasedPacketToMission } from '@/lib/orchestrator/mission-registry';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
@@ -280,46 +281,6 @@ async function revParse(repoPath: string, ref: string): Promise<string | null> {
   }
 }
 
-// Each sweep runs every 30 s. Fetching every repository's base on each one was
-// ~8 network fetches a minute at rest; merges made outside o8 are still found
-// within this window. O8_ANCESTRY_FETCH_INTERVAL_MS overrides it (tests use 0).
-const DEFAULT_BASE_FETCH_INTERVAL_MS = 5 * 60_000;
-const lastBaseFetchAt = new Map<string, number>();
-
-function baseFetchIntervalMs(): number {
-  const raw = process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
-  const value = raw === undefined || raw.trim() === '' ? Number.NaN : Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_BASE_FETCH_INTERVAL_MS;
-}
-
-async function refreshOriginBase(repoPath: string, baseBranch: string, refreshed: Set<string>): Promise<void> {
-  // Worktrees share their repository's refs, so one fetch per repository and
-  // base serves every candidate in the same sweep.
-  let repository = gitDirectories(repoPath)?.commonDir ?? repoPath;
-  if (repository === repoPath) {
-    try {
-      repository = await git(repoPath, ['rev-parse', '--path-format=absolute', '--git-common-dir'], { timeout: 3_000 });
-    } catch {
-      // An unreadable repository keys on its own path; the fetch below fails too.
-    }
-  }
-  const key = `${repository}\0${baseBranch}`;
-  if (refreshed.has(key)) return;
-  refreshed.add(key);
-  const now = Date.now();
-  const last = lastBaseFetchAt.get(key);
-  if (last !== undefined && now - last < baseFetchIntervalMs()) return;
-  lastBaseFetchAt.set(key, now);
-  if (lastBaseFetchAt.size > 500) lastBaseFetchAt.delete(lastBaseFetchAt.keys().next().value!);
-  try {
-    await git(repoPath, ['fetch', '--quiet', 'origin', `${baseBranch}:refs/remotes/origin/${baseBranch}`], {
-      timeout: 20_000,
-    });
-  } catch {
-    // Best effort only. The proof step below must still verify readable refs.
-  }
-}
-
 async function resolveBaseRef(repoPath: string, baseBranch: string): Promise<string | null> {
   const originRef = `origin/${baseBranch}`;
   if (await refExists(repoPath, originRef)) return originRef;
@@ -394,11 +355,9 @@ async function squashPatchExistsOnBase(
   };
 }
 
-async function detectMergedByAncestry(candidate: Candidate, refreshedBases: Set<string>): Promise<MergeEvidence | null> {
+async function detectMergedByAncestry(candidate: Candidate): Promise<MergeEvidence | null> {
   const { repoPath, branch, baseBranch } = candidate;
   if (!branch) return null;
-
-  await refreshOriginBase(repoPath, baseBranch, refreshedBases);
 
   const branchRef = await resolveBranchRef(repoPath, branch);
   const baseRef = await resolveBaseRef(repoPath, baseBranch);
@@ -828,15 +787,22 @@ async function runSweep(): Promise<MergedByAncestrySweepResult> {
     try {
       const generation = candidate.packet && candidate.laneId
         ? packetReleaseGeneration(candidate.packet, candidate.laneId) : null;
-      // The base fetch keeps its own interval: it is how merges made outside
-      // o8 arrive, and a moved origin ref changes the fingerprint below.
-      await refreshOriginBase(candidate.repoPath, candidate.baseBranch, refreshedBases);
+      // Keep fetching bases on their own interval. A moved origin ref changes
+      // the fingerprint below even when the lane record is unchanged.
+      if (!await refreshAncestryOriginBase(candidate.repoPath, candidate.baseBranch, refreshedBases, git)) {
+        // The directory can become a checkout later. Drop stale answers and
+        // let the next pass check it again.
+        detectBackoff.recordSuccess(key);
+        notMergedFingerprints.delete(key);
+        skipped += 1;
+        continue;
+      }
       const fingerprint = candidateFingerprint(candidate);
       if (fingerprint !== null && notMergedFingerprints.get(key) === fingerprint) {
         skipped += 1;
         continue;
       }
-      const evidence = await detectMergedByAncestry(candidate, refreshedBases);
+      const evidence = await detectMergedByAncestry(candidate);
       detectBackoff.recordSuccess(key);
       if (!evidence) {
         if (fingerprint !== null) notMergedFingerprints.set(key, fingerprint);
