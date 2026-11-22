@@ -220,6 +220,7 @@ impl Inspector {
             cx.notify();
         }
         if !self.pending
+            && !crate::foreground::hidden()
             && (refresh
                 || self.refreshed.is_none_or(|at| {
                     at.elapsed() >= crate::foreground::cadence(Duration::from_secs(3))
