@@ -533,6 +533,30 @@ describe('merged-by-ancestry reconciliation', () => {
     };
   }
 
+  it('starts Git only after a checkout exists in the lane workspace', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'o8-ancestry-no-git-'));
+    tempDirs.push(workspace);
+    const lane = seedLaneOnly(workspace);
+    const gitCalls = logGitCalls();
+    try {
+      await expect(sweepPacketsMergedByAncestry()).resolves.toEqual({ scanned: 1, merged: 0, skipped: 1 });
+      expect(gitCalls.takeAll()).toBe(0);
+      expect(getLane(lane.id)?.status).toBe('reviewing');
+
+      git(workspace, ['init', '-b', 'main']);
+      writeFileSync(join(workspace, 'seed.txt'), 'seed\n');
+      commitAll(workspace, 'seed');
+      git(workspace, ['branch', lane.branch]);
+      gitCalls.takeAll();
+
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 1 });
+      expect(gitCalls.takeAll()).toBeGreaterThan(0);
+      expect(getLane(lane.id)).toMatchObject({ status: 'archived', outcome: 'no_changes' });
+    } finally {
+      gitCalls.restore();
+    }
+  });
+
   it('computes each main commit patch id once across sweeps (#5064)', async () => {
     const { clone, seed } = makeRepo('o8-ancestry-patch-cache');
     writeFileSync(join(clone, 'lane.txt'), 'lane\n');
