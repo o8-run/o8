@@ -70,7 +70,8 @@ impl BotThread {
         view
     }
     pub(crate) fn tick(&mut self, cx: &mut Context<Self>) {
-        if self.fetched.is_none_or(|t| t.elapsed() >= REFRESH) {
+        // Nobody can see the window: read once when it shows.
+        if !crate::foreground::hidden() && self.fetched.is_none_or(|t| t.elapsed() >= REFRESH) {
             self.load(cx);
         }
     }

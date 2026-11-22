@@ -41,10 +41,12 @@ fn load_roster(shell: &mut Shell, force: bool, cx: &mut Context<Shell>) {
         state.entries.clear();
         cx.notify();
     }
+    // Nobody can see the window: the timed roster read waits, and the first
+    // tick after it shows reads once. A change in Settings still reads.
     if state.loading
         || !force
             && state.settings_revision == settings_revision
-            && state.fetched.is_some_and(|t| t.elapsed() < POLL)
+            && (crate::foreground::hidden() || state.fetched.is_some_and(|t| t.elapsed() < POLL))
     {
         return;
     }

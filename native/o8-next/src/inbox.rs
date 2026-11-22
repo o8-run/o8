@@ -310,6 +310,10 @@ impl Inbox {
         self.focus.focus(window);
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        // Nobody can see the window: the inbox reads once when it shows.
+        if crate::foreground::hidden() {
+            return;
+        }
         if self.lane == approval_audit::LANE {
             if self.audit.last_refresh.elapsed() >= Duration::from_secs(30) {
                 self.load_audit(cx);

@@ -80,6 +80,7 @@ impl Saved {
             }
         }
         if self.loading.is_none()
+            && !crate::foreground::hidden()
             && self.last.is_none_or(|last| {
                 now.duration_since(last) >= crate::foreground::cadence(Duration::from_secs(5))
             })
