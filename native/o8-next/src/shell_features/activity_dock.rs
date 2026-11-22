@@ -248,6 +248,11 @@ fn turn(s: &Shell, cx: &App) -> Turn {
 }
 
 fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
+    // Nobody can see the window: no reads and no redraws. The first tick after
+    // it shows finds the data stale and reads once.
+    if crate::foreground::hidden() {
+        return;
+    }
     let dock = s.features.get::<Dock>();
     // Hidden, the data still refreshes slowly, so the toolbar opens with
     // every tab instead of growing as the first loads return.

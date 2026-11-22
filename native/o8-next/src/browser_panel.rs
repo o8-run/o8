@@ -194,9 +194,12 @@ impl BrowserPanel {
         cx.spawn(async move |this, cx| {
             let mut read: Option<std::time::Instant> = None;
             loop {
-                if read.is_some_and(|at| {
-                    at.elapsed() < crate::foreground::cadence(Duration::from_secs(5))
-                }) {
+                // Nobody can see the window: wait, and read as soon as it shows.
+                if crate::foreground::hidden()
+                    || read.is_some_and(|at| {
+                        at.elapsed() < crate::foreground::cadence(Duration::from_secs(5))
+                    })
+                {
                     cx.background_executor().timer(Duration::from_secs(1)).await;
                     continue;
                 }
