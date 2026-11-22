@@ -1,3 +1,4 @@
+import { SELF_REQUEST_HEADERS } from '@/lib/background-work/idle-gate';
 import { getApiBase } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
@@ -11,11 +12,12 @@ export function scheduleNextServerStartup(): void {
   const attempt = async () => {
     try {
       const origin = getApiBase();
-      const health = await fetch(`${origin}/api/panel/status`, { signal: AbortSignal.timeout(1_500) });
+      // Boot work is the server's own: neither request is client activity for the idle gate.
+      const health = await fetch(`${origin}/api/panel/status`, { headers: SELF_REQUEST_HEADERS, signal: AbortSignal.timeout(1_500) });
       if (!health.ok || (await health.json()).product !== 'o8') throw new Error('not ready');
       const response = await fetch(`${origin}/api/review/auto-review`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json' },
+        headers: { authorization: `Bearer ${getOrCreateWsToken()}`, 'content-type': 'application/json', ...SELF_REQUEST_HEADERS },
         body: JSON.stringify({ action: 'bootstrap' }),
         signal: AbortSignal.timeout(30_000),
       });

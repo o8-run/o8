@@ -3,6 +3,7 @@ import type {
   RealtimeMutationPublishRequest,
   RealtimeRefreshRequest,
 } from '@/lib/realtime/types';
+import { SELF_REQUEST_HEADERS } from '@/lib/background-work/idle-gate';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 import { getWsBase } from '@/lib/panel/api-port';
 
@@ -84,6 +85,8 @@ export async function publishCortexChange(payload: {
       headers: {
         'Authorization': `Bearer ${getOrCreateWsToken()}`,
         'Content-Type': 'application/json',
+        // The server's own notice: never client activity for the idle gate.
+        ...SELF_REQUEST_HEADERS,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS),
@@ -114,6 +117,8 @@ export async function publishArtifactRecorded(payload: {
       headers: {
         'Authorization': `Bearer ${getOrCreateWsToken()}`,
         'Content-Type': 'application/json',
+        // The server's own notice: never client activity for the idle gate.
+        ...SELF_REQUEST_HEADERS,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS),
