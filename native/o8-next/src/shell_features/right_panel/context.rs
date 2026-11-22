@@ -38,7 +38,11 @@ pub(super) fn refresh(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
         ensure_comparison(s, w, cx);
     }
     let state = &mut s.features.get::<Panel>().contexts;
-    if state.pending || state.next.is_some_and(|at| at > std::time::Instant::now()) {
+    // Nobody can see the window: the count waits and reads once when it shows.
+    if state.pending
+        || crate::foreground::hidden()
+        || state.next.is_some_and(|at| at > std::time::Instant::now())
+    {
         return;
     }
     state.pending = true;

@@ -153,12 +153,20 @@ fn watch_usage(client: &Client) {
     STARTED.call_once(|| {
         let client = client.clone();
         std::thread::spawn(move || {
+            // Once a minute, and not while nobody can see the window: the
+            // first check after it shows reads at once.
+            let mut read: Option<std::time::Instant> = None;
             loop {
-                if let Ok(snapshot) = client.get::<Value>("/api/runtime/capacity", &[]) {
-                    *USAGE.lock().unwrap() = read_usage(&snapshot);
-                    *SNAPSHOT.lock().unwrap() = Some(snapshot);
+                if !crate::foreground::hidden()
+                    && read.is_none_or(|at| at.elapsed() >= Duration::from_secs(60))
+                {
+                    read = Some(std::time::Instant::now());
+                    if let Ok(snapshot) = client.get::<Value>("/api/runtime/capacity", &[]) {
+                        *USAGE.lock().unwrap() = read_usage(&snapshot);
+                        *SNAPSHOT.lock().unwrap() = Some(snapshot);
+                    }
                 }
-                std::thread::sleep(Duration::from_secs(60));
+                std::thread::sleep(Duration::from_secs(1));
             }
         });
     });
