@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isNetworkThread } from '@/lib/bots/network-store';
-import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
+import { readPersistedLlmChatSummary } from '@/lib/llm/chat-history-store';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { validateComposerImageAttachments, composerBackendSupportsImages } from '@/lib/mobile/composer-image-validation';
 import { isOrchestratorServiceTier } from './service-tier';
@@ -25,8 +25,8 @@ export function validateComposerQueueTarget(input: unknown, requireSaved = true)
   if (!target || typeof target.repoPath !== 'string' || !target.repoPath.startsWith('/') || target.repoPath.length > 4096
     || typeof target.threadId !== 'string' || !/^thoughts-[A-Za-z0-9_-]{1,80}$/.test(target.threadId)) throw new Error('A valid repository and chat are required.');
   if (isNetworkThread(target.threadId)) throw new Error('Network threads send through the agent bus, not the orchestrator queue.');
-  const history = readPersistedLlmChat(target.threadId);
-  if ((!history?.history.repoPath && requireSaved) || (history?.history.repoPath && composerQueueRepoKey(history.history.repoPath) !== composerQueueRepoKey(target.repoPath))) throw new Error('The queued message must target its saved chat repository.');
+  const saved = readPersistedLlmChatSummary(target.threadId);
+  if ((!saved?.repoPath && requireSaved) || (saved?.repoPath && composerQueueRepoKey(saved.repoPath) !== composerQueueRepoKey(target.repoPath))) throw new Error('The queued message must target its saved chat repository.');
   return { repoPath: requireSaved ? realpathSync(target.repoPath) : composerQueueRepoKey(target.repoPath), threadId: target.threadId };
 }
 
@@ -37,8 +37,8 @@ function noProjectScratch(target: Partial<ComposerQueueTarget> | null, requireSa
   // Clients send no repository; a queued item carries the scratch folder it resolved to.
   if (target.repoPath !== undefined && target.repoPath !== null && target.repoPath !== ''
     && (typeof target.repoPath !== 'string' || composerQueueRepoKey(target.repoPath) !== composerQueueRepoKey(threadScratchPath(target.threadId)))) return null;
-  const history = readPersistedLlmChat(target.threadId);
-  if (!history || history.history.repoPath) return null;
+  const saved = readPersistedLlmChatSummary(target.threadId);
+  if (!saved || saved.repoPath) return null;
   return { repoPath: requireSaved ? ensureThreadScratch(target.threadId) : composerQueueRepoKey(threadScratchPath(target.threadId)), threadId: target.threadId };
 }
 

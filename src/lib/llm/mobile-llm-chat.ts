@@ -40,8 +40,29 @@ export function loadMobileLlmInboxTail(sessionKey: string): Transcript {
   return transcript;
 }
 
+const histories = new Map<string, { version: string; serialized: string }>();
+const MAX_CACHED_HISTORIES = 16;
+const MAX_HISTORY_CHARS = 262_144;
+
 export function loadMobileLlmChatHistory(sessionKey: string, limit?: number): MobileHistoryResponse {
   const tabId = sessionKey.replace(/^llm-chat:/, '');
   refreshNetworkProjection(tabId);
-  return { sessionKey, transcript: readTranscript(tabId, limit) };
+  // Clients poll this with a cursor and nearly always find nothing new. Reuse
+  // the mapped transcript while the chat file is unchanged; each caller gets
+  // its own copy.
+  const path = getCanonicalChatHistoryPath(tabId);
+  const key = `${path}\n${limit ?? 'all'}`;
+  const version = getChatHistoryFileVersion(path);
+  const cached = histories.get(key);
+  if (version !== null && cached?.version === version) {
+    return { sessionKey, transcript: JSON.parse(cached.serialized) as Transcript };
+  }
+  const transcript = readTranscript(tabId, limit);
+  const serialized = JSON.stringify(transcript);
+  histories.delete(key);
+  if (version !== null && serialized.length <= MAX_HISTORY_CHARS && getChatHistoryFileVersion(path) === version) {
+    if (histories.size >= MAX_CACHED_HISTORIES) histories.delete(histories.keys().next().value!);
+    histories.set(key, { version, serialized });
+  }
+  return { sessionKey, transcript };
 }
