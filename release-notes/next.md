@@ -1,1 +1,8 @@
 - The Rust daemon ships inside the Mac app and carries the app's live connection. If it stops, the app falls back to the built-in one. Set `O8_WS_O8D=0` to turn it off.
+- With no agent running and no window in front, the server pauses most of its background loops.
+- The server no longer rebuilds the phone inbox each time git activity touches a registered repository.
+- A queued message is delivered when it is added. It used to wait up to 5 seconds.
+- A mission whose packets never launched can be archived from the command line.
+- Saying the cancel phrase drops a dictation even when the polish step can't be reached.
+- A Rust library the app uses for web addresses is updated for a published security advisory.
+- Seven fixes for running o8 from source on Windows, all from @Hysteric-Larva: worktree creation on NTFS drives, file-permission checks, a command line that was too long, worker launch, timeouts on a busy machine, the Claude worker list, and the glass theme. Thank you.
