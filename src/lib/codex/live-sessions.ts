@@ -57,7 +57,10 @@ function loadLiveCodexThreadIds(staleHours: number): Set<string> {
     try {
       const cutoffEpochSeconds = Math.floor((Date.now() - staleHours * 3600 * 1000) / 1000);
       const rows = db
-        .prepare('SELECT id FROM threads WHERE archived = 0 AND updated_at >= ?')
+        // `+archived` keeps the planner off the archived index: nearly every
+        // thread is unarchived, so that index made SQLite read most of the
+        // (large) threads table on every load. The updated_at range is tiny.
+        .prepare('SELECT id FROM threads WHERE +archived = 0 AND updated_at >= ?')
         .all(cutoffEpochSeconds) as Array<{ id: string }>;
       return new Set(rows.map((row) => row.id).filter((id): id is string => typeof id === 'string' && id.length > 0));
     } finally {
