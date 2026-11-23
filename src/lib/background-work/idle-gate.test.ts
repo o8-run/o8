@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { atRest, idleGateStats, noteActivity, noteRequest, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
+import { atRest, idleGateStats, noteActivity, noteClientMessage, noteRequest, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
 import { recurring } from './ledger';
 
 let live: boolean | string = false;
@@ -57,7 +57,10 @@ it('wakes at once on client activity and keeps "always" loops running', () => {
   // The server's own reads and a background window's reads do not wake it.
   noteRequest({ 'x-o8-background': '1' }, 'POST');
   noteRequest({ 'x-o8-foreground': '0' }, 'GET');
+  // Nor does a client's socket keepalive.
+  noteClientMessage('{"type":"ping"}');
   expect(idleSafe.mock.calls.length).toBe(pausedAt);
+  expect(idleGateStats().ignored['socket keepalive']).toBe(1);
   // A window in front (or one that does not say) does, without waiting for a tick.
   noteRequest({}, 'GET');
   expect(idleSafe.mock.calls.length).toBe(pausedAt + 1);

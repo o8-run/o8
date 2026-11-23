@@ -79,6 +79,8 @@ impl Shell {
             .text_size(px(crate::theme::TYPE.chrome))
             .line_height(gpui::relative(crate::theme::TYPE.chrome_line))
             .track_focus(&self.focus)
+            // Reads in the next few seconds count as the user's (foreground.rs).
+            .capture_any_mouse_down(|_, _, _| crate::foreground::touched())
             .capture_key_down(cx.listener(Self::key_down))
             .capture_key_up(
                 cx.listener(|this, event: &gpui::KeyUpEvent, _, cx| {

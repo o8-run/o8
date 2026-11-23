@@ -5,8 +5,10 @@
  * At rest means all of: no agent session running or launching, no recent work
  * progress (a launch or other change the headless tick reports), and no client
  * activity for IDLE_AFTER_MS. Client activity is any request or client message,
- * except the server's own requests (`x-o8-background: 1`) and a read that
- * carries `x-o8-foreground: 0` (a window behind another app).
+ * except the server's own requests (`x-o8-background: 1`), a read that carries
+ * `x-o8-foreground: 0` (one the user did not cause: a window behind another
+ * app, or a timer or socket event in a window in front), and a client's socket
+ * keepalive (`{"type":"ping"}`).
  *
  * A loop is "idle-safe" unless it is registered as "always" with a written
  * reason. An idle-safe loop may also declare a `busy` check: while it returns
@@ -154,7 +156,16 @@ export function noteActivity(now = Date.now(), source = 'activity'): void {
   if (resting) wake(now);
 }
 
-/** Classify one HTTP request: the server's own requests and a background window's reads do not count. */
+/** A client socket message: a keepalive does not count as someone using o8. */
+export function noteClientMessage(text: string, now = Date.now()): void {
+  if (text.length <= 64 && /^\s*\{\s*"type"\s*:\s*"ping"\s*\}\s*$/.test(text)) {
+    count(stats.ignored, 'socket keepalive');
+    return;
+  }
+  noteActivity(now, 'socket message');
+}
+
+/** Classify one HTTP request: the server's own requests and reads the user did not cause do not count. */
 export function noteRequest(headers: Record<string, string | string[] | undefined>, method: string | undefined, path?: string): void {
   if (headers['x-o8-background'] === '1') { count(stats.ignored, 'server self-request'); return; }
   const foreground = headers['x-o8-foreground'];
