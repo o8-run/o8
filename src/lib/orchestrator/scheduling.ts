@@ -495,7 +495,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
     }
   }
 
-  pruneRecoverySkipMemo(new Set(nextState.packets.map((packet) => packet.id)));
+  pruneRecoverySkipMemo(new Set(nextState.packets.map((packet) => packet.id)), nextState.missionId ?? '');
 
   const dispatchablePackets = overlapFiltered
     .map((packet) => ({
@@ -514,7 +514,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         : null;
       if (recoveryBlocker) {
         // #2048 — print once per reason+runtime, not once per tick.
-        if (shouldLogRecoverySkip(packet.id, recoveryBlocker, pinnedRuntime)) {
+        if (shouldLogRecoverySkip(packet.id, recoveryBlocker, pinnedRuntime, nextState.missionId ?? '')) {
           console.log(`[recovery] Packet ${packet.id} skipped — ${recoveryBlocker}`);
         }
         return false;

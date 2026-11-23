@@ -148,6 +148,32 @@ describe('#2048 headless recovery tick logging', () => {
     expect(skipLines[0]).toContain('mission is not live');
   });
 
+  it('keeps a skip logged once when the tick also dispatches another mission', async () => {
+    // The headless tick dispatches the current mission, then each registry
+    // mission. Each pass used to prune the memo to its own packets, so every
+    // full tick printed the other mission's skips again.
+    const current = { ...createEmptyOrchestratorMissionState(), missionId: 'mission-current',
+      packets: [decomposePacket({ id: 'decompose-current', dispatchRuntimePin: null })] };
+    const registry = { ...createEmptyOrchestratorMissionState(), missionId: 'mission-registry',
+      packets: [decomposePacket({ id: 'decompose-registry', dispatchRuntimePin: null })] };
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map((arg) => String(arg)).join(' '));
+    });
+    try {
+      for (let tick = 0; tick < 3; tick++) {
+        for (const mission of [current, registry]) {
+          await runDispatchTick(mission, { enforceBootRecoveryGuard: true, missionArchived: false });
+        }
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    const skips = logs.filter((line) => line.includes('runtime is not pinned'));
+    expect(skips.filter((line) => line.includes('decompose-current'))).toHaveLength(1);
+    expect(skips.filter((line) => line.includes('decompose-registry'))).toHaveLength(1);
+  });
+
   it('spawns no git process for a workspace target that no longer exists', async () => {
     persistPacket(decomposePacket({
       id: 'decompose-2048-missing-repo',
