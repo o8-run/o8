@@ -2,8 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { getSqlite } from '@/lib/db';
 import { captureWorktreeMaterializationIdentity } from '@/lib/worktree/materialization-identity';
 import { withWorktreeMetaTransaction } from '@/lib/worktree/metadata-store';
 import { probeMetadataLockProcessIdentity } from '@/lib/worktree/metadata-lock-process-identity';
@@ -12,6 +13,7 @@ import {
   finishPendingExactManagedDirectoryRetirements,
   retireExactManagedDirectory,
 } from './exact-managed-directory-retirement';
+import { prepareExactWorkspaceClaim, readExactWorkspaceClaim } from './exact-workspace-claim-state';
 
 const roots: string[] = [];
 
@@ -91,6 +93,82 @@ describe('exact managed directory retirement', () => {
       refused: 0,
     });
     expect(readdirSync(root)).toEqual([]);
+  });
+
+  it('backs off a refused replay instead of reloading its manifest on every start', async () => {
+    const { root, workspacePath } = await fixture('refused-backoff');
+    mkdirSync(path.join(workspacePath, 'node_modules', 'package'), { recursive: true });
+    writeFileSync(path.join(workspacePath, 'node_modules', 'package', 'index.js'), 'owned');
+    let purgeChecks = 0;
+    await expect(retireExactManagedDirectory({
+      repositoryPath: root,
+      worktreeId: 'packet-workspace',
+      directoryPath: workspacePath,
+      identity: await captureWorktreeMaterializationIdentity(workspacePath),
+      retirementReason: 'creation-rollback',
+      beforeRetirementPurge: async () => {
+        purgeChecks += 1;
+        if (purgeChecks === 2) throw new Error('simulated process death after durable manifest');
+      },
+    })).rejects.toThrow('simulated process death');
+    const claim = readExactWorkspaceClaim('managed-retirement', root, 'packet-workspace')!;
+    expect(claim.state).toBe('purging');
+    const changedFile = path.join(claim.claimPath, 'node_modules', 'package', 'index.js');
+    writeFileSync(changedFile, 'changed after the durable manifest');
+    const replay = async () => finishPendingExactManagedDirectoryRetirements(
+      root, root, await captureWorktreeMaterializationIdentity(root), () => true,
+    );
+
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() });
+    try {
+      await expect(replay()).resolves.toEqual({ completed: 0, refused: 1 });
+      // The next start leaves the unchanged refused claim unread.
+      await expect(replay()).resolves.toEqual({ completed: 0, refused: 0 });
+      vi.setSystemTime(Date.now() + 25 * 60 * 60_000);
+      await expect(replay()).resolves.toEqual({ completed: 0, refused: 1 });
+      // A second refusal of the same claim row doubles the wait.
+      vi.setSystemTime(Date.now() + 25 * 60 * 60_000);
+      await expect(replay()).resolves.toEqual({ completed: 0, refused: 0 });
+      vi.setSystemTime(Date.now() + 24 * 60 * 60_000);
+      await expect(replay()).resolves.toEqual({ completed: 0, refused: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(readFileSync(changedFile, 'utf8')).toBe('changed after the durable manifest');
+    expect(readExactWorkspaceClaim('managed-retirement', root, 'packet-workspace')?.operationId)
+      .toBe(claim.operationId);
+  });
+
+  it('leaves retirement authority from another parent unread during replay', async () => {
+    const { root, workspacePath } = await fixture('other-parent');
+    const otherParent = path.join(root, 'other-managed-base');
+    mkdirSync(otherParent);
+    const worktreeId = 'outside-replay';
+    const operationId = 'outside-parent-operation';
+    const sourcePath = path.join(otherParent, worktreeId);
+    prepareExactWorkspaceClaim({
+      kind: 'managed-retirement',
+      repositoryPath: root,
+      worktreeId,
+      operationId,
+      expectedPath: sourcePath,
+      sourcePath,
+      claimPath: path.join(otherParent, '.o8-retired-managed-' + operationId),
+      parentIdentity: await captureWorktreeMaterializationIdentity(otherParent),
+      contentDigest: null,
+      authority: null,
+    });
+    getSqlite().prepare('UPDATE workspace_exact_claims SET authority_json = ? WHERE operation_id = ?')
+      .run('{malformed', operationId);
+
+    await expect(finishPendingExactManagedDirectoryRetirements(
+      root,
+      root,
+      await captureWorktreeMaterializationIdentity(root),
+    )).resolves.toEqual({ completed: 0, refused: 0 });
+    expect(readFileSync(path.join(workspacePath, 'sentinel.txt'), 'utf8')).toBe('owned bytes');
+    expect(getSqlite().prepare('SELECT 1 FROM workspace_exact_claims WHERE operation_id = ?')
+      .get(operationId)).toBeDefined();
   });
 
   it('leaves no retirement namespace across repeated cycles', async () => {

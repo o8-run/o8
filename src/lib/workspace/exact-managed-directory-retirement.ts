@@ -20,7 +20,9 @@ import { reviewedCleanupAuthority, verifyReviewedCleanup, restoreReviewedCleanup
 import { assertWorkspaceRetentionReleased } from './retention-holds';
 import { admitRetirementAuthority, requiresPausedOrphanVerification, verifyRetirementAuthority, withRetirementAuthorityLock, type ManagedRetirementReason } from './retirement-authority';
 import {
-  listExactWorkspaceClaims,
+  clearManagedRetirementReplayRefusal,
+  listManagedRetirementClaimKeys,
+  recordManagedRetirementReplayRefusal,
   prepareExactWorkspaceClaim,
   readExactWorkspaceClaim,
   removeExactWorkspaceClaim,
@@ -416,7 +418,10 @@ export function completeExactManagedDirectoryRetirement(
   removeExactWorkspaceClaim('managed-retirement', repositoryPath, worktreeId, claim.operationId);
 }
 
-/** Resume only SQLite-backed retirements; receipt-like files are never authority. */
+/**
+ * Resume only SQLite-backed retirements; receipt-like files are never authority.
+ * A refused claim is retried after a backoff, or sooner once its claim row changes.
+ */
 export async function finishPendingExactManagedDirectoryRetirements(
   repositoryPath: string,
   parentPath: string,
@@ -427,8 +432,11 @@ export async function finishPendingExactManagedDirectoryRetirements(
   const resolvedParent = parentIdentity.canonicalPath;
   let completed = 0;
   let refused = 0;
-  for (const claim of listExactWorkspaceClaims('managed-retirement', repositoryPath)) {
-    if (path.dirname(claim.sourcePath) !== resolvedParent
+  for (const candidate of listManagedRetirementClaimKeys(repositoryPath, parentIdentity)) {
+    if (path.dirname(candidate.sourcePath) !== resolvedParent) continue;
+    const claim = readExactWorkspaceClaim('managed-retirement', repositoryPath, candidate.worktreeId);
+    if (!claim || claim.operationId !== candidate.operationId
+      || claim.sourcePath !== candidate.sourcePath
       || claim.parentIdentity.device !== parentIdentity.device
       || claim.parentIdentity.inode !== parentIdentity.inode
       || claim.parentIdentity.canonicalPath !== parentIdentity.canonicalPath) continue;
@@ -437,8 +445,10 @@ export async function finishPendingExactManagedDirectoryRetirements(
       if (canFinalize?.(claim.worktreeId)) {
         completeExactManagedDirectoryRetirement(repositoryPath, claim.worktreeId);
       }
+      clearManagedRetirementReplayRefusal(claim.operationId);
       completed += 1;
     } catch {
+      recordManagedRetirementReplayRefusal(claim.operationId);
       refused += 1;
     }
   }
