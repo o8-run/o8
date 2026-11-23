@@ -7460,6 +7460,31 @@ const httpServer = createServer(async (req, res) => {
   // event; the desktop WS bridge converts it to an `o8:cortex-changes`
   // window event so the Recall Card / Packet Review Card re-fetch without
   // a full page reload.
+  // One generic "this changed" notice per resource (publishChanged). It
+  // carries no data: a client showing the resource reads it once.
+  if (req.url === '/internal/changed' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let resource: unknown;
+      try { resource = (JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { resource?: unknown }).resource; } catch { /* rejected below */ }
+      if (resource !== 'update') {
+        res.writeHead(400);
+        res.end('unknown resource');
+        return;
+      }
+      broadcast({ channel: 'changed', event: resource });
+      res.writeHead(202);
+      res.end('accepted');
+    });
+    return;
+  }
+
   if (req.url === '/internal/cortex-changes' && req.method === 'POST') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);

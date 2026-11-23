@@ -10,6 +10,9 @@ register_shell_feature!(LauncherUpdate);
 struct State {
     classic: bool,
     checked: Option<Instant>,
+    /// The `changed: update` notices at the last server read. With no
+    /// launcher, the server is read once per notice, not every check.
+    server_read: Option<u64>,
     reading: bool,
     status: String,
     notified: Option<String>,
@@ -104,11 +107,15 @@ fn poll(s: &mut Shell, cx: &mut Context<Shell>) {
     }
     state.checked = Some(Instant::now());
     state.reading = true;
+    // The launcher socket is local and costs the server nothing.
+    let noticed = crate::changes::update_notices();
+    let server = state.server_read != Some(noticed);
     let data = s.file.parent().unwrap_or(Path::new("")).to_path_buf();
     let client = s.client.clone();
     let task = cx.background_executor().spawn(async move {
         match request(&data, "update-status") {
             Ok(body) => Ok((false, body)),
+            Err(_) if !server => Err("unchanged".to_string()),
             Err(_) => client
                 .get::<Value>("/api/panel/update/apply", &[])
                 .map(|body| (true, body))
@@ -120,7 +127,11 @@ fn poll(s: &mut Shell, cx: &mut Context<Shell>) {
         let _ = this.update(cx, |s, cx| {
             s.features.get::<State>().reading = false;
             if let Ok((classic, body)) = result {
-                s.features.get::<State>().classic = classic;
+                let state = s.features.get::<State>();
+                state.classic = classic;
+                if classic {
+                    state.server_read = Some(noticed);
+                }
                 let body = if classic {
                     let held = &body["state"]["heldUpdate"];
                     let attempt = &body["state"]["autoApply"];
@@ -493,4 +504,51 @@ fn classic_ready_uses_shared_notice_and_apply_waits_for_drafts(cx: &mut gpui::Te
     );
     let _ = std::fs::remove_file(file);
     let _ = std::fs::remove_file(draft_path.with_extension("draft.json"));
+}
+
+#[cfg(test)]
+#[gpui::test]
+fn without_a_launcher_the_server_is_read_once_per_update_notice(cx: &mut gpui::TestAppContext) {
+    use crate::settings::test_peer::Peer;
+    use crate::shell::test_support::*;
+    let peer = Peer::new();
+    peer.reply(
+        "GET",
+        "/api/panel/update/apply",
+        200,
+        serde_json::json!({"ok":true,"state":{"heldUpdate":{"phase":"ready","version":"2.0.0"}}}),
+    );
+    let (shell, mut v) = open_past_setup(
+        peer.client.clone(),
+        scratch_path("notice-layout"),
+        crate::shell_state::State::default(),
+        cx,
+    );
+    let reads = || {
+        peer.calls()
+            .iter()
+            .filter(|(method, path, _)| method == "GET" && path == "/api/panel/update/apply")
+            .count()
+    };
+    let settle = |v: &mut gpui::VisualTestContext| {
+        for _ in 0..3 {
+            shell.update(v, |s, _| s.features.get::<State>().checked = None);
+            v.update(|window, cx| shell.update(cx, |s, cx| s.tick(false, window, cx)));
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while shell.read_with(v, |s, _| s.features.read::<State>().is_some_and(|s| s.reading)) {
+                v.run_until_parked();
+                assert!(Instant::now() < deadline, "the status read must finish");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    };
+    settle(&mut v);
+    let first = reads();
+    assert!(first >= 1, "the first check reads the server");
+    // Checks with no notice try only the local launcher socket.
+    settle(&mut v);
+    assert_eq!(reads(), first, "no notice, no server read");
+    crate::changes::notice("update");
+    settle(&mut v);
+    assert!(reads() > first, "a notice reads the status again");
 }

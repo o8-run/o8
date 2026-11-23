@@ -964,6 +964,10 @@ impl ThreadList {
                         }
                     }
                 }
+                if frame["channel"] == "changed" {
+                    crate::changes::notice(frame["event"].as_str().unwrap_or(""));
+                    continue;
+                }
                 if frame["channel"] == "orchestrator-threads"
                     && matches!(
                         frame["event"].as_str(),

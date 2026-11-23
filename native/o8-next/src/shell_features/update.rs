@@ -54,6 +54,8 @@ struct State {
     /// The installed version, when the updater reported it.
     current: Option<String>,
     checked: Option<Instant>,
+    /// The server's `changed: update` notices at the last read (crate::changes).
+    noticed: u64,
     /// An explicit check is running.
     checking: bool,
     /// The apply request is in flight.
@@ -681,14 +683,16 @@ fn read(state: &mut State, body: &Value) {
     }
 }
 
-/// Reads the update state about once a minute, and every second while the
-/// native updater installs and the window is in front. A window nobody can see
-/// reads it only while an install runs.
+/// Reads the update state once at connect and once per `changed: update`
+/// notice, and every second while the native updater installs and the window
+/// is in front. A window nobody can see reads it only while an install runs.
 fn check(s: &mut Shell, cx: &mut Context<Shell>) {
     let connected = s.connected;
     let state = s.features.get::<State>();
     if connected && !state.connected {
         state.identity_fresh = false;
+        // Notices sent while disconnected were missed: read once.
+        state.checked = None;
     }
     state.connected = connected;
     if connected && !state.reported && !state.identity_fresh {
@@ -701,16 +705,23 @@ fn check(s: &mut Shell, cx: &mut Context<Shell>) {
     if crate::foreground::hidden() && state.phase.is_none() && !state.applying {
         return;
     }
-    let every = crate::foreground::cadence(Duration::from_secs(
-        if state.phase.is_some() || state.applying {
-            1
-        } else {
-            60
-        },
-    ));
-    if state.checking || state.reading || state.checked.is_some_and(|at| at.elapsed() < every) {
+    // An install runs: follow it every second. Otherwise the status changes
+    // only when the server says so (a `changed: update` notice), so read once
+    // on each, plus one follow-up while a server that never checked is told
+    // apart from one with no updater.
+    let installing =
+        matches!(state.phase, Some(Phase::Installing | Phase::Restarting)) || state.applying;
+    let noticed = crate::changes::update_notices();
+    let told = state.checked.is_none() || state.noticed != noticed;
+    let follow_up = installing || (state.never_since.is_some() && !state.no_updater);
+    let every = crate::foreground::cadence(Duration::from_secs(if installing { 1 } else { 60 }));
+    if state.checking
+        || state.reading
+        || !(told || follow_up && state.checked.is_some_and(|at| at.elapsed() >= every))
+    {
         return;
     }
+    state.noticed = noticed;
     state.checked = Some(Instant::now());
     state.reading = true;
     let client = s.client.clone();
