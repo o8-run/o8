@@ -228,7 +228,7 @@ import { executeComposerWsIngress, composerWsSelection } from './lib/ws-server/c
 import { ComposerAttemptUncertain, type ComposerExecutorAttempt } from './lib/ws-server/composer-executor-attempt';
 import { ComposerOwnerUnknownOutcome } from './lib/ws-server/composer-owner-rpc';
 import type { ComposerQueuePayload } from './lib/orchestrator/composer-queue-types';
-import { holdWorkerCorrections } from './lib/orchestrator/worker-corrections';
+import { holdWorkerCorrections } from '@/lib/db/worker-correction-fences';
 import { stopSharedWorkerReturns } from './lib/orchestrator/shared-worker-returns';
 import {
   findLeadThreadBinding,
