@@ -211,14 +211,74 @@ export function bindExactWorkspaceClaimCreator(input: {
   )!;
 }
 
-export function listExactWorkspaceClaims(
-  kind: ExactWorkspaceClaimKind,
+const REPLAY_RETRY_MS = 24 * 60 * 60_000;
+const REPLAY_RETRY_MAX_MS = 7 * REPLAY_RETRY_MS;
+
+/**
+ * Replay refusals for unchanged claims. A purge that diverged from its manifest
+ * can never finish, and each replay reloads the manifest: one stuck
+ * node_modules purge holds 190k entries (about 45 MB of JSON).
+ */
+function replayRefusalStore() {
+  const sqlite = getSqlite();
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS workspace_exact_replay_refusals (
+    operation_id TEXT PRIMARY KEY,
+    claim_updated_at INTEGER NOT NULL,
+    refusals INTEGER NOT NULL,
+    retry_after INTEGER NOT NULL
+  )`);
+  return sqlite;
+}
+
+/**
+ * List exact replay candidates without pulling their purge manifests into
+ * memory. A claim refused by an earlier replay waits for its retry time
+ * unless the claim row changed since that refusal.
+ */
+export function listManagedRetirementClaimKeys(
   repositoryPath: string,
-): ExactWorkspaceClaimRecord[] {
-  return (getSqlite().prepare(`
-    SELECT * FROM workspace_exact_claims
-    WHERE kind = ? AND repository_path = ? ORDER BY created_at ASC
-  `).all(kind, path.resolve(repositoryPath)) as ExactWorkspaceClaimRow[]).map(decode);
+  parent: WorktreeMaterializationIdentity,
+  now = Date.now(),
+): { worktreeId: string; operationId: string; sourcePath: string }[] {
+  const sqlite = replayRefusalStore();
+  sqlite.prepare(`DELETE FROM workspace_exact_replay_refusals
+    WHERE operation_id NOT IN (SELECT operation_id FROM workspace_exact_claims)`).run();
+  return sqlite.prepare(`
+    SELECT worktree_id AS worktreeId, operation_id AS operationId, source_path AS sourcePath
+    FROM workspace_exact_claims AS claim
+    WHERE kind = 'managed-retirement' AND repository_path = ?
+      AND parent_device = ? AND parent_inode = ? AND parent_canonical_path = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM workspace_exact_replay_refusals AS refusal
+        WHERE refusal.operation_id = claim.operation_id
+          AND refusal.claim_updated_at = claim.updated_at AND refusal.retry_after > ?
+      )
+    ORDER BY created_at ASC
+  `).all(path.resolve(repositoryPath), parent.device, parent.inode, parent.canonicalPath, now) as {
+    worktreeId: string; operationId: string; sourcePath: string;
+  }[];
+}
+
+/** Back off a refused replay: one day, doubling per refusal of the same claim row, at most a week. */
+export function recordManagedRetirementReplayRefusal(operationId: string, now = Date.now()): void {
+  const sqlite = replayRefusalStore();
+  const claim = sqlite.prepare(`SELECT updated_at AS updatedAt FROM workspace_exact_claims
+    WHERE kind = 'managed-retirement' AND operation_id = ?`).get(operationId) as { updatedAt: number } | undefined;
+  if (!claim) return;
+  const prior = sqlite.prepare(`SELECT claim_updated_at AS claimUpdatedAt, refusals
+    FROM workspace_exact_replay_refusals WHERE operation_id = ?`).get(operationId) as
+    { claimUpdatedAt: number; refusals: number } | undefined;
+  const refusals = prior?.claimUpdatedAt === claim.updatedAt ? prior.refusals + 1 : 1;
+  const delay = Math.min(REPLAY_RETRY_MAX_MS, REPLAY_RETRY_MS * 2 ** Math.min(refusals - 1, 8));
+  sqlite.prepare(`INSERT INTO workspace_exact_replay_refusals
+    (operation_id, claim_updated_at, refusals, retry_after) VALUES (?, ?, ?, ?)
+    ON CONFLICT(operation_id) DO UPDATE SET claim_updated_at = excluded.claim_updated_at,
+      refusals = excluded.refusals, retry_after = excluded.retry_after`)
+    .run(operationId, claim.updatedAt, refusals, now + delay);
+}
+
+export function clearManagedRetirementReplayRefusal(operationId: string): void {
+  replayRefusalStore().prepare('DELETE FROM workspace_exact_replay_refusals WHERE operation_id = ?').run(operationId);
 }
 
 export function transitionExactWorkspaceClaim(input: {

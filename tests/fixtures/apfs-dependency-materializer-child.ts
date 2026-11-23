@@ -380,10 +380,10 @@ async function cleanupRefusal() {
     );
   }
   const evidence = await dependencyRollbackEvidence(input.worktreeId, oldLease);
+  const claim = claimRegistry.readExactWorkspaceClaim('managed-retirement', input.repoPath, input.worktreeId);
   return {
     removed,
-    exactClaims: claimRegistry.listExactWorkspaceClaims('managed-retirement', input.repoPath)
-      .filter((claim) => claim.worktreeId === input.worktreeId),
+    exactClaims: claim ? [claim] : [],
     ...evidence,
   };
 }
