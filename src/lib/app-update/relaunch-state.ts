@@ -1,7 +1,6 @@
 import 'server-only';
 import type { AppUpdateBlockers } from './types';
 import { updateCheckTicket, type UpdateCheckTicket } from './check-order';
-import { publishChanged } from '@/lib/realtime/publisher';
 
 export interface AppUpdateAutoApplyState {
   attemptId: string | null;
@@ -69,7 +68,10 @@ function settle(): void {
   const now = shown(state);
   if (now === announced) return;
   announced = now;
-  publishChanged('update');
+  // Loaded lazily and best-effort: a missed notice is read on the next one.
+  void import('@/lib/realtime/publisher')
+    .then(({ publishChanged }) => publishChanged('update'))
+    .catch(() => {});
 }
 
 export function getAppUpdateState(): AppUpdateState {
