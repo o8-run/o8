@@ -20,8 +20,51 @@
 export type LoopClass = 'idle-safe' | 'always';
 
 export interface IdleGateSignals {
-  /** True while any agent or worker session is running or launching. */
-  liveSessions: () => boolean;
+  /**
+   * Truthy while any agent or worker session is running or launching. A string
+   * names what is live (for the gate's statistics); `true` is an unnamed one.
+   */
+  liveSessions: () => boolean | string | null;
+}
+
+/** What kept the gate awake, for the background ledger and `bench:idle`. */
+export interface IdleGateStats {
+  awakeMs: number;
+  restingMs: number;
+  /** Activity that woke or kept the gate awake, by source (a request is `METHOD /path`). */
+  activity: Record<string, number>;
+  /** Requests that did not count: the server's own, and reads from a window behind another app. */
+  ignored: Record<string, number>;
+  /** Session checks that found something live, by what was live. */
+  live: Record<string, number>;
+}
+
+const STAT_KEYS_MAX = 60;
+const stats: IdleGateStats = { awakeMs: 0, restingMs: 0, activity: {}, ignored: {}, live: {} };
+let statsAt = Date.now();
+
+function count(map: Record<string, number>, key: string): void {
+  if (map[key] === undefined && Object.keys(map).length >= STAT_KEYS_MAX) key = 'other';
+  map[key] = (map[key] ?? 0) + 1;
+}
+
+/** A request path without its query string, with long ids folded so the counts stay few. */
+function requestKey(method: string | undefined, path: string | undefined): string {
+  const bare = (path ?? '').split('?')[0].replace(/\/[^/]{24,}/g, '/:id');
+  return `${method ?? '?'} ${bare || '/'}`;
+}
+
+export function idleGateStats(now = Date.now()): IdleGateStats {
+  accrue(now);
+  return { awakeMs: stats.awakeMs, restingMs: stats.restingMs,
+    activity: { ...stats.activity }, ignored: { ...stats.ignored }, live: { ...stats.live } };
+}
+
+function accrue(now: number): void {
+  const elapsed = Math.max(0, now - statsAt);
+  statsAt = now;
+  if (resting) stats.restingMs += elapsed;
+  else stats.awakeMs += elapsed;
 }
 
 /** Headers for a request the server sends to itself, so it never counts as client activity. */
@@ -55,7 +98,10 @@ function liveSessions(now: number): boolean {
   if (now - sessionsCheckedAt >= SESSION_CACHE_MS) {
     sessionsCheckedAt = now;
     const wasLive = sessionsLive;
-    try { sessionsLive = signals.liveSessions(); } catch { sessionsLive = true; }
+    let live: boolean | string | null;
+    try { live = signals.liveSessions(); } catch { live = 'session check failed'; }
+    sessionsLive = Boolean(live);
+    if (live) count(stats.live, typeof live === 'string' ? live : 'unnamed');
     if (wasLive && !sessionsLive) sessionEndedAt = now;
   }
   return sessionsLive;
@@ -94,24 +140,27 @@ function enterRest(now: number): void {
 }
 
 function evaluate(now = Date.now()): void {
+  accrue(now);
   const rest = atRest(now);
   if (resting && !rest) wake(now);
   else if (!resting && rest) enterRest(now);
 }
 
 /** A client request, client message, launch or other change: wake now if resting. */
-export function noteActivity(now = Date.now()): void {
+export function noteActivity(now = Date.now(), source = 'activity'): void {
+  accrue(now);
+  count(stats.activity, source);
   lastActivityAt = now;
   if (resting) wake(now);
 }
 
 /** Classify one HTTP request: the server's own requests and a background window's reads do not count. */
-export function noteRequest(headers: Record<string, string | string[] | undefined>, method: string | undefined): void {
-  if (headers['x-o8-background'] === '1') return;
+export function noteRequest(headers: Record<string, string | string[] | undefined>, method: string | undefined, path?: string): void {
+  if (headers['x-o8-background'] === '1') { count(stats.ignored, 'server self-request'); return; }
   const foreground = headers['x-o8-foreground'];
   const header = Array.isArray(foreground) ? foreground[0] : foreground;
-  if ((method === 'GET' || method === 'HEAD') && header === '0') return;
-  noteActivity();
+  if ((method === 'GET' || method === 'HEAD') && header === '0') { count(stats.ignored, 'background window read'); return; }
+  noteActivity(Date.now(), requestKey(method, path));
 }
 
 /**
@@ -158,6 +207,8 @@ export function resetIdleGate(): void {
   sessionsCheckedAt = 0;
   sessionsLive = false;
   sessionEndedAt = 0;
+  Object.assign(stats, { awakeMs: 0, restingMs: 0, activity: {}, ignored: {}, live: {} });
+  statsAt = Date.now();
 }
 
 export function pausedLoopNames(): string[] {

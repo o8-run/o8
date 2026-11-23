@@ -14,7 +14,7 @@ import { ChildProcess } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { admitRun, type LoopClass } from './idle-gate';
+import { admitRun, idleGateStats, type LoopClass } from './idle-gate';
 
 export interface LedgerEntry {
   name: string;
@@ -212,6 +212,7 @@ export function startLedgerReporter(
         writtenAt: new Date().toISOString(),
         registered: registeredLoopNames(),
         loops: snapshot,
+        gate: idleGateStats(),
       }, null, 2));
     } catch {
       // Diagnostics only; a write failure never affects the server.

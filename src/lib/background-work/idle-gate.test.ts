@@ -4,10 +4,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { atRest, noteActivity, noteRequest, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
+import { atRest, idleGateStats, noteActivity, noteRequest, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
 import { recurring } from './ledger';
 
-let live = false;
+let live: boolean | string = false;
 const timers: NodeJS.Timeout[] = [];
 
 beforeEach(() => {
@@ -157,3 +157,24 @@ it("wakes on neither of the server's own requests to itself, and still wakes on 
     vi.unstubAllEnvs();
   }
 });
+
+it('reports awake and resting time and names what kept the gate awake', () => {
+  vi.advanceTimersByTime(120_000);
+  expect(atRest()).toBe(true);
+  noteRequest({ 'x-o8-foreground': '0' }, 'GET', '/api/mission?since=1');
+  noteRequest({ 'x-o8-background': '1' }, 'POST', '/api/internal');
+  noteRequest({}, 'GET', '/api/missions/0123456789abcdef0123456789abcdef?x=1');
+  vi.advanceTimersByTime(30_000);
+  live = 'lane running';
+  vi.advanceTimersByTime(30_000);
+
+  const stats = idleGateStats();
+  // Rested from 60 s until the request at 120 s, then awake through the live lane.
+  expect(stats.restingMs).toBeGreaterThanOrEqual(55_000);
+  expect(stats.restingMs).toBeLessThanOrEqual(65_000);
+  expect(stats.awakeMs + stats.restingMs).toBe(180_000);
+  expect(stats.activity).toEqual({ 'GET /api/missions/:id': 1 });
+  expect(stats.ignored).toEqual({ 'background window read': 1, 'server self-request': 1 });
+  expect(stats.live['lane running']).toBeGreaterThan(0);
+});
+

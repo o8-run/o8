@@ -106,6 +106,27 @@ function ledgerDelta(before, after, seconds) {
     .sort((a, b) => (b.mainMsPerMin + b.childWallMsPerMin / 10) - (a.mainMsPerMin + a.childWallMsPerMin / 10));
 }
 
+function countDelta(after = {}, before = {}) {
+  return Object.entries(after).map(([key, value]) => [key, value - (before[key] ?? 0)])
+    .filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
+}
+
+/** How long the idle gate was awake in the window, and what kept it awake. */
+function gateDelta(before, after) {
+  const was = before?.gate;
+  const now = after?.gate;
+  if (!now) return null;
+  return {
+    awakeMinutes: (now.awakeMs - (was?.awakeMs ?? 0)) / 60_000,
+    totalMinutes: (now.awakeMs + now.restingMs - (was ? was.awakeMs + was.restingMs : 0)) / 60_000,
+    activity: countDelta(now.activity, was?.activity),
+    ignored: countDelta(now.ignored, was?.ignored),
+    live: countDelta(now.live, was?.live),
+  };
+}
+
+const listed = (entries) => entries.slice(0, 6).map(([key, value]) => `${key} ×${value}`).join(', ') || 'none';
+
 async function measure(label, pid, dataDir) {
   const before = readLedger(dataDir);
   const cpu0 = cpuSeconds(pid);
@@ -120,12 +141,18 @@ async function measure(label, pid, dataDir) {
   const spawnsPerMin = rows.reduce((sum, row) => sum + row.spawnsPerMin, 0);
   console.log(`\n== ${label}: ${mainMsPerMin.toFixed(0)} ms/min ledger main, ${spawnsPerMin.toFixed(1)} spawns/min`);
   console.log(`   ${cpu.toFixed(1)}% of a core, ${rssMb(pid)} MB RSS (${measureSeconds} s)`);
+  const gate = gateDelta(before, after);
+  if (gate) {
+    console.log(`   gate awake ${gate.awakeMinutes.toFixed(1)} of ${gate.totalMinutes.toFixed(1)} min`);
+    console.log(`   woken by: ${listed(gate.activity)}; live: ${listed(gate.live)}`);
+    console.log(`   not counted: ${listed(gate.ignored)}`);
+  }
   for (const row of rows.slice(0, 25)) {
     const commands = Object.entries(row.commands).map(([name, count]) => `${name}×${count}`).join(' ');
     console.log(`${row.mainMsPerMin.toFixed(0).padStart(7)} ms/min main  ${row.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  ${String(row.runs).padStart(4)} runs ${String(row.paused).padStart(4)} paused  ${row.name}${commands ? `  [${commands}]` : ''}`);
   }
   if (rows.length === 0) console.log('  no registered loop ran');
-  return { mainMsPerMin, spawnsPerMin, cpu, rows };
+  return { mainMsPerMin, spawnsPerMin, cpu, rows, gate };
 }
 
 async function main() {
@@ -226,7 +253,8 @@ async function main() {
     console.log(`\nRegistered loops: ${scan.registered.length}; unregistered setInterval sites: ${scan.unregistered.length}`);
     console.log('\nTotals (ledger main ms/min, spawns/min):');
     for (const [label, result] of [['no clients', quiet], ['background window', windowed], ['window in front', front]]) {
-      if (result) console.log(`  ${label.padEnd(18)} ${result.mainMsPerMin.toFixed(0).padStart(6)} ms/min  ${result.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  (${result.cpu.toFixed(1)}% CPU)`);
+      const awake = result?.gate ? `  gate awake ${result.gate.awakeMinutes.toFixed(1)} of ${result.gate.totalMinutes.toFixed(1)} min` : '';
+      if (result) console.log(`  ${label.padEnd(18)} ${result.mainMsPerMin.toFixed(0).padStart(6)} ms/min  ${result.spawnsPerMin.toFixed(1).padStart(6)} spawns/min  (${result.cpu.toFixed(1)}% CPU)${awake}`);
     }
     if (flag('json')) console.log(JSON.stringify({ quiet, windowed, front, scan }, null, 2));
     if (flag('keep')) console.log(`[bench:idle] kept ${bench}`);

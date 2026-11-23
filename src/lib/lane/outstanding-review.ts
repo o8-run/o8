@@ -8,9 +8,14 @@ export function hasOutstandingReview(): boolean {
   return Boolean(getSqlite().prepare("SELECT 1 FROM lanes WHERE status = 'reviewing' LIMIT 1").get());
 }
 
-/** Settled and reviewing lanes do not keep idle-safe work awake. */
+/** The first lane that keeps the server awake, as `lane <status>`; settled and reviewing lanes do not. */
+export function laneBlockingIdle(): string | null {
+  const row = getSqlite().prepare(
+    "SELECT status FROM lanes WHERE status IN ('launching', 'running', 'merging') LIMIT 1",
+  ).get() as { status: string } | undefined;
+  return row ? `lane ${row.status}` : null;
+}
+
 export function hasLaneBlockingIdle(): boolean {
-  return Boolean(getSqlite().prepare(
-    "SELECT 1 FROM lanes WHERE status IN ('launching', 'running', 'merging') LIMIT 1",
-  ).get());
+  return laneBlockingIdle() !== null;
 }
