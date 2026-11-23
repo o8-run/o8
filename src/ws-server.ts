@@ -55,7 +55,7 @@ import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcrip
 
 import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import { watch, existsSync } from 'node:fs';
-import { readFile, stat, access } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
@@ -365,15 +365,6 @@ const execFileAsync = promisify(execFile);
 // Async existence check — never blocks the shared event loop for FS calls on
 // per-message / per-poll hot paths (the #1498 exposure class). Startup-only
 // probes may still use existsSync.
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
 async function listRepoPaths(): Promise<string[]> {
   try {
