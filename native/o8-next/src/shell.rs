@@ -649,6 +649,7 @@ impl Shell {
         cx.notify();
     }
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        crate::foreground::touched();
         // Setup owns the whole window, as on the desktop: workspace shortcuts
         // wait, and keys reach only setup's own controls.
         if self.surfaces.setup.view.is_some() {
@@ -674,8 +675,15 @@ impl Shell {
         }
     }
     fn tick(&mut self, refresh: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // A window opened without focus (at login, or launched behind another
+        // app) would otherwise keep assuming it is in front until it is first
+        // focused. Test windows never report focus, so they keep the default.
+        // Whichever sees it first, this or the activation observer, refreshes.
+        let back = !cfg!(test)
+            && !self.offscreen
+            && crate::foreground::set(window.is_window_active());
         crate::foreground::set_visible(!self.offscreen && crate::foreground::on_screen(window));
-        features::tick(self, refresh, window, cx);
+        features::tick(self, refresh || back, window, cx);
     }
 }
 #[path = "shell_material.rs"]

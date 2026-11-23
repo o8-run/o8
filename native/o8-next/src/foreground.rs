@@ -6,19 +6,43 @@
 //! stop; the first tick after it shows again reads once, as every interval has
 //! passed by then.
 //!
-//! Behind another app, hidden, minimized or offscreen, the window's reads also
-//! carry `x-o8-foreground: 0`, and its sockets skip their keepalive messages:
-//! the server's idle gate does not count either as someone using o8, so the
-//! server can rest. Only reads carry the header. Anything the user does
-//! happens with the window in front, so it never does.
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+//! A read the user did not cause carries `x-o8-foreground: 0`: every read made
+//! behind another app, hidden, minimized or offscreen, and, in front, every read
+//! that does not follow a click or keypress within a few seconds (timers and
+//! socket events). The server's idle gate does not count those as someone
+//! using o8, so an untouched window lets the server rest. Only reads carry the
+//! header; writes always count.
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 static ACTIVE: AtomicBool = AtomicBool::new(true);
 static VISIBLE: AtomicBool = AtomicBool::new(true);
 const BACKGROUND: Duration = Duration::from_secs(60);
-/// The header the server's idle gate reads; `0` marks a background read.
+/// The header the server's idle gate reads; `0` marks a read the user did not cause.
 pub(crate) const HEADER: &str = "x-o8-foreground";
+/// How long after a click or keypress the window's reads count as the user's.
+const INPUT_WINDOW: Duration = Duration::from_secs(3);
+/// Milliseconds after `epoch()` of the last click or keypress, plus one; 0 is never.
+static INPUT: AtomicU64 = AtomicU64::new(0);
+
+fn epoch() -> Instant {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// Records a click or keypress in the window.
+pub(crate) fn touched() {
+    INPUT.store(epoch().elapsed().as_millis() as u64 + 1, Ordering::Relaxed);
+}
+
+fn recent_input() -> bool {
+    recent_at(epoch().elapsed().as_millis() as u64 + 1, INPUT.load(Ordering::Relaxed))
+}
+
+fn recent_at(now: u64, input: u64) -> bool {
+    input != 0 && now.saturating_sub(input) <= INPUT_WINDOW.as_millis() as u64
+}
 
 /// Records the window's state; returns true when it has just come back to the front.
 /// Coming back counts as a change, so views that read on change read once.
@@ -87,13 +111,13 @@ fn cadence_for(active: bool, front: Duration) -> Duration {
     if active { front } else { front.max(BACKGROUND) }
 }
 
-/// Marks a read made while the window is not in front.
+/// Marks a read the user did not cause.
 pub(crate) fn mark(request: ureq::Request, method: &str) -> ureq::Request {
-    mark_for(active(), request, method)
+    mark_for(active() && recent_input(), request, method)
 }
 
-fn mark_for(active: bool, request: ureq::Request, method: &str) -> ureq::Request {
-    if !active && matches!(method, "GET" | "HEAD") {
+fn mark_for(users: bool, request: ureq::Request, method: &str) -> ureq::Request {
+    if !users && matches!(method, "GET" | "HEAD") {
         request.set(HEADER, "0")
     } else {
         request
@@ -125,7 +149,15 @@ mod tests {
     }
 
     #[test]
-    fn only_reads_made_behind_another_app_carry_the_background_header() {
+    fn reads_count_as_the_users_only_for_seconds_after_a_click_or_keypress() {
+        assert!(!recent_at(10_000, 0), "no input yet");
+        assert!(recent_at(10_000, 9_000));
+        assert!(recent_at(10_000, 7_000));
+        assert!(!recent_at(10_000, 6_999));
+    }
+
+    #[test]
+    fn only_reads_the_user_caused_go_unmarked() {
         let agent = ureq::agent();
         let header = |active, method: &str| {
             mark_for(active, agent.request(method, "http://127.0.0.1:1/"), method)

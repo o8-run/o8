@@ -88,7 +88,7 @@ import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
-import { noteActivity, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
+import { noteActivity, noteClientMessage, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
 import { hasOutstandingReview, laneBlockingIdle } from '@/lib/lane/outstanding-review';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
@@ -7722,8 +7722,9 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('message', (raw) => {
-    noteActivity(Date.now(), 'socket message');
-    void withWsHealthHandler('ws-message', () => handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString()));
+    const text = typeof raw === 'string' ? raw : raw.toString();
+    noteClientMessage(text);
+    void withWsHealthHandler('ws-message', () => handleClientMessage(client, text));
   });
 
   ws.on('pong', () => { client.alive = true; });
