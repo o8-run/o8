@@ -290,9 +290,26 @@ function ensureControlPlaneDir() {
   mkdirSync(ORCHESTRATOR_DIR, { recursive: true });
 }
 
+// The file text this process last wrote or read, with the file's stat at that
+// moment. A write of identical text over an unchanged file is skipped: every
+// GET /api/orchestrator/state reconciles and persists, and nearly all of those
+// change nothing.
+let persisted: { stamp: string; text: string } | null = null;
+
+function fileStamp(): string | null {
+  try {
+    const stat = statSync(ORCHESTRATOR_PATH, { bigint: true });
+    return `${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  } catch {
+    return null;
+  }
+}
+
 function readPersistedControlPlaneState(strict = false): OrchestratorMissionState {
   try {
+    const before = fileStamp();
     const raw = readFileSync(ORCHESTRATOR_PATH, 'utf8');
+    persisted = before !== null && before === fileStamp() ? { stamp: before, text: raw } : null;
     const parsed = JSON.parse(raw) as Partial<OrchestratorControlPlaneFile>;
     if (strict) assertMissionSnapshotAvailable(parsed?.mission);
     return normalizeOrchestratorMissionState(parsed.mission ?? createEmptyOrchestratorMissionState());
@@ -324,8 +341,13 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
     version: 1,
     mission: normalizeOrchestratorMissionStateForPersistence(state),
   };
-  writeFileSync(ORCHESTRATOR_TMP_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  renameSync(ORCHESTRATOR_TMP_PATH, ORCHESTRATOR_PATH);
+  const text = `${JSON.stringify(next, null, 2)}\n`;
+  if (persisted?.text !== text || persisted.stamp !== fileStamp()) {
+    writeFileSync(ORCHESTRATOR_TMP_PATH, text, 'utf8');
+    renameSync(ORCHESTRATOR_TMP_PATH, ORCHESTRATOR_PATH);
+    const stamp = fileStamp();
+    persisted = stamp === null ? null : { stamp, text };
+  }
   updateOrchestratorMissionState(next.mission);
   return next.mission;
 }

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import {
+  controlPlaneStamp,
   syncOrchestratorControlPlaneState,
   withLockedState,
 } from '@/lib/orchestrator/control-plane';
@@ -10,6 +11,7 @@ import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { getLaneEvents, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { listApprovals } from '@/lib/approvals/store';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { laneEpoch } from '@/lib/orchestrator/settled-missions';
 import { getSqlite } from '@/lib/db';
 import { StorageAdmissionStore } from '@/lib/workspace/storage-admission';
 import { manualLaunchClaimIsLive } from '@/lib/orchestrator/manual-launch-claim';
@@ -92,11 +94,16 @@ function approvalMatchesLane(approval: ApprovalRecord, lane: Lane): boolean {
   return approval.metadata?.laneId === lane.id || approval.metadata?.LaneId === lane.id;
 }
 
-async function buildStateResponse(mission: OrchestratorMissionState): Promise<OrchestratorStateApiResponse> {
+type InventorySnapshot = Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>;
+
+async function buildStateResponse(
+  mission: OrchestratorMissionState,
+  inventory?: InventorySnapshot,
+): Promise<OrchestratorStateApiResponse> {
   const enriched = enrichMissionWithLanes(mission);
   // Desktop, mobile, MCP, and CLI poll this route; reuse the inventory TTL and
   // read at most 50 events only for agent or packet lanes the response carries.
-  const snapshot = await getRuntimeInventorySnapshot({ fresh: false });
+  const snapshot = inventory ?? await getRuntimeInventorySnapshot({ fresh: false });
   const lanes = listLanes();
   const laneById = new Map(lanes.map((lane) => [lane.id, lane]));
   const laneByPacketId = new Map(
@@ -155,6 +162,27 @@ function buildErrorResponse(message: string, status = 500) {
   });
 }
 
+// Inputs no version covers (project merge policy, approval expiry by age) are
+// picked up within this long.
+const STATE_RESPONSE_MAX_AGE_MS = 10_000;
+let lastState: { version: string; snapshot: InventorySnapshot; at: number; body: OrchestratorStateApiResponse } | null = null;
+
+/** Changes whenever the mission file, lanes, lane events, pending approvals or
+ * the active review queue change. The mission stamp comes first. */
+function stateInputsVersion(): string {
+  const approvals = getSqlite().prepare(
+    "SELECT COUNT(*) AS n, MAX(updated_at) AS updated FROM approvals WHERE status = 'pending'",
+  ).get() as { n: number; updated: number | null };
+  const reviews = getSqlite().prepare(
+    "SELECT COUNT(*) AS n, MAX(updated_at) AS updated FROM review_queue WHERE status IN ('pending', 'in_progress')",
+  ).get() as { n: number; updated: string | null };
+  return [controlPlaneStamp(), laneEpoch(), `${approvals.n}:${approvals.updated ?? ''}`, `${reviews.n}:${reviews.updated ?? ''}`].join('|');
+}
+
+function sameInputsApartFromMission(before: string, after: string): boolean {
+  return before.slice(before.indexOf('|')) === after.slice(after.indexOf('|'));
+}
+
 export async function GET(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
@@ -165,8 +193,25 @@ export async function GET(req: NextRequest) {
     // (e.g. /api/orchestrator/delegate's packet synthesis) whose writes land
     // between our read and the lock acquisition. undefined → reconcile reads
     // fresh state inside the lock.
+    // The desktop polls this route several times a minute and nearly every
+    // poll finds nothing changed. Reuse the last answer while every input it
+    // was built from is unchanged; the inventory snapshot is compared by
+    // identity because its cache returns the same object until it rebuilds.
+    const snapshot = await getRuntimeInventorySnapshot({ fresh: false });
+    const before = stateInputsVersion();
+    if (lastState && lastState.version === before && lastState.snapshot === snapshot
+      && Date.now() - lastState.at < STATE_RESPONSE_MAX_AGE_MS) {
+      return NextResponse.json(lastState.body, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    }
     const mission = await syncOrchestratorControlPlaneState();
-    return NextResponse.json(await buildStateResponse(mission), {
+    const body = await buildStateResponse(mission, snapshot);
+    // The sync may have written the mission file, which moves its stamp; any
+    // other input that moved while this answer was built makes it unsafe to reuse.
+    const after = stateInputsVersion();
+    lastState = sameInputsApartFromMission(before, after)
+      ? { version: after, snapshot, at: Date.now(), body }
+      : null;
+    return NextResponse.json(body, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (error) {
