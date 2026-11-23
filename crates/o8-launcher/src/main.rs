@@ -333,6 +333,7 @@ fn spawn(
         }
     };
     drop(hold_file);
+    watch_exit(child.id());
     fault("after-spawn", script);
     let mut server = Server {
         child,
@@ -558,6 +559,28 @@ fn default_ws_port() -> u16 {
 fn native_enabled() -> bool {
     cfg!(target_os = "macos")
 }
+/// Blocks until `pid`, a child of this process, exits. `WNOWAIT` leaves it
+/// unreaped for its owner: the loop's `waitid` for a server, `running` for the
+/// window.
+fn wait_exited(pid: u32) {
+    let mut status: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    while unsafe { libc::waitid(libc::P_PID, pid, &mut status, libc::WEXITED | libc::WNOWAIT) } != 0
+        && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+    {}
+}
+/// Wakes the main loop when a server exits; the loop reaps it and schedules
+/// the restart as before.
+fn watch_exit(pid: u32) {
+    let watcher = std::thread::Builder::new()
+        .name("launcher-child".into())
+        .spawn(move || {
+            wait_exited(pid);
+            native::wake();
+        });
+    if watcher.is_err() {
+        o8_launcher::note!("Server exit watcher unavailable; checking on each wake");
+    }
+}
 /// Pumps once between startup steps; true when a stop was requested.
 fn stop_requested(native: &native::Native, stopped: &AtomicBool) -> bool {
     native.pump();
@@ -602,6 +625,7 @@ fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<St
         &config.data_dir,
         config.update.as_ref(),
     ));
+    updates.on_finish(native::wake);
     let mut install: Option<update::Staged> = None;
     // Finish launching first, then keep the main thread answering events through
     // every startup step: the system delivers Quit only to a launched app whose
@@ -698,10 +722,22 @@ fn serve(
     updates: &mut update::Controller,
     install: &mut Option<update::Staged>,
 ) -> Result<(), String> {
-    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+    let signals = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP];
+    for signal in signals {
         signal_hook::flag::register(signal, stopped.clone())
             .map_err(|_| "Shutdown handler unavailable")?;
     }
+    // The flag is set inside the handler; this thread then wakes the loop.
+    let mut delivered =
+        signal_hook::iterator::Signals::new(signals).map_err(|_| "Shutdown handler unavailable")?;
+    std::thread::Builder::new()
+        .name("launcher-signals".into())
+        .spawn(move || {
+            for _ in delivered.forever() {
+                native::wake();
+            }
+        })
+        .map_err(|_| "Shutdown handler unavailable")?;
     let Some(prepared) = prepare(config, native, stopped, preparing, control)? else {
         return Ok(());
     };
@@ -846,6 +882,7 @@ fn serve(
         config.api_port,
         move || {
             restart_stop.store(true, Ordering::SeqCst);
+            native::wake();
         },
     );
     let client = reqwest::blocking::Client::builder()
@@ -1130,8 +1167,27 @@ fn serve(
                     pending_show = false;
                 }
             }
+            let retry = [api.as_ref(), ws.as_ref(), o8d.as_ref()]
+                .into_iter()
+                .flatten()
+                .filter_map(|server| server.retry_at)
+                .min();
             drop(guard);
-            std::thread::sleep(Duration::from_millis(25));
+            // Startup (health probes, the window's first paint) keeps the tick.
+            // At rest the loop sleeps until a wake or its next deadline: a
+            // server restart or the background update check.
+            let starting = launch.is_some() || (!voice_only && !opened && !window_failed);
+            let fixture = cfg!(debug_assertions) && config.data_dir.join("fixture-owner").exists();
+            let limit = if starting || fixture {
+                Some(native::TICK)
+            } else {
+                [retry, updates.next_due()]
+                    .into_iter()
+                    .flatten()
+                    .min()
+                    .map(|at| at.saturating_duration_since(Instant::now()))
+            };
+            native.wait(limit);
         }
         Ok(())
     })();
