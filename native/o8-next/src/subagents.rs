@@ -3,7 +3,7 @@ use crate::{client::Client, theme::current as theme};
 use gpui::{App, Context, Entity, FocusHandle, KeyDownEvent, Render, Window, div, prelude::*, px};
 use std::{
     collections::HashMap,
-    time::{Duration, Instant},
+    time::Duration,
 };
 #[path = "subagents/history.rs"]
 mod history;
@@ -36,7 +36,8 @@ pub(crate) struct Inspector {
     pending: bool,
     loaded: bool,
     error: Option<String>,
-    refreshed: Option<Instant>,
+    /// Reads on a thread, agent or lane event, or every 3 s while work runs.
+    follow: crate::changes::Follow,
     clock_second: u64,
     detail_pending: bool,
     /// What a subagent's own chat last read as, and when; it has no session.
@@ -78,7 +79,7 @@ impl Inspector {
             pending: false,
             loaded: false,
             error: None,
-            refreshed: None,
+            follow: Default::default(),
             clock_second: 0,
             detail_pending: false,
             native_read: None,
@@ -221,10 +222,7 @@ impl Inspector {
         }
         if !self.pending
             && !crate::foreground::hidden()
-            && (refresh
-                || self.refreshed.is_none_or(|at| {
-                    at.elapsed() >= crate::foreground::cadence(Duration::from_secs(3))
-                }))
+            && (refresh || self.follow.due(Duration::from_secs(3), self.busy()))
         {
             self.refresh(cx);
         }
@@ -232,6 +230,11 @@ impl Inspector {
             self.detail_images(cx);
             cx.notify();
         }
+    }
+    /// A thread or one of these agents is working, so status changes without
+    /// an event this view hears.
+    fn busy(&self) -> bool {
+        crate::changes::working() || self.agents.iter().any(|a| a.group == model::Group::Working)
     }
     pub(crate) fn summary(&self) -> String {
         model::summary(&self.agents)
@@ -241,6 +244,7 @@ impl Inspector {
             return;
         }
         self.pending = true;
+        self.follow.read();
         let (client, scope) = (self.client.clone(), self.scope.clone());
         let known = self.lanes.clone();
         let task = cx
@@ -250,7 +254,6 @@ impl Inspector {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.pending = false;
-                this.refreshed = Some(Instant::now());
                 let old = this
                     .selected
                     .as_ref()

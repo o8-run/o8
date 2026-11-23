@@ -5,7 +5,7 @@ use crate::subagents::{
     model::{Agent, Facts, Group, Scope},
 };
 use gpui::{Entity, Modifiers, VisualTestContext};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 struct Panel(Entity<Inspector>);
 impl Render for Panel {
