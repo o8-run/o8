@@ -355,13 +355,36 @@ interface LinkedTaskTruth {
   lane: ReturnType<typeof findLatestLaneByPacket>;
 }
 
+/**
+ * Stored-mission lookups by packet, valid while the missions table is unchanged.
+ * Each lookup scans every stored mission's text; the reconcile repeats it for
+ * every linked dossier each minute, almost always with the same answer.
+ */
+let registryLookups: { stamp: string; byPacket: Map<string, ReturnType<typeof findMissionRegistryEntryByPacketId>> } | null = null;
+
+function missionsStamp(): string {
+  // Every mission write sets updated_at; the total catches a change to any row.
+  const row = getSqlite().prepare('SELECT COUNT(*) AS rows, MAX(updated_at) AS latest, TOTAL(updated_at) AS total FROM missions')
+    .get() as { rows: number; latest: number | null; total: number };
+  return `${row.rows}:${row.latest}:${row.total}`;
+}
+
+function storedMissionForPacket(packetId: string) {
+  const stamp = missionsStamp();
+  if (registryLookups?.stamp !== stamp) registryLookups = { stamp, byPacket: new Map() };
+  if (!registryLookups.byPacket.has(packetId)) {
+    registryLookups.byPacket.set(packetId, findMissionRegistryEntryByPacketId(packetId, { includeArchived: true }));
+  }
+  return registryLookups.byPacket.get(packetId) ?? null;
+}
+
 function resolveLinkedTask(packetId: string): LinkedTaskTruth {
   const current = readOrchestratorControlPlaneState();
   const currentPacket = current.packets.find((packet) => packet.id === packetId) ?? null;
   if (currentPacket) {
     return { missionId: current.missionId || null, packet: currentPacket, lane: findLatestLaneByPacket(packetId) };
   }
-  const registry = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true });
+  const registry = storedMissionForPacket(packetId);
   return {
     missionId: registry?.mission.missionId ?? null,
     packet: registry?.mission.packets.find((packet) => packet.id === packetId) ?? null,
