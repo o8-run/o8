@@ -900,6 +900,7 @@ fn serve(
     let mut next_probe: Option<Instant> = None;
     let mut credential_deadline: Option<Instant> = None;
     let mut launch: Option<std::sync::mpsc::Receiver<Result<(), String>>> = None;
+    let mut announced = false;
     let outcome = (|| -> Result<(), String> {
         while !stopped.load(Ordering::SeqCst) {
             // Never call this while holding the server lock: a native quit waits in here.
@@ -989,6 +990,12 @@ fn serve(
                 if window.quit_requested() {
                     stopped.store(true, Ordering::SeqCst);
                     break;
+                }
+                // Opened files wait in the queue until the window takes them.
+                if !documents::pending() {
+                    announced = false;
+                } else if !announced {
+                    announced = window.announce_documents();
                 }
             }
             #[cfg(debug_assertions)]
