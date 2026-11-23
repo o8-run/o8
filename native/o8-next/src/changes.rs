@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 static REVISION: AtomicU64 = AtomicU64::new(1);
+/// `{"channel":"changed","event":"update"}` notices seen: the update status.
+static UPDATE: AtomicU64 = AtomicU64::new(0);
 static WORKING: AtomicBool = AtomicBool::new(false);
 
 /// Something the server reported may have changed what a view shows.
@@ -15,6 +17,16 @@ pub(crate) fn bump() {
 }
 pub(crate) fn revision() -> u64 {
     REVISION.load(Ordering::Relaxed)
+}
+/// A server notice that one resource changed (`channel: "changed"`).
+pub(crate) fn notice(resource: &str) {
+    if resource == "update" {
+        UPDATE.fetch_add(1, Ordering::Relaxed);
+    }
+}
+/// Update-status notices so far; a view reads again when this moves.
+pub(crate) fn update_notices() -> u64 {
+    UPDATE.load(Ordering::Relaxed)
 }
 /// Whether a listed thread is running; the sidebar keeps this current.
 pub(crate) fn set_working(working: bool) {

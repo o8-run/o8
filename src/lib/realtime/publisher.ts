@@ -62,6 +62,37 @@ export async function publishRealtimeMutation(request: Omit<RealtimeMutationPubl
   });
 }
 
+/** Resources whose clients read once on a `changed` notice instead of polling. */
+export type ChangedResource = 'update';
+const CHANGED_COALESCE_MS = 250;
+const changedPending = new Set<ChangedResource>();
+
+/**
+ * One generic "this changed" notice per resource: the ws-server broadcasts
+ * `{ channel: 'changed', event: <resource> }` with no data, and a window that
+ * shows the resource reads it once. Changes within 250 ms coalesce into one.
+ *
+ * Best-effort — never throws; a missed notice is read on the next one.
+ */
+export function publishChanged(resource: ChangedResource): void {
+  if (changedPending.has(resource)) return;
+  changedPending.add(resource);
+  setTimeout(() => {
+    changedPending.delete(resource);
+    void fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/changed`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${getOrCreateWsToken()}`,
+        'Content-Type': 'application/json',
+        // The server's own notice: never client activity for the idle gate.
+        ...SELF_REQUEST_HEADERS,
+      },
+      body: JSON.stringify({ resource }),
+      signal: AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS),
+    }).then(response => response.body?.cancel()).catch(() => {});
+  }, CHANGED_COALESCE_MS).unref?.();
+}
+
 /**
  * #840 — Lightweight broadcast for Cortex memory mutations the UI cares
  * about (directives, outcomes, codebase-memory). The ws-server fans this

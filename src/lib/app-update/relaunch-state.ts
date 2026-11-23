@@ -1,6 +1,7 @@
 import 'server-only';
 import type { AppUpdateBlockers } from './types';
 import { updateCheckTicket, type UpdateCheckTicket } from './check-order';
+import { publishChanged } from '@/lib/realtime/publisher';
 
 export interface AppUpdateAutoApplyState {
   attemptId: string | null;
@@ -60,6 +61,16 @@ let state: AppUpdateState = {
   },
   lastInstall: null,
 };
+
+// What a window shows changed: tell it, so it reads once instead of polling.
+const shown = (value: AppUpdateState) => JSON.stringify({ ...value, updatedAt: null });
+let announced = shown(state);
+function settle(): void {
+  const now = shown(state);
+  if (now === announced) return;
+  announced = now;
+  publishChanged('update');
+}
 
 export function getAppUpdateState(): AppUpdateState {
   return state;
@@ -122,11 +133,13 @@ export function setAppUpdateState(update: {
     },
     lastInstall: state.lastInstall,
   };
+  settle();
   return state;
 }
 
 export function recordAutoApply(autoApply: AppUpdateAutoApplyState | null): AppUpdateState {
   state = { ...state, autoApply };
+  settle();
   return state;
 }
 
@@ -135,12 +148,14 @@ export function recordAutoApplyWait(attemptId: string): void {
   if (state.autoApply?.attemptId !== attemptId || state.autoApply.installed) return;
   state = { ...state, lastInstall: state.lastInstall?.version === state.autoApply.version ? null : state.lastInstall,
     autoApply: { ...state.autoApply, attemptId: null, phase: 'waiting', error: null, manualRetryRequired: false } };
+  settle();
 }
 
 /** Records the start or the failure of an install, with the error message for a failure. */
 export function recordAppUpdateInstall(update: { outcome: 'started' | 'installed' | 'failed' | 'cancelled'; version?: string | null; error?: string | null }): AppUpdateState {
   if (update.outcome === 'cancelled') {
     if (state.lastInstall?.outcome === 'started' && state.lastInstall.version === (update.version ?? null)) state = { ...state, lastInstall: null };
+    settle();
     return state;
   }
   state = {
@@ -155,9 +170,11 @@ export function recordAppUpdateInstall(update: { outcome: 'started' | 'installed
         : null,
     },
   };
+  settle();
   return state;
 }
 
 export function recordHeldUpdate(held: AppUpdateState['heldUpdate']) {
   state = { ...state, heldUpdate: held };
+  settle();
 }
