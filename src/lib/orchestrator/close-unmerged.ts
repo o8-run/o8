@@ -451,13 +451,21 @@ async function closePacketUnmergedUnlocked(input: {
     });
     const kills = await killLaneSessionsConfirmed(liveWorkerSessionLanes(workerLanesToKill));
     const survivors = [] as typeof kills;
+    let goneRunsWithoutProcess = 0;
     for (const outcome of kills.filter(entry => !entry.confirmed && !entry.alreadyDead)) {
       const target = lanesToClose.find(entry => entry.id === outcome.laneId);
-      const gone = target && target.worktreePath
-        && missingWorktreeBindings.has(`${target.id}\0${target.worktreePath}`)
-        && await import('./close-gone-session').then(({ confirmGoneCloseSession }) => confirmGoneCloseSession(target));
-      if (gone && target) orphanLaneIds.add(target.id);
-      else survivors.push(outcome);
+      const workspaceGone = target && (target.worktreePath?.trim()
+        ? missingWorktreeBindings.has(`${target.id}\0${target.worktreePath}`)
+        : input.acknowledgeMissingWorktree);
+      const gone = target && workspaceGone
+        ? await import('./close-gone-session').then(({ confirmGoneCloseSession }) => confirmGoneCloseSession(target, {
+          packetId: input.packetId, sessionKey: outcome.sessionKey, acknowledgeMissingWorktree: input.acknowledgeMissingWorktree,
+        }))
+        : null;
+      if (gone && target) {
+        orphanLaneIds.add(target.id);
+        goneRunsWithoutProcess += gone.runsWithoutProcess;
+      } else survivors.push(outcome);
     }
     const survivorLaneIds = new Set(survivors.map((outcome) => outcome.laneId));
     const unverifiedMissing = lanesToClose.find((target) => {
@@ -518,6 +526,9 @@ async function closePacketUnmergedUnlocked(input: {
     const killUnconfirmedNote = survivors.length > 0
       ? ` Kill unconfirmed for ${survivors.length} worker session class process${survivors.length === 1 ? '' : 'es'}. The packet was closed; any existing worktree and owned-session recovery metadata were preserved.`
       : '';
+    const goneSessionNote = goneRunsWithoutProcess > 0
+      ? ` ${goneRunsWithoutProcess} earlier worker run${goneRunsWithoutProcess === 1 ? '' : 's'} never recorded a process id, so only packet and run markers were checked for a live worker.`
+      : '';
     const outcomeNote = `${closeUnmergedOutcomeNote({
       disposition: rawDisposition,
       note,
@@ -525,7 +536,7 @@ async function closePacketUnmergedUnlocked(input: {
       preservedBranches,
       preservationReceipts,
       preservationFailure,
-    })}${killUnconfirmedNote}`;
+    })}${killUnconfirmedNote}${goneSessionNote}`;
     for (const survivor of survivors) {
       const lifecycle = getOwnedSessionLifecycle(survivor.sessionKey);
       if (!lifecycle?.setDetachedSession) {

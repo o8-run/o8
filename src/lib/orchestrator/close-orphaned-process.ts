@@ -17,6 +17,8 @@ export class OrphanCloseRefusal extends Error {
 }
 
 export interface OrphanRunIdentity { runId: string; pid: number; processGroupId: number }
+/** A pid and group are null only for a marker-only run that never recorded its process. */
+export interface OrphanRunMarker { runId: string; pid: number | null; processGroupId: number | null }
 
 async function command(file: string, args: string[], absentExit = false): Promise<string | null> {
   return observeCloseProcess(file === 'lsof' ? 'open-files' : JSON.stringify([file, args, absentExit]),
@@ -49,9 +51,10 @@ export async function assertOrphanProcessesAbsent(input: {
   capturedPurge?: CapturedPurgeProcessWitness;
   runtime: string;
   packetId?: string;
-  runs: OrphanRunIdentity[];
-  sourcePath: string;
-  candidatePath: string;
+  runs: OrphanRunMarker[];
+  /** Null only when the packet never recorded a workspace path to inspect. */
+  sourcePath: string | null;
+  candidatePath: string | null;
 }): Promise<void> {
   if (!input.capturedPurge) {
     for (let attempt = 0; ; attempt += 1) {
@@ -65,8 +68,10 @@ export async function assertOrphanProcessesAbsent(input: {
       }
     }
   }
+  const candidatePath = input.candidatePath;
+  if (candidatePath === null) throw new OrphanCloseRefusal('a paused purge helper has no exact namespace to attest');
   try {
-    await withCapturedPurgeProcessExclusion(input.capturedPurge, input.candidatePath,
+    await withCapturedPurgeProcessExclusion(input.capturedPurge, candidatePath,
       (isHelper) => inspectOrphanProcesses(input, isHelper));
   } catch (error) {
     if (error instanceof OrphanCloseRefusal) throw error;
@@ -76,7 +81,7 @@ export async function assertOrphanProcessesAbsent(input: {
 
 async function inspectOrphanProcesses(input: {
   runtime: string; packetId?: string;
-  runs: OrphanRunIdentity[]; sourcePath: string; candidatePath: string;
+  runs: OrphanRunMarker[]; sourcePath: string | null; candidatePath: string | null;
 }, isHelper?: (pid: number) => boolean): Promise<void> {
   const raw = hasCloseProcessObservation() ? '' : await command('ps', ['axeww', '-o', 'pid=,pgid=,ppid=,command=']);
   if (!hasCloseProcessObservation() && !raw?.trim()) throw new OrphanCloseRefusal('ps returned no process identity snapshot');
@@ -88,11 +93,13 @@ async function inspectOrphanProcesses(input: {
   const packetProcess = processes.find(row => !isHelper?.(row.pid) && !closeObservedHelperSettled(row.pid) && (
     (input.packetId && row.command.split(/\s+/).includes(`O8_WORKER_PACKET_ID=${input.packetId}`))
     || (input.packetId && row.command.split(/\s+/).includes(`O8_PACKET_ID=${input.packetId}`))
-    || row.command.includes(input.sourcePath) || row.command.includes(input.candidatePath)));
+    || (input.sourcePath !== null && row.command.includes(input.sourcePath))
+    || (input.candidatePath !== null && row.command.includes(input.candidatePath))));
   if (packetProcess) throw new OrphanCloseRefusal(`live process PID ${packetProcess.pid} (${processName(packetProcess.command)}) references the packet workspace`);
   for (const run of input.runs) {
-    const live = processes.find((row) => row.pid === run.pid || row.group === run.processGroupId
-      || row.parent === run.pid || row.command.split(/\s+/).includes(`O8_OWNED_RUN_MARKER=${run.runId}`));
+    const live = processes.find((row) => (run.pid !== null && (row.pid === run.pid || row.parent === run.pid))
+      || (run.processGroupId !== null && row.group === run.processGroupId)
+      || row.command.split(/\s+/).includes(`O8_OWNED_RUN_MARKER=${run.runId}`));
     // A reused PID/group remains a refusal; token rows confer no signaling authority.
     if (live) throw new OrphanCloseRefusal(`live process PID ${live.pid} (${processName(live.command)}) matches retained run identity`);
     const tmux = await command('tmux', ['has-session', '-t', `=${tmuxSessionName(input.runtime, run.runId)}`], true);
@@ -106,7 +113,7 @@ async function inspectOrphanProcesses(input: {
     ? await readCloseOpenFiles().catch(() => { throw new OrphanCloseRefusal('lsof process probe is unavailable or inconclusive'); })
     : await command('lsof', ['-nP', '-Fpcftn']);
   if (!files?.trim()) throw new OrphanCloseRefusal('lsof returned no open-file snapshot');
-  const targets = [input.sourcePath, input.candidatePath].map((target) => path.resolve(target));
+  const targets = [input.sourcePath, input.candidatePath].flatMap((target) => target === null ? [] : [path.resolve(target)]);
   let helperObserved = false;
   let entries;
   try { entries = hasCloseProcessObservation() ? await readCloseOpenFileRows() : parseOpenFileSnapshot(files); }
