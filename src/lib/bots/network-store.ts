@@ -8,7 +8,7 @@ import { listBotMembers } from '@/lib/agents/bot-membership-store';
 import { AGENT_MESSAGE_TEXT_MAX_LENGTH, getAgentConversation, normalizeAgentBusRepoPath } from '@/lib/agents/store';
 import { readAgentConversationMessages, readAgentMessageByRequestId } from '@/lib/agents/message-history';
 import type { AgentMessage } from '@/lib/agents/types';
-import { getCanonicalChatHistoryPath, readPersistedLlmChat, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
+import { getCanonicalChatHistoryPath, readPersistedLlmChatSummary, withCanonicalChatHistoryLock } from '@/lib/llm/chat-history-store';
 import { BotNetworkError, type BotNetworkThread, type NetworkParticipant, type NetworkSendIntent } from './network-types';
 
 interface ThreadRow { thread_id: string; repo_path: string; conversation_id: string | null; participants_json: string; title: string; created_at: string }
@@ -24,7 +24,7 @@ export function findNetworkThread(threadId: string, sqlite: Database.Database = 
   return row ? threadView(row) : null;
 }
 export function isNetworkThread(threadId: string, sqlite: Database.Database = getSqlite()): boolean {
-  return Boolean(findNetworkThread(threadId, sqlite) || readPersistedLlmChat(threadId)?.history.source === 'bot-network');
+  return Boolean(findNetworkThread(threadId, sqlite) || readPersistedLlmChatSummary(threadId)?.source === 'bot-network');
 }
 export function listNetworkThreads(sqlite: Database.Database = getSqlite()): BotNetworkThread[] {
   ensureV77BotNetworkThreadSchema(sqlite);

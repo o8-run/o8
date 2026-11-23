@@ -217,6 +217,29 @@ export function readPersistedLlmChat(tabId: string): PersistedLlmChatRecord | nu
   }
 }
 
+export interface PersistedLlmChatSummary { source?: unknown; repoPath?: string }
+const chatSummaries = new Map<string, { version: string; summary: PersistedLlmChatSummary | null }>();
+const MAX_CACHED_CHAT_SUMMARIES = 64;
+
+/** Where a chat came from and its saved repository, re-read only when its file
+ * changes. Callers that need only these no longer parse the whole history
+ * (often a megabyte) on every request. Null when there is no readable chat. */
+export function readPersistedLlmChatSummary(tabId: string): PersistedLlmChatSummary | null {
+  const filePath = getCanonicalChatHistoryPath(tabId);
+  const version = getChatHistoryFileVersion(filePath);
+  if (version === null) return null;
+  const cached = chatSummaries.get(filePath);
+  if (cached?.version === version) return cached.summary && { ...cached.summary };
+  const history = readPersistedLlmChat(tabId)?.history;
+  const summary = history ? { source: history.source, repoPath: history.repoPath } : null;
+  if (getChatHistoryFileVersion(filePath) === version) {
+    chatSummaries.delete(filePath);
+    if (chatSummaries.size >= MAX_CACHED_CHAT_SUMMARIES) chatSummaries.delete(chatSummaries.keys().next().value!);
+    chatSummaries.set(filePath, { version, summary });
+  }
+  return summary && { ...summary };
+}
+
 export function writePersistedLlmChat(
   tabId: string,
   history: PersistedLlmChatHistory,
