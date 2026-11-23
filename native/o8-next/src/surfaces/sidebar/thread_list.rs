@@ -270,10 +270,16 @@ pub struct ThreadList {
     inventory_due: Instant,
     /// The next timed read follows one that may have started a server rebuild.
     inventory_follow_up: bool,
+    /// The change count (crate::changes) at the last inventory read. While the
+    /// stream is live and nothing runs, the timed read waits for a change.
+    inventory_seen: u64,
     last_attempt: Instant,
     catalog_loaded: bool,
     inventory_loading: bool,
     subscription: Subscription,
+    /// The global event stream is connected; while it is, the stream keeps
+    /// the list current and no timed catalog read is needed.
+    stream_live: bool,
     subscriptions: Vec<gpui::Subscription>,
     notice: String,
     /// A pinned-row drag's drop target: (target id, drop after it).
@@ -297,6 +303,7 @@ impl ThreadList {
     #[cfg(test)]
     pub(crate) fn expire_inventory_cadence(&mut self) {
         self.inventory_due = Instant::now();
+        self.inventory_seen = 0;
     }
     pub fn new(client: Client, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(Composer::new);
@@ -332,6 +339,7 @@ impl ThreadList {
         let submit = cx.subscribe(&editor, |this, _, _: &Submit, cx| this.submit(cx));
         Self {
             subscription: transport::subscribe_global(client.clone()),
+            stream_live: false,
             client,
             links: Default::default(),
             machines_read_at: None,
@@ -429,6 +437,7 @@ impl ThreadList {
             catalog_loaded: false,
             inventory_due: Instant::now() + INVENTORY_EVERY,
             inventory_follow_up: false,
+            inventory_seen: 0,
             inventory_loading: false,
             subscriptions: vec![observe, submit],
             notice: String::new(),
@@ -701,6 +710,10 @@ impl ThreadList {
             }
         }
     }
+    /// The event stream is connected and keeping the list current.
+    pub(crate) fn stream_live(&self) -> bool {
+        self.stream_live
+    }
     pub fn catalog_changed(&mut self) {
         self.generation += 1;
         self.dirty.get_or_insert_with(Instant::now);
@@ -770,6 +783,7 @@ impl ThreadList {
                 // The listing read a current inventory itself.
                 this.inventory_due = Instant::now() + crate::foreground::cadence(INVENTORY_EVERY);
                 this.inventory_follow_up = false;
+                this.inventory_seen = crate::changes::revision();
                 match result {
                     Ok((mut sessions, ledger, header, branches)) => {
                         this.catalog_loaded = true;
@@ -925,6 +939,9 @@ impl ThreadList {
         let messages: Vec<_> = self.subscription.receiver.try_iter().take(64).collect();
         let mut changed = false;
         for message in messages {
+            if let Incoming::Status(status) = &message {
+                self.stream_live = status.starts_with("Live");
+            }
             if let Incoming::Frame(frame) = message {
                 if frame["type"] == "ui-command" {
                     cx.emit(Event::UiCommand(frame));
@@ -1103,15 +1120,22 @@ impl ThreadList {
             // A change stays marked and reloads on the first tick it is seen.
         } else if changed {
             self.load(cx);
-        } else if self.last_load.elapsed() >= Duration::from_secs(300) {
+        } else if self.last_load.elapsed() >= Duration::from_secs(300)
+            && (crate::changes::working() || !self.stream_live)
+        {
             self.load_cached(cx);
         }
         if !hidden
             && !self.loading
             && !self.inventory_loading
             && Instant::now() >= self.inventory_due
+            && (self.inventory_follow_up
+                || !self.stream_live
+                || crate::changes::working()
+                || self.inventory_seen != crate::changes::revision())
         {
             self.inventory_loading = true;
+            self.inventory_seen = crate::changes::revision();
             let generation = self.generation;
             let client = self.client.clone();
             let task = cx
