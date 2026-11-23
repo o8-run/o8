@@ -136,6 +136,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
 function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureUserColumns(sqlite);
   ensureApprovalContextColumns(sqlite);
+  ensureApprovalContinuationStatusIndex(sqlite);
   ensureWatchedAgentColumns(sqlite);
   ensureChatHistoryColumns(sqlite);
   ensureSessionOutcomeColumns(sqlite);
@@ -1289,6 +1290,17 @@ function ensureApprovalContextIndexes(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_approvals_packet_id ON approvals(packet_id);
     CREATE INDEX IF NOT EXISTS idx_approvals_lane_id ON approvals(lane_id);
+  `);
+}
+
+/** listUnsettledApprovalContinuations filters on exactly this expression.
+ * Without the index every poll reads the whole table, diffs included. Runs on
+ * every boot so existing databases get it; building it reads the table once. */
+function ensureApprovalContinuationStatusIndex(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS idx_approvals_continuation_status ON approvals((
+      CASE WHEN json_valid(resolution_json) THEN json_extract(resolution_json, '$.continuationStatus') END
+    ));
   `);
 }
 

@@ -1,7 +1,7 @@
 import { prepareReviewFindings } from '@/lib/approvals/review-findings';
 import { reviewExecution } from '@/lib/orchestrator/review-run-evidence';
 import { reviewOutcomeForLane } from '@/lib/cortex/review-outcomes';
-import { and, desc, eq, gte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, or, sql, type SQL } from 'drizzle-orm';
 import {
   buildApprovalContextMatchPredicate, extractApprovalContextIds,
   isOrchestratorReviewApproval,
@@ -20,7 +20,7 @@ import {
   normalizeOrchestratorReview,
   type OrchestratorReviewRecordInput,
 } from '@/lib/approvals/orchestrator-review';
-import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb } from '@/lib/db';
+import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb, lanes as lanesTable } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
 import { findLaneByPacket, getLane } from '@/lib/lane/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
@@ -318,7 +318,35 @@ export function listUnsettledApprovalContinuations(options: { sessionKey?: strin
   const unsettledResolution = sql`CASE WHEN json_valid(${approvalsTable.resolutionJson})
     THEN json_extract(${approvalsTable.resolutionJson}, '$.continuationStatus')
     END IN ('pending', 'outcome_unknown')`;
-  return listInboxApprovals({ status: 'all', ...options }, unsettledResolution).filter((approval) => {
+  // A continuation whose lane already finished is never listed. Rule those
+  // rows out from the small continuation column first (the expression index
+  // finds the unsettled rows without reading the table), so their arguments,
+  // diffs and audit trails are not decoded on every poll.
+  const unsettledRows = getApprovalDb()
+    .select({ id: approvalsTable.id, rowid: sql<number>`${approvalsTable}.rowid`, continuationJson: approvalsTable.continuationJson })
+    .from(approvalsTable)
+    .where(unsettledResolution)
+    .all();
+  const laneContinuations = unsettledRows
+    .flatMap((row) => {
+      const continuation = parseJson<ApprovalRecord['continuation'] | null>(row.continuationJson, null);
+      return continuation?.kind === 'lane' ? [{ id: row.id, laneId: continuation.laneId }] : [];
+    });
+  const finishedLanes = new Set(laneContinuations.length === 0 ? [] : getApprovalDb()
+    .select({ id: lanesTable.id, status: lanesTable.status })
+    .from(lanesTable)
+    .where(inArray(lanesTable.id, [...new Set(laneContinuations.map((row) => row.laneId))]))
+    .all()
+    .filter((lane) => lane.status === 'completed' || lane.status === 'archived')
+    .map((lane) => lane.id));
+  const finishedLaneRows = new Set(laneContinuations.filter((row) => finishedLanes.has(row.laneId)).map((row) => row.id));
+  const candidates = unsettledRows.filter((row) => !finishedLaneRows.has(row.id)).map((row) => Number(row.rowid));
+  // Fetch the rest by rowid: a project or session filter would otherwise lead
+  // the planner to read every approval in that scope.
+  const predicate = candidates.length
+    ? sql`${approvalsTable}.rowid IN (${sql.join(candidates.map((rowid) => sql`${rowid}`), sql`, `)})`
+    : sql`0`;
+  return listInboxApprovals({ status: 'all', ...options }, predicate).filter((approval) => {
     const unsettled = approval.resolution?.continuationStatus === 'pending'
       || approval.resolution?.continuationStatus === 'outcome_unknown';
     if (!unsettled || approval.continuation?.kind !== 'lane') return unsettled;

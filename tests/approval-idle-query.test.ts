@@ -1,7 +1,9 @@
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApproval, getApproval, listApprovals, listUnsettledApprovalContinuations } from '@/lib/approvals/store';
 import { claimApprovalResolution, finalizeApprovalContinuation } from '@/lib/approvals/resolution';
 import { getSqlite } from '@/lib/db';
+import { createLane, setLaneStatus } from '@/lib/lane/registry';
 import type { ApprovalRecord } from '@/lib/approvals/types';
 
 vi.mock('@/lib/repos/projects', async (importOriginal) => ({
@@ -13,11 +15,11 @@ vi.mock('@/lib/push/notify', () => ({ notifyApprovalCreated: vi.fn() }));
 afterEach(() => vi.restoreAllMocks());
 
 let sequence = 0;
-function fixture(projectId: string | null = 'query-project-a', sessionKey = 'query-session-a', args?: ApprovalRecord['args']) {
+function fixture(projectId: string | null = 'query-project-a', sessionKey = 'query-session-a', args?: ApprovalRecord['args'], laneId = 'missing-query-lane') {
   const approval = createApproval({
     projectId, source: 'test', runtime: 'codex', agent: 'worker', sessionKey,
     title: 'Query fixture', description: 'Query fixture', summary: `query-${++sequence}`,
-    risk: 'low', args, continuation: { kind: 'lane', laneId: 'missing-query-lane', verb: 'merge' },
+    risk: 'low', args, continuation: { kind: 'lane', laneId, verb: 'merge' },
   });
   getSqlite().prepare('UPDATE approvals SET created_at = ? WHERE id = ?').run(Date.now() + sequence, approval.id);
   return approval;
@@ -66,6 +68,45 @@ describe('idle approval queries retain scope and history', () => {
           .toEqual(expected.filter((row) => ['pending', 'outcome_unknown'].includes(row.resolution?.continuationStatus ?? '')));
       }
     }
+  });
+
+  it('does not decode an unsettled continuation whose lane already finished', () => {
+    const finishedLane = createLane({ repoPath: '/tmp/query-repo', projectId: 'query-project-a', branch: 'query-finished', runtime: 'codex' });
+    setLaneStatus(finishedLane.id, 'completed');
+    const finished = fixture('query-project-a', 'query-session-a', undefined, finishedLane.id);
+    claimApprovalResolution(finished.id, 'approve', 'desktop');
+    const diffJson = JSON.stringify({ largeDiffMarker: 'x'.repeat(1024 * 1024) });
+    getSqlite().prepare('UPDATE approvals SET diff_json = ? WHERE id = ?').run(diffJson, finished.id);
+    const open = fixture();
+    claimApprovalResolution(open.id, 'approve', 'desktop');
+    const parse = vi.spyOn(JSON, 'parse');
+
+    const results = listUnsettledApprovalContinuations();
+
+    expect(results.map((row) => row.id)).toContain(open.id);
+    expect(results.map((row) => row.id)).not.toContain(finished.id);
+    expect(parse.mock.calls.some(([value]) => value === diffJson)).toBe(false);
+  });
+
+  it('finds unsettled continuations through an index instead of reading every approval', () => {
+    const pending = fixture();
+    claimApprovalResolution(pending.id, 'approve', 'desktop');
+    const plans: string[] = [];
+    const prepare = Database.prototype.prepare;
+    vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (this: Database.Database, source: string) {
+      if (/continuationStatus|"approvals"\.rowid IN/.test(source) && !source.startsWith('EXPLAIN')) {
+        const plan = prepare.call(this, `EXPLAIN QUERY PLAN ${source}`) as unknown as { all: (...params: unknown[]) => unknown[] };
+        const rows = plan.all(...Array<null>(source.split('?').length - 1).fill(null));
+        plans.push((rows as Array<{ detail: string }>).map((row) => row.detail).join('; '));
+      }
+      return prepare.call(this, source);
+    });
+
+    expect(listUnsettledApprovalContinuations().map((row) => row.id)).toContain(pending.id);
+    expect(plans.length).toBeGreaterThan(0);
+    // The unsettled rows come from the expression index, then by rowid;
+    // never a scan, and never every approval in the active project.
+    for (const plan of plans) expect(plan).toMatch(/^SEARCH approvals USING (INDEX idx_approvals_continuation_status \(<expr>=\?\)|.*\browid=\?\))/);
   });
 
   it('still expires stale pending rows through the normal query entry point', () => {
