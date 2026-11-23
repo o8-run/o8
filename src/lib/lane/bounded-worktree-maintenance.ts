@@ -31,6 +31,8 @@ interface MaintenanceResult {
   readBytes: number;
   removed: number;
   held: number;
+  /** Refused candidates skipped because nothing about them changed since the refusal. */
+  deferred: number;
   admissionMilliseconds: number;
   elapsedMilliseconds?: number;
   outcomes: Array<{ phase: MaintenancePhase; scope: string; outcome: string }>;
@@ -39,6 +41,62 @@ interface MaintenanceResult {
 
 let inFlight: Promise<MaintenanceResult> | null = null;
 const terminal = (lane: Lane) => lane.status === 'completed' || lane.status === 'archived';
+
+/*
+ * A managed retirement whose exact purge diverged from its journal stays
+ * refused until its claim changes. Each pass retried three such claims:
+ * a decode of each claim's purge manifest (up to 42 MB of JSON on real data)
+ * and a purge capture child, every five minutes. The startup replay already
+ * waits on the same refusal; this pass now does too: a day, doubling per
+ * refusal of the same claim row, at most a week. A changed claim retries at once.
+ */
+const REFUSAL_RETRY_MS = 24 * 60 * 60_000;
+const REFUSAL_RETRY_MAX_MS = 7 * REFUSAL_RETRY_MS;
+const JOURNAL_REFUSED = 'held: exact retirement journal refused';
+
+function refusalStore() {
+  const sqlite = getSqlite();
+  sqlite.exec(`CREATE TABLE IF NOT EXISTS worktree_maintenance_refusals (
+    phase TEXT NOT NULL, candidate_key TEXT NOT NULL, stamp TEXT NOT NULL,
+    refusals INTEGER NOT NULL, retry_after INTEGER NOT NULL,
+    PRIMARY KEY (phase, candidate_key)
+  )`);
+  return sqlite;
+}
+
+/** The claim row a retry depends on, read without decoding its purge manifest. */
+function claimStamp(candidate: MaintenanceCandidate): string {
+  const claim = getSqlite().prepare(`SELECT state, updated_at AS updatedAt FROM workspace_exact_claims
+    WHERE kind = 'managed-retirement' AND repository_path = ? AND worktree_id = ?`)
+    .get(candidate.repositoryPath, candidate.worktreeId) as { state: string; updatedAt: number } | undefined;
+  return claim ? `${claim.state}:${claim.updatedAt}` : '-';
+}
+
+function refusalDeferred(phase: MaintenancePhase, candidate: MaintenanceCandidate, now: number): boolean {
+  if (phase !== 'claims') return false;
+  const row = refusalStore().prepare(`SELECT stamp, retry_after AS retryAfter FROM worktree_maintenance_refusals
+    WHERE phase = ? AND candidate_key = ?`).get(phase, candidate.key) as { stamp: string; retryAfter: number } | undefined;
+  return Boolean(row && row.stamp === claimStamp(candidate) && row.retryAfter > now);
+}
+
+function recordRefusalOutcome(phase: MaintenancePhase, candidate: MaintenanceCandidate, outcome: string, now: number): void {
+  if (phase !== 'claims') return;
+  const sqlite = refusalStore();
+  if (outcome !== JOURNAL_REFUSED) {
+    sqlite.prepare('DELETE FROM worktree_maintenance_refusals WHERE phase = ? AND candidate_key = ?').run(phase, candidate.key);
+    return;
+  }
+  // The claim after the refused attempt: only a later change retries early.
+  const stamp = claimStamp(candidate);
+  const prior = sqlite.prepare(`SELECT stamp, refusals FROM worktree_maintenance_refusals
+    WHERE phase = ? AND candidate_key = ?`).get(phase, candidate.key) as { stamp: string; refusals: number } | undefined;
+  const refusals = prior?.stamp === stamp ? prior.refusals + 1 : 1;
+  const delay = Math.min(REFUSAL_RETRY_MAX_MS, REFUSAL_RETRY_MS * 2 ** Math.min(refusals - 1, 8));
+  sqlite.prepare(`INSERT INTO worktree_maintenance_refusals (phase, candidate_key, stamp, refusals, retry_after)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(phase, candidate_key) DO UPDATE SET stamp = excluded.stamp,
+      refusals = excluded.refusals, retry_after = excluded.retry_after`)
+    .run(phase, candidate.key, stamp, refusals, now + delay);
+}
 
 async function seedRegisteredRoots(budget: WorktreeMaintenanceBudget): Promise<string | null> {
   const registryPath = path.join(getDataDir(), 'repos.json');
@@ -201,7 +259,7 @@ export function runBoundedWorktreeMaintenance(
       rootBytes: WORKTREE_MAINTENANCE_POLICY.rootBytes, rootEntries: WORKTREE_MAINTENANCE_POLICY.rootEntries,
     };
     const result: MaintenanceResult = { startedAt: new Date().toISOString(), candidates: 0,
-      discoveryPages: 0, readBytes: 0, removed: 0, held: 0, admissionMilliseconds, outcomes: [] };
+      discoveryPages: 0, readBytes: 0, removed: 0, held: 0, deferred: 0, admissionMilliseconds, outcomes: [] };
     await withWorktreeMaintenanceBudget(budget, async () => {
       try { result.registryHold = await seedRegisteredRoots(budget); }
       catch (error) { result.registryHold = `Registry discovery held: ${error instanceof Error ? error.message : String(error)}`; }
@@ -219,6 +277,11 @@ export function runBoundedWorktreeMaintenance(
         const candidate = nextMaintenanceCandidate(phase);
         if (!candidate) { emptyPhases += 1; continue; }
         emptyPhases = 0;
+        if (refusalDeferred(phase, candidate, Date.now())) {
+          result.deferred += 1;
+          advanceMaintenanceCandidate(phase, candidate.key);
+          continue;
+        }
         result.candidates += 1;
         let outcome: string;
         try { outcome = await attemptCandidate(phase, candidate, reconcileActive); }
@@ -226,6 +289,7 @@ export function runBoundedWorktreeMaintenance(
           outcome = `held: ${error instanceof Error ? error.message : String(error)}`;
           if (candidate.metadataRoot) holdMaintenanceRoot(candidate.metadataRoot, outcome);
         }
+        recordRefusalOutcome(phase, candidate, outcome, Date.now());
         if (outcome.startsWith('held:')) result.held += 1;
         if (phase === 'roots' && outcome.startsWith('held:')) holdMaintenanceRoot(candidate.metadataRoot!, outcome);
         if (outcome === 'removed') result.removed += 1;
