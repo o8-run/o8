@@ -17,8 +17,43 @@ export function heldSharedCheckoutRepairs(): Array<{ file: string; reason: strin
 }
 
 function pathStamp(path: string): string {
-  try { const stat = statSync(path); return `${stat.ino}:${stat.size}:${stat.mtimeMs}`; }
+  try { const stat = statSync(path); return `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`; }
   catch { return '-'; }
+}
+
+/**
+ * A settled repair reads only its team receipt, its lock and the owned
+ * session records. While none of them changed it is skipped: each repair
+ * reads every live and archived session record (about 90 ms with 400 of them),
+ * and the heartbeat runs every 5 s. A member still inside its launch grace
+ * window is rechecked when that window ends.
+ */
+const settledRepairs = new Map<string, { stamp: string; recheckAt: number }>();
+const LAUNCH_GRACE_MS = 15 * 60_000;
+const TERMINAL_MEMBER_STATES = new Set(['failed', 'interrupted', 'completed', 'exited', 'settled', 'lost']);
+
+/** Live roots change in place; an archived record changes only by moving in or out. */
+async function ownedEvidenceStamp(): Promise<string> {
+  const { ownedRoots } = await import('@/lib/runtimes/shared/owned-session-index');
+  const { archiveRootForOwnedSessionRoot } = await import('@/lib/runtimes/shared/owned-session/archive');
+  const parts: string[] = [];
+  for (const { root } of ownedRoots()) {
+    parts.push(pathStamp(root), pathStamp(archiveRootForOwnedSessionRoot(root)));
+    let entries: string[] = [];
+    try { entries = readdirSync(root).sort(); } catch { /* absent root: its stamp says so */ }
+    for (const entry of entries) parts.push(`${entry}=${pathStamp(join(root, entry, 'session.json'))}`);
+  }
+  return parts.join(',');
+}
+
+function graceRecheckAt(team: SharedCheckoutTeam, at0: number): number {
+  let at = Infinity;
+  for (const member of team.members) {
+    if (TERMINAL_MEMBER_STATES.has(member.state)) continue;
+    const ends = Date.parse(member.launchedAt) + LAUNCH_GRACE_MS;
+    if (Number.isFinite(ends) && ends > at0) at = Math.min(at, ends);
+  }
+  return at;
 }
 
 /** Startup and the existing supervisor heartbeat share the same owned-index repair. */
@@ -27,9 +62,13 @@ export async function settleSharedCheckoutTeams(dataDir = getDataDir(), now = Da
   let files: string[];
   try { files = readdirSync(directory).filter(file => /^[a-f0-9]{24}\.json$/.test(file)); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-  for (const key of heldRepairs.keys()) {
-    if (!key.startsWith(`${directory}/`) || !files.includes(key.slice(directory.length + 1))) heldRepairs.delete(key);
+  for (const repairs of [heldRepairs, settledRepairs]) {
+    for (const key of repairs.keys()) {
+      if (!key.startsWith(`${directory}/`) || !files.includes(key.slice(directory.length + 1))) repairs.delete(key);
+    }
   }
+  // Read before the repairs, so a change made while they run is seen next time.
+  const evidence = files.length ? await ownedEvidenceStamp() : '';
   for (const file of files) {
     const key = join(directory, file);
     // A stale lock or unreadable liveness holds the repair until someone acts on it.
@@ -37,11 +76,16 @@ export async function settleSharedCheckoutTeams(dataDir = getDataDir(), now = Da
     const stamp = `${pathStamp(key)}|${pathStamp(key.replace(/\.json$/, '.lock'))}`;
     const held = heldRepairs.get(key);
     if (held && held.stamp === stamp && now() < held.retryAt) continue;
+    const settled = settledRepairs.get(key);
+    if (settled && settled.stamp === `${stamp}|${evidence}` && now() < settled.recheckAt) continue;
     try {
       const team = JSON.parse(readFileSync(key, 'utf8')) as SharedCheckoutTeam;
       await settleSharedCheckoutTeam({ repoPath: team.path, parentThreadId: team.parentThreadId, dataDir });
       heldRepairs.delete(key);
+      // The repair may rewrite the receipt; the next heartbeat repeats once and then settles.
+      settledRepairs.set(key, { stamp: `${stamp}|${evidence}`, recheckAt: graceRecheckAt(team, now()) });
     } catch (error) {
+      settledRepairs.delete(key);
       // Preserve uncertain ownership and continue repairing independent teams.
       const reason = error instanceof Error ? error.message : String(error);
       if (held?.reason !== reason) console.warn('[shared-checkout] Membership repair held:', file, reason);
