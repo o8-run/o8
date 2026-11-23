@@ -181,3 +181,23 @@ it('reports awake and resting time and names what kept the gate awake', () => {
   expect(stats.live['lane running']).toBeGreaterThan(0);
 });
 
+it("does not wake on the launcher's or the window's identity read, and still wakes on another read", () => {
+  const idleSafe = vi.fn();
+  timers.push(recurring('fixture-identity', idleSafe, 1_000));
+  vi.advanceTimersByTime(120_000);
+  expect(atRest()).toBe(true);
+  const pausedAt = idleSafe.mock.calls.length;
+
+  // The launcher sends no foreground header; a window in front sends 1.
+  noteRequest({}, 'GET', '/api/setup/identity');
+  noteRequest({ 'x-o8-foreground': '1' }, 'GET', '/api/setup/identity?probe=1');
+  vi.advanceTimersByTime(5_000);
+  expect(atRest()).toBe(true);
+  expect(idleSafe.mock.calls.length).toBe(pausedAt);
+  expect(idleGateStats().ignored['identity probe']).toBe(2);
+  expect(idleGateStats().activity).toEqual({});
+
+  noteRequest({ 'x-o8-foreground': '1' }, 'GET', '/api/setup/status');
+  expect(atRest()).toBe(false);
+  expect(idleGateStats().activity).toEqual({ 'GET /api/setup/status': 1 });
+});
