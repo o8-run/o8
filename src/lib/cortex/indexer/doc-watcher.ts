@@ -25,7 +25,8 @@ import { chunkMarkdown } from './markdown-chunks';
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, watch, type Dirent } from 'node:fs';
+import { existsSync, readFileSync, statSync, watch, type Dirent } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 
 import { distillDocChunkBatch } from '@/lib/cortex/indexer/doc-distill';
@@ -297,7 +298,12 @@ async function distillChangedFile(
 
 // ── File discovery for seeding hashes ────────────────────────────────────────
 
-function collectWatchedFiles(repos: RegisteredRepo[]): Array<{ repo: RegisteredRepo; absPath: string; relPath: string }> {
+/**
+ * Walks each repository with asynchronous reads: a large checkout holds
+ * thousands of directories, and a synchronous walk held the event loop for
+ * over a second during startup.
+ */
+async function collectWatchedFiles(repos: RegisteredRepo[]): Promise<Array<{ repo: RegisteredRepo; absPath: string; relPath: string }>> {
   const files: Array<{ repo: RegisteredRepo; absPath: string; relPath: string }> = [];
   for (const repo of repos) {
     if (!existsSync(repo.localPath)) continue;
@@ -306,7 +312,7 @@ function collectWatchedFiles(repos: RegisteredRepo[]): Array<{ repo: RegisteredR
       const dir = stack.pop()!;
       let entries: Dirent[];
       try {
-        entries = readdirSync(dir, { withFileTypes: true });
+        entries = await readdir(dir, { withFileTypes: true });
       } catch {
         continue;
       }
@@ -316,7 +322,7 @@ function collectWatchedFiles(repos: RegisteredRepo[]): Array<{ repo: RegisteredR
         if (!entry.isDirectory() && !isLink && !/\.md$/i.test(name)) continue;
         const abs = join(dir, name);
         try {
-          const target = isLink ? statSync(abs) : entry;
+          const target = isLink ? await stat(abs) : entry;
           if (target.isDirectory()) {
             if (!SKIP_DIRECTORIES.has(name) && !pathHasWorktreeSegment(abs)) stack.push(abs);
             continue;
@@ -324,8 +330,8 @@ function collectWatchedFiles(repos: RegisteredRepo[]): Array<{ repo: RegisteredR
           if (!target.isFile() || !/\.md$/i.test(name)) continue;
           const relPath = relative(repo.localPath, abs);
           if (!isWhitelisted(relPath)) continue;
-          const stat = 'size' in target ? target : statSync(abs);
-          if (stat.isFile() && stat.size <= MAX_FILE_BYTES && stat.size >= MIN_FILE_LEN) {
+          const info = 'size' in target ? target : await stat(abs);
+          if (info.isFile() && info.size <= MAX_FILE_BYTES && info.size >= MIN_FILE_LEN) {
             files.push({ repo, absPath: abs, relPath });
           }
         } catch {
@@ -361,10 +367,10 @@ function scheduleDistill(repo: RegisteredRepo, absPath: string, relPath: string)
  * Seed the in-memory hash map from the current content of all watched files
  * so the first change only triggers re-distill for actually-modified chunks.
  */
-function seedChunkHashes(files: Array<{ repo: RegisteredRepo; absPath: string; relPath: string }>): void {
+async function seedChunkHashes(files: Array<{ repo: RegisteredRepo; absPath: string; relPath: string }>): Promise<void> {
   for (const { repo, absPath, relPath } of files) {
     try {
-      const body = readFileSync(absPath, 'utf-8');
+      const body = await readFile(absPath, 'utf-8');
       if (body.length < MIN_FILE_LEN) continue;
       const chunks = chunkMarkdown(body);
       for (const chunk of chunks) {
@@ -377,10 +383,11 @@ function seedChunkHashes(files: Array<{ repo: RegisteredRepo; absPath: string; r
   }
 }
 
-function watchRepoDocs(repos: RegisteredRepo[], handles: ReturnType<typeof watch>[]): void {
-  const files = collectWatchedFiles(repos);
-  if (files.length === 0) return;
-  seedChunkHashes(files);
+async function watchRepoDocs(repos: RegisteredRepo[], handles: ReturnType<typeof watch>[], stopped: () => boolean): Promise<void> {
+  const files = await collectWatchedFiles(repos);
+  if (files.length === 0 || stopped()) return;
+  await seedChunkHashes(files);
+  if (stopped()) return;
   console.log(`[doc-watcher] seeded hashes for ${chunkHashes.size} chunk(s) across ${files.length} file(s)`);
 
   // One fs.watch handle per file (not per-directory) — avoids recursive watch
@@ -423,10 +430,16 @@ function startRepoDocWatcher(): () => void {
   const handles: ReturnType<typeof watch>[] = [];
   let stopped = false;
   const later = repos.filter((repo) => !isPathReachable(repo.localPath));
+  const isStopped = () => stopped;
+  const watchFailed = (err: unknown) => console.warn(
+    `[doc-watcher] could not start: ${err instanceof Error ? err.message : String(err)}`,
+  );
   for (const repo of later) {
-    void whenPathReachable(repo.localPath).then(() => { if (!stopped) watchRepoDocs([repo], handles); });
+    void whenPathReachable(repo.localPath)
+      .then(() => (stopped ? undefined : watchRepoDocs([repo], handles, isStopped)))
+      .catch(watchFailed);
   }
-  watchRepoDocs(repos.filter((repo) => !later.includes(repo)), handles);
+  void watchRepoDocs(repos.filter((repo) => !later.includes(repo)), handles, isStopped).catch(watchFailed);
   return () => {
     stopped = true;
     for (const h of handles) {

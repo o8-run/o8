@@ -17,7 +17,7 @@ import {
 import { broadcastEventSpecifics } from './commentary-prompt';
 import { buildBroadcastSnapshot } from './snapshot';
 import { claimBroadcastLineSlot } from './hourly-cap';
-import { listBroadcastEvents } from './events';
+import { headBroadcastCursor, listBroadcastEvents } from './events';
 import {
   BROADCAST_SPOKEN_MAX_LENGTH,
   clipPhrase,
@@ -602,7 +602,11 @@ export class BroadcastSpeaker {
     try {
       const loader = this.options.loadCommentary ?? loadCommentary;
       const initialPoll = !this.commentaryInitialized;
-      let hasMore = true;
+      // Startup speaks nothing from history, so it starts at the head instead
+      // of reading every stored page first.
+      const skipHistory = this.options.includeExisting !== true;
+      if (initialPoll && skipHistory) this.cursor = headBroadcastCursor(sqlite);
+      let hasMore = !(initialPoll && skipHistory);
       while (hasMore) {
         const page = await loader(this.cursor);
         this.cursor = page.cursor;
@@ -619,7 +623,8 @@ export class BroadcastSpeaker {
 
       const initialEventPoll = !this.eventsInitialized;
       const feedEvents: BroadcastEvent[] = [];
-      let eventHasMore = true;
+      if (initialEventPoll && skipHistory) this.eventCursor = headBroadcastCursor(sqlite);
+      let eventHasMore = !(initialEventPoll && skipHistory);
       while (eventHasMore) {
         const page = listBroadcastEvents({ cursor: this.eventCursor, limit: COMMENTARY_PAGE_LIMIT }, sqlite);
         this.eventCursor = page.cursor;

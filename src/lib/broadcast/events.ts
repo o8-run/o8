@@ -308,6 +308,16 @@ function currentCursor(sqlite: Database.Database): BroadcastCursor {
   return { v: 1, positions: row };
 }
 
+/**
+ * The cursor just past every event stored now. A reader that will not act on
+ * history starts here: walking the whole history from the start sorts the
+ * combined event tables once per 250-row batch and holds the event loop for
+ * seconds on a large data folder.
+ */
+export function headBroadcastCursor(sqlite: Database.Database = getSqlite()): string {
+  return encodeCursor(currentCursor(sqlite));
+}
+
 function emptyCursor(): BroadcastCursor {
   return {
     v: 1,

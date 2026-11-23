@@ -69,7 +69,8 @@ it('preserves explicit excludes after adding the two root filenames to the batch
 it('watches both root files, persists cited facts for changed chunks only, and leaves nested notes out of scope', async () => {
   database = await import('@/lib/db'); database.getDb();
   const { startDocWatcher } = await import('./doc-watcher'); stop = startDocWatcher();
-  expect(console.log).toHaveBeenCalledWith('[doc-watcher] watching 3 file(s) for changes');
+  // The startup walk is asynchronous: the watchers attach once it finishes.
+  await vi.waitFor(() => expect(console.log).toHaveBeenCalledWith('[doc-watcher] watching 3 file(s) for changes'), { timeout: 5_000, interval: 20 });
   expect(transport.callSonnet).not.toHaveBeenCalled();
   await new Promise(resolve => setTimeout(resolve, 100));
   const sqlite = database.getSqlite();

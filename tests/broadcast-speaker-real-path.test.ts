@@ -115,7 +115,8 @@ describe('Broadcast speaker real path', () => {
     const stop = startBroadcastSpeakerLoop();
     try {
       // #5326: with voice off (the default) the loop polls on every 15th tick.
-      await vi.advanceTimersByTimeAsync(15_500);
+      // The first tick starts at the event head without a request.
+      await vi.advanceTimersByTimeAsync(30_500);
       const speakerWarnings = warning.mock.calls.filter(([message]) => (
         String(message).startsWith('[broadcast-speaker]')
       ));
@@ -213,7 +214,7 @@ describe('Broadcast speaker real path', () => {
     expect(empty.commentary).toEqual([]);
   });
 
-  it('skips historical priority speech across startup pages and still delivers a fresh explicit request while muted', async () => {
+  it('starts at the event head without reading historical priority speech and still delivers a fresh explicit request while muted', async () => {
     const base = new Date('2026-08-01T12:00:00.000Z');
     const sqlite = getSqlite();
     for (let index = 0; index < 105; index += 1) {
@@ -227,10 +228,26 @@ describe('Broadcast speaker real path', () => {
     const loader = vi.fn(loadCommentary);
     const settings = { ...voiceOn, broadcastVoice: 'off' as const, quietHours: 'on' as const,
       quietStart: '08:00', quietEnd: '08:00' };
-    const speaker = new BroadcastSpeaker({ sqlite, speak, loadCommentary: loader });
+    // Count reads of the combined event history (one sorted union per batch).
+    let historyReads = 0;
+    const counted = new Proxy(sqlite, {
+      get(target, key) {
+        if (key === 'prepare') {
+          return (sql: string) => {
+            if (sql.includes('UNION ALL')) historyReads += 1;
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const speaker = new BroadcastSpeaker({ sqlite: counted, speak, loadCommentary: loader });
     await speaker.tick({ settings });
     await speaker.flush();
-    expect(loader.mock.calls.length).toBeGreaterThan(1);
+    // Startup speaks nothing from history, so it reads none: it starts at the head.
+    expect(loader).not.toHaveBeenCalled();
+    expect(historyReads).toBe(0);
     expect(speak).not.toHaveBeenCalled();
     expect(speaker.state()).toMatchObject({ queued: 0, speaking: false });
 
