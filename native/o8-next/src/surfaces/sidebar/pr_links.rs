@@ -5,8 +5,9 @@
 //!
 //! Links are the server's explicit conversation PR context
 //! (GET /api/orchestrator/pull-request-context?threadId=…, table
-//! conversation_pr_context), refreshed at most once a minute for listed
-//! conversations, one read each, and not at all while nobody can see the window.
+//! conversation_pr_context), read for listed conversations, one read each,
+//! after a thread, agent or lane event (PRs open and merge through lanes) or
+//! once a minute while a thread is running; never while nobody can see the window.
 //!
 //! Dev only: O8_DEV_SIDEBAR_PR_LINKS may name a JSON file of
 //! `{ "<threadId>": [{ "repositoryFullName", "number", "title"?, "state"? }] }`
@@ -111,10 +112,11 @@ impl ThreadList {
         !self.pr_loading
             && !crate::foreground::hidden()
             && !self.sessions.is_empty()
-            && self.pr_links_at.is_none_or(|at| at.elapsed() >= REFRESH)
+            && self.pr_links_at.due(REFRESH, crate::changes::working())
     }
     pub(super) fn load_pr_links(&mut self, cx: &mut Context<Self>) {
         self.pr_loading = true;
+        self.pr_links_at.read();
         let client = self.client.clone();
         let ids: Vec<String> = self
             .sessions
@@ -127,7 +129,6 @@ impl ThreadList {
             let links = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.pr_loading = false;
-                this.pr_links_at = Some(Instant::now());
                 this.pr_links.extend(links);
                 cx.notify();
             });
@@ -306,6 +307,6 @@ impl ThreadList {
     pub(crate) fn set_pr_links(&mut self, id: &str, links: Vec<PrLink>) {
         self.pr_links.insert(id.to_owned(), links);
         // Keep the periodic read from racing the test's links.
-        self.pr_links_at = Some(Instant::now());
+        self.pr_links_at.read();
     }
 }

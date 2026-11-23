@@ -10,6 +10,7 @@ mod change_map;
 mod child_command;
 #[path = "shell_features/connection/client.rs"]
 mod client;
+mod changes;
 mod clock;
 mod composer;
 mod devices_panel;

@@ -21,8 +21,13 @@ const BACKGROUND: Duration = Duration::from_secs(60);
 pub(crate) const HEADER: &str = "x-o8-foreground";
 
 /// Records the window's state; returns true when it has just come back to the front.
+/// Coming back counts as a change, so views that read on change read once.
 pub(crate) fn set(active: bool) -> bool {
-    !ACTIVE.swap(active, Ordering::Relaxed) && active
+    let back = !ACTIVE.swap(active, Ordering::Relaxed) && active;
+    if back {
+        crate::changes::bump();
+    }
+    back
 }
 
 pub(crate) fn active() -> bool {

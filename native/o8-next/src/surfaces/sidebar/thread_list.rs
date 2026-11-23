@@ -171,7 +171,7 @@ pub struct ThreadList {
     pick_anchor: Option<String>,
     /// Linked pull requests by thread id (pr_links.rs).
     pr_links: HashMap<String, Vec<pr_links::PrLink>>,
-    pr_links_at: Option<Instant>,
+    pr_links_at: crate::changes::Follow,
     pr_loading: bool,
     pr_hover: Option<pr_links::PrHover>,
     /// The thread whose facts card is opening or open (thread_hover.rs).
@@ -350,7 +350,7 @@ impl ThreadList {
             picked: HashSet::new(),
             pick_anchor: None,
             pr_links: HashMap::new(),
-            pr_links_at: None,
+            pr_links_at: Default::default(),
             pr_loading: false,
             pr_hover: None,
             thread_hover: None,
@@ -896,6 +896,7 @@ impl ThreadList {
             .collect()
     }
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        crate::changes::set_working(self.sessions.iter().any(|s| s.status == "running"));
         // Nobody can see the window: stream frames still apply in place below,
         // but no timed or change-driven read runs until it shows again.
         let hidden = crate::foreground::hidden();
@@ -999,8 +1000,14 @@ impl ThreadList {
                         if *old == incoming {
                             continue;
                         }
+                        // Streamed text arrives as upserts too; only a
+                        // status change is news to the views reading on change.
+                        if old.status != incoming.status {
+                            crate::changes::bump();
+                        }
                         *old = incoming;
                     } else {
+                        crate::changes::bump();
                         self.sessions.push(incoming);
                     }
                     changed = true;
@@ -1035,6 +1042,7 @@ impl ThreadList {
                 {
                     self.generation += 1;
                     self.dirty.get_or_insert_with(Instant::now);
+                    crate::changes::bump();
                 }
             }
         }

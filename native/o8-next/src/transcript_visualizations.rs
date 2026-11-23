@@ -46,6 +46,8 @@ pub(super) struct Saved {
     refs: Vec<Reference>,
     anchors: Anchors,
     last: Option<Instant>,
+    /// The change count at the last read (crate::changes).
+    seen: u64,
     loading: Option<mpsc::Receiver<Response>>,
     pub(super) visible: Rc<Cell<usize>>,
 }
@@ -57,6 +59,8 @@ impl Saved {
             self.anchors.clear();
             // Keep the in-flight request and deadline: switching tabs cannot
             // overlap requests or increase the poll rate. Its scope fences results.
+            // The new chat reads once the deadline passes, change or not.
+            self.seen = 0;
         }
     }
     pub(super) fn attach(&mut self, rows: &mut Vec<Row>, messages: &[crate::model::Entry]) {
@@ -81,12 +85,16 @@ impl Saved {
         }
         if self.loading.is_none()
             && !crate::foreground::hidden()
+            // Agents save visualizations: read on a thread, agent or lane
+            // event, or every 5 s while a thread is running.
             && self.last.is_none_or(|last| {
-                now.duration_since(last) >= crate::foreground::cadence(Duration::from_secs(5))
+                (self.seen != crate::changes::revision() || crate::changes::working())
+                    && now.duration_since(last) >= crate::foreground::cadence(Duration::from_secs(5))
             })
             && let Some(scope) = self.scope.clone()
         {
             self.last = Some(now);
+            self.seen = crate::changes::revision();
             let client = client.clone();
             let (send, receive) = mpsc::channel();
             self.loading = Some(receive);
@@ -370,10 +378,11 @@ mod tests {
         assert!(saved.loading.is_none());
         let (client, request) = server(json!({"result":{"visualizations":[]}}));
         saved.visible.set(1);
+        crate::changes::bump();
         saved.poll(&client, now + Duration::from_secs(5));
         assert!(
             saved.loading.is_some(),
-            "visible panes may poll at five seconds"
+            "visible panes read again five seconds after an event"
         );
         assert!(
             request

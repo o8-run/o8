@@ -4,7 +4,9 @@ use serde_json::{Value, json};
 pub(super) struct Contexts {
     pub approvals: usize,
     pending: bool,
-    next: Option<std::time::Instant>,
+    /// Agents ask for approvals: read on a thread, agent or lane event, or
+    /// every 15 s while a thread is running.
+    follow: crate::changes::Follow,
     comparison_next: Option<std::time::Instant>,
     prs: std::collections::HashMap<String, gpui::AnyView>,
     list: Option<(String, gpui::AnyView)>,
@@ -41,13 +43,12 @@ pub(super) fn refresh(s: &mut Shell, w: &mut Window, cx: &mut Context<Shell>) {
     // Nobody can see the window: the count waits and reads once when it shows.
     if state.pending
         || crate::foreground::hidden()
-        || state.next.is_some_and(|at| at > std::time::Instant::now())
+        || !state.follow.due(Duration::from_secs(15), crate::changes::working())
     {
         return;
     }
     state.pending = true;
-    state.next =
-        Some(std::time::Instant::now() + crate::foreground::cadence(Duration::from_secs(15)));
+    state.follow.read();
     let client = s.client.clone();
     let rx = background(move || {
         client.get::<Value>(
