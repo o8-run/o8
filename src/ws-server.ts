@@ -55,7 +55,7 @@ import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcrip
 
 import { TASK_ARTIFACT_ACTION_ID_PATTERN, TASK_ARTIFACT_ID_PATTERN, type TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import { watch, existsSync } from 'node:fs';
-import { readFile, stat, access } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { execFile, execFileSync } from '@/lib/providers/child-process';
 import { createServer } from 'node:http';
@@ -127,6 +127,7 @@ import {
 import { appendOperatorStopNote, createAssistantTextBuffer, createPersistPacer, createTrailingPersist } from './lib/ws-server/orchestrator-assistant-text';
 import { prepareOrchestratorProjectTurn } from './lib/ws-server/orchestrator-project-context';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+import { createReviewWatchTargets } from './lib/ws-server/review-watch-targets';
 import { mayHaveGitRepositoryContext } from './lib/git/repository-context';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import { isOrchestratorServiceTier, serviceTierForTurn } from './lib/orchestrator/service-tier';
@@ -365,15 +366,6 @@ const execFileAsync = promisify(execFile);
 // Async existence check — never blocks the shared event loop for FS calls on
 // per-message / per-poll hot paths (the #1498 exposure class). Startup-only
 // probes may still use existsSync.
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
 async function listRepoPaths(): Promise<string[]> {
   try {
@@ -7881,44 +7873,11 @@ async function pruneOrphanedCodexWorktreeBranches(repoPath: string): Promise<num
   return orphanedBranches.length;
 }
 
-async function getReviewWatchTargets() {
-  const repoPaths = new Set<string>([REPO_ROOT]);
-  for (const p of await listRepoPaths()) {
-    repoPaths.add(resolve(p));
-  }
-
-  const targets = [] as Array<{ repoPath: string; workspacePath: string; sessionKey?: string }>;
-
-  for (const repoPath of repoPaths) {
-    targets.push({ repoPath, workspacePath: repoPath });
-
-    try {
-      for (const worktreeBase of resolveWorktreeRootLayout(repoPath).bases) {
-        const metaPath = resolve(worktreeBase, '.meta.json');
-        if (!(await pathExists(metaPath))) continue;
-        const raw = await readFile(metaPath, 'utf-8');
-        const meta = JSON.parse(raw) as {
-          worktrees?: Record<string, { id: string; sessionKey?: string; claudeManaged?: boolean }>;
-        };
-        for (const worktree of Object.values(meta.worktrees ?? {})) {
-          const workspacePath = worktree.claudeManaged
-            ? resolve(repoPath, '.claude', 'worktrees', worktree.id)
-            : resolve(worktreeBase, worktree.id);
-          if (!(await pathExists(workspacePath))) continue;
-          targets.push({
-            repoPath,
-            workspacePath,
-            sessionKey: worktree.sessionKey,
-          });
-        }
-      }
-    } catch {
-      // Ignore repos without a readable worktree store
-    }
-  }
-
-  return targets;
-}
+const reviewWatchTargets = createReviewWatchTargets({
+  rootPath: REPO_ROOT,
+  reposFile: () => join(getDataDir(), 'repos.json'),
+  listRepoPaths,
+});
 
 async function broadcastDiffStats() {
   if (!hasReviewSubscribers()) return;
@@ -8026,7 +7985,13 @@ async function reviewTargetStatKey(workspacePath: string): Promise<string> {
 async function broadcastReviewFileChanges() {
   if (!hasReviewSubscribers()) return false;
 
-  const targets = await getReviewWatchTargets();
+  const now = Date.now();
+  const fullSweep = now - lastReviewFullSweepAt >= REVIEW_FULL_SWEEP_MS;
+  if (fullSweep) lastReviewFullSweepAt = now;
+
+  // Watcher events invalidate the list; without a live watcher, or on the
+  // minute's sweep, read the worktree stores again.
+  const targets = await reviewWatchTargets.list(fullSweep || !conflictWatchersActive);
   const liveTargetKeys = new Set(targets.map((target) => target.workspacePath));
   let changed = false;
 
@@ -8041,10 +8006,6 @@ async function broadcastReviewFileChanges() {
       reviewGitDirCache.delete(key);
     }
   }
-
-  const now = Date.now();
-  const fullSweep = now - lastReviewFullSweepAt >= REVIEW_FULL_SWEEP_MS;
-  if (fullSweep) lastReviewFullSweepAt = now;
 
   let nextIndex = 0;
   const scanTarget = async (target: typeof targets[number]) => {
@@ -8187,6 +8148,8 @@ function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
     if (watchedWorktreeBases.has(base) || !existsSync(base)) continue;
     try {
       watch(base, { recursive: true }, (_event, filename) => {
+        // Any change under a base can add or remove a worktree.
+        reviewWatchTargets.invalidate();
         // A known-noisy path (node_modules, .next, target...) tells us nothing.
         // An UNKNOWN path is treated as real — fail safe, never fail silent.
         if (isWorktreeNoise(filename)) return;
@@ -8198,8 +8161,10 @@ function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
         console.warn('[ws-server] worktree watcher error, reverting to polling:', err);
         conflictWatchersActive = false;
         watchedWorktreeBases.delete(base);
+        reviewWatchTargets.invalidate();
       });
       watchedWorktreeBases.add(base);
+      reviewWatchTargets.invalidate();
       conflictWatchersActive = true;
       console.log(`[ws-server] Watching worktrees at ${base} for conflict changes`);
     } catch (err) {
