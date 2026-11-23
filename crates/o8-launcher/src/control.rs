@@ -39,8 +39,33 @@ pub struct Instance {
     queue: Receiver<Pending>,
     show: Arc<AtomicBool>,
     halt: Arc<AtomicBool>,
+    /// Ends the worker's wait for a connection when the instance drops.
+    interrupt: io::PipeWriter,
     worker: Option<JoinHandle<()>>,
     socket: PathBuf,
+}
+/// Blocks until the listener has a connection or the interrupt pipe is written.
+fn readable(listener: &UnixListener, interrupt: &io::PipeReader) -> bool {
+    let mut fds = [
+        libc::pollfd {
+            fd: listener.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: interrupt.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+    loop {
+        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) } >= 0 {
+            return fds[1].revents == 0;
+        }
+        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
 }
 fn read_request(peer: &mut UnixStream) -> io::Result<Request> {
     // Accepted sockets inherit nonblocking mode on some Unix platforms.
@@ -158,16 +183,17 @@ impl Instance {
         let queued_show = show.clone();
         let halt = Arc::new(AtomicBool::new(false));
         let stopping = halt.clone();
+        let (interrupted, interrupt) = io::pipe()?;
         let worker = std::thread::Builder::new()
             .name("launcher-control".into())
             .spawn(move || {
                 while !stopping.load(Ordering::SeqCst) {
+                    if !readable(&listener, &interrupted) {
+                        break;
+                    }
                     let mut peer = match listener.accept() {
                         Ok((peer, _)) => peer,
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(Duration::from_millis(10));
-                            continue;
-                        }
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
                         Err(_) => break,
                     };
                     if !same_user(&peer, unsafe { libc::getuid() }) {
@@ -179,13 +205,18 @@ impl Instance {
                     if matches!(request, Request::Show) {
                         // A bool coalesces repeated reopen requests without allocating a queue.
                         queued_show.store(true, Ordering::SeqCst);
+                        crate::native::wake();
                         let _ = peer.write_all(b"{\"ok\":true}\n");
-                    } else if let Err(TrySendError::Full(mut pending)) =
-                        send.try_send(Pending { request, peer })
-                    {
-                        let _ = pending
-                            .peer
-                            .write_all(b"{\"ok\":false,\"error\":\"Launcher is busy\"}\n");
+                    } else {
+                        match send.try_send(Pending { request, peer }) {
+                            Ok(()) => crate::native::wake(),
+                            Err(TrySendError::Full(mut pending)) => {
+                                let _ = pending
+                                    .peer
+                                    .write_all(b"{\"ok\":false,\"error\":\"Launcher is busy\"}\n");
+                            }
+                            Err(TrySendError::Disconnected(_)) => {}
+                        }
                     }
                 }
             })?;
@@ -194,6 +225,7 @@ impl Instance {
             queue,
             show,
             halt,
+            interrupt,
             worker: Some(worker),
             socket,
         }))
@@ -218,6 +250,7 @@ impl Instance {
 impl Drop for Instance {
     fn drop(&mut self) {
         self.halt.store(true, Ordering::SeqCst);
+        let _ = self.interrupt.write_all(b"x");
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }

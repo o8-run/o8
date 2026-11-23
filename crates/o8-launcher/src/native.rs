@@ -9,6 +9,46 @@ use std::{
     time::Duration,
 };
 type MainWork = Box<dyn FnOnce() + Send>;
+/// The startup and fixture tick; at rest the loop waits for `wake` instead.
+pub const TICK: Duration = Duration::from_millis(25);
+/// Set by `wake` and cleared by the main loop before it looks for work.
+static WOKEN: Mutex<bool> = Mutex::new(false);
+static WAKE: std::sync::Condvar = std::sync::Condvar::new();
+/// True once AppKit owns the main thread, which then waits in its run loop.
+static APPKIT: AtomicBool = AtomicBool::new(false);
+/// Wakes the main loop from any thread: a control request, a child exit, the
+/// window, an update job or a stop. At rest the loop otherwise sleeps until
+/// its next deadline instead of ticking.
+pub fn wake() {
+    let first = !std::mem::replace(
+        &mut *WOKEN.lock().unwrap_or_else(PoisonError::into_inner),
+        true,
+    );
+    WAKE.notify_all();
+    #[cfg(target_os = "macos")]
+    if first && APPKIT.load(Ordering::SeqCst) {
+        mac::nudge();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = first;
+}
+fn take_woken() -> bool {
+    std::mem::take(&mut *WOKEN.lock().unwrap_or_else(PoisonError::into_inner))
+}
+fn wait_without_appkit(limit: Option<Duration>) {
+    let woken = WOKEN.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut woken = match limit {
+        Some(limit) => {
+            WAKE.wait_timeout_while(woken, limit, |woken| !*woken)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0
+        }
+        None => WAKE
+            .wait_while(woken, |woken| !*woken)
+            .unwrap_or_else(PoisonError::into_inner),
+    };
+    *woken = false;
+}
 /// Answers a platform termination request (Quit, logout, restart): sets the stop
 /// flag and starts the bounded shutdown. The platform then waits; `allow` lets it
 /// exit with status 0. A stop that cannot be proven complete exits with status 1
@@ -147,6 +187,18 @@ mod mac {
         let context = Box::into_raw(Box::new(work)).cast();
         unsafe { dispatch_async_f(&_dispatch_main_q, context, run_on_main) };
     }
+    extern "C" fn nothing(_: *mut std::ffi::c_void) {}
+    /// Main-queue work ends the run-loop wait in `Native::wait`.
+    pub(super) fn nudge() {
+        unsafe { dispatch_async_f(&_dispatch_main_q, std::ptr::null_mut(), nothing) };
+    }
+    type CFStringRef = *const std::ffi::c_void;
+    const RUN_FINISHED: i32 = 1;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFRunLoopDefaultMode: CFStringRef;
+        fn CFRunLoopRunInMode(mode: CFStringRef, seconds: f64, after_source: u8) -> i32;
+    }
     fn allow() {
         if let Some(mtm) = MainThreadMarker::new() {
             NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(true);
@@ -212,6 +264,7 @@ mod mac {
             app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
             app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
             app.finishLaunching();
+            APPKIT.store(true, Ordering::SeqCst);
             Ok(Self {
                 app: Some(app),
                 _delegate: Some(delegate),
@@ -234,6 +287,30 @@ mod mac {
                     }
                 });
             }
+        }
+        /// Sleeps until `wake`, an AppKit event or `limit`; `pump` then
+        /// dispatches the events. Debug fixtures keep their 25 ms tick.
+        pub fn wait(&self, limit: Option<Duration>) {
+            let limit = if self.fake.is_some() {
+                Some(super::TICK)
+            } else {
+                limit
+            };
+            if self.app.is_none() {
+                return wait_without_appkit(limit);
+            }
+            if take_woken() {
+                return;
+            }
+            let seconds = limit.map_or(1.0e9, |limit| limit.as_secs_f64());
+            let ran = autoreleasepool(|_| unsafe {
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, 1)
+            });
+            if ran == RUN_FINISHED {
+                // A mode without sources returns at once; never spin on it.
+                wait_without_appkit(limit);
+            }
+            take_woken();
         }
         pub fn focus(&self, api: u32, expected: &Path) -> bool {
             if self.app.is_none() {
@@ -316,6 +393,13 @@ impl Native {
             fake.pump();
         }
     }
+    pub fn wait(&self, limit: Option<Duration>) {
+        wait_without_appkit(if self.fake.is_some() {
+            Some(TICK)
+        } else {
+            limit
+        });
+    }
     pub fn focus(&self, _: u32, _: &Path) -> bool {
         false
     }
@@ -323,6 +407,23 @@ impl Native {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_wake_ends_an_unbounded_wait_and_is_never_lost() {
+        // Sent before the wait: returns at once instead of sleeping forever.
+        wake();
+        wait_without_appkit(None);
+        // Sent from another thread while the loop sleeps.
+        let waker = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            wake();
+        });
+        wait_without_appkit(None);
+        waker.join().unwrap();
+        // A bounded wait ends at its limit without a wake.
+        let start = std::time::Instant::now();
+        wait_without_appkit(Some(Duration::from_millis(20)));
+        assert!(start.elapsed() < Duration::from_secs(5));
+    }
     #[test]
     fn focus_requires_this_servers_child_and_exact_executable() {
         let expected = Path::new("/fixture/native-window");

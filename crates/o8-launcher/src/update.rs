@@ -593,6 +593,8 @@ pub struct Controller {
     install_requested: bool,
     background_check: bool,
     next_check: std::time::Instant,
+    /// Called on the worker thread when a job ends, so a sleeping loop polls.
+    finished: fn(),
 }
 
 impl Controller {
@@ -619,7 +621,20 @@ impl Controller {
             install_requested: false,
             background_check: false,
             next_check: std::time::Instant::now() + delay,
+            finished: || {},
         }
+    }
+
+    /// Runs `wake` on the worker thread each time a job ends.
+    pub fn on_finish(&mut self, wake: fn()) {
+        self.finished = wake;
+    }
+
+    /// When `poll` next has work of its own: the background check. A running
+    /// job reports through `on_finish` instead.
+    pub fn next_due(&self) -> Option<std::time::Instant> {
+        (self.updater.is_ok() && self.job.is_none() && self.ready.is_none())
+            .then_some(self.next_check)
     }
 
     pub fn updater(&self) -> Option<&Updater> {
@@ -699,10 +714,12 @@ impl Controller {
     fn spawn(&mut self, work: impl FnOnce() -> Outcome + Send + 'static) {
         let (send, receive) = std::sync::mpsc::channel();
         self.job = Some(receive);
+        let finished = self.finished;
         let spawned = std::thread::Builder::new()
             .name("launcher-update".into())
             .spawn(move || {
                 let _ = send.send(work());
+                finished();
             });
         if spawned.is_err() {
             self.job = None;

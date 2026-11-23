@@ -310,6 +310,7 @@ impl Window {
                     let _ = ready.send(());
                 } else if text.trim_end() == QUIT {
                     relay.quit.store(true, Ordering::SeqCst);
+                    crate::native::wake();
                 } else if text.starts_with(RESULT) {
                     let mut attached = lock(&relay.attached);
                     if let Some((_, stream)) = attached.as_mut() {
@@ -319,6 +320,9 @@ impl Window {
                     }
                 }
             }
+            // Output ends as the window exits; `running` reaps it after this.
+            super::wait_exited(pid);
+            crate::native::wake();
         });
         std::thread::spawn(move || {
             let _ = send.send(match painted.recv_timeout(READY_WITHIN) {
