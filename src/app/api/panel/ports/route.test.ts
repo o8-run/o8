@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({ execFile: vi.fn(), listening: '' }));
+const fixture = vi.hoisted(() => ({ execFile: vi.fn(), listening: '', unreadableCwd: new Set<string>() }));
 vi.mock('@/lib/providers/child-process', async () => {
   const { promisify: custom } = await import('node:util');
   const execFile = Object.assign(() => undefined, { [custom.custom]: fixture.execFile });
@@ -15,12 +15,18 @@ const listening = (rows: Array<[pid: number, name: string, port: number]>) =>
 
 function answer(file: string, args: string[]) {
   if (file === 'lsof' && args.includes('-sTCP:LISTEN')) return { stdout: fixture.listening, stderr: '' };
+  if (file === 'netstat') {
+    const ports = [...fixture.listening.matchAll(/^n\*:(\d+)$/gm)].map(match => match[1]);
+    return { stdout: `Current listen queue sizes (qlen/incqlen/maxqlen)\nListen         Local Address\n${ports.map(port => `0/0/128        *.${port}`).join('\n')}`, stderr: '' };
+  }
   const pids = String(args[args.indexOf('-p') + 1]).split(',');
-  if (file === 'lsof') return { stdout: pids.map(pid => `p${pid}\nn/work/app-${pid}`).join('\n'), stderr: '' };
+  if (file === 'lsof') return { stdout: pids.filter(pid => !fixture.unreadableCwd.has(pid)).map(pid => `p${pid}\nn/work/app-${pid}`).join('\n'), stderr: '' };
   return { stdout: pids.map(pid => `${pid} node server-${pid}.js`).join('\n'), stderr: '' };
 }
 
 const lookups = () => fixture.execFile.mock.calls.filter(([file, args]) => file === 'ps' || (file === 'lsof' && !args.includes('-sTCP:LISTEN')));
+const fullScans = () => fixture.execFile.mock.calls.filter(([file, args]) => file === 'lsof' && args.includes('-sTCP:LISTEN')).length;
+const onPlatform = (platform: NodeJS.Platform) => vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
 
 let now = 1_000_000;
 beforeEach(() => {
@@ -28,6 +34,7 @@ beforeEach(() => {
   fixture.execFile.mockReset();
   fixture.execFile.mockImplementation(async (file: string, args: string[]) => answer(file, args));
   vi.spyOn(Date, 'now').mockImplementation(() => now);
+  fixture.unreadableCwd.clear();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -58,6 +65,51 @@ describe('GET /api/panel/ports', () => {
     fixture.listening = listening([[901, 'python3', 59_991], [903, 'node', 59_993]]);
     await GET();
     expect(lookups().map(([file, args]) => [file, args[args.indexOf('-p') + 1]])).toEqual([['lsof', '901,903'], ['ps', '901,903']]);
+  });
+
+  it('on macOS, reuses the last scan while the listening addresses read the same', async () => {
+    onPlatform('darwin');
+    fixture.listening = listening([[901, 'node', 59_991]]);
+    const { GET } = await import('./route');
+    const first = await (await GET()).json();
+    expect(fullScans()).toBe(1);
+
+    // Unchanged listeners: netstat alone, no lsof or ps.
+    for (let poll = 0; poll < 4; poll += 1) {
+      now += 11_000;
+      expect(await (await GET()).json()).toEqual(first);
+    }
+    expect(fullScans()).toBe(1);
+    expect(fixture.execFile.mock.calls.filter(([file]) => file !== 'netstat')).toHaveLength(3);
+
+    // A new listener is scanned at once.
+    now += 11_000;
+    fixture.listening = listening([[901, 'node', 59_991], [903, 'node', 59_993]]);
+    expect((await (await GET()).json()).ports.map((p: { port: number }) => p.port)).toEqual([59_991, 59_993]);
+    expect(fullScans()).toBe(2);
+
+    // An unchanged set is still rescanned after a minute, which refreshes the probes.
+    for (let poll = 0; poll < 6; poll += 1) { now += 11_000; await GET(); }
+    expect(fullScans()).toBe(3);
+  });
+
+  it('looks up a process whose cwd cannot be read again only after five minutes', async () => {
+    onPlatform('linux');
+    fixture.unreadableCwd.add('902');
+    fixture.listening = listening([[901, 'node', 59_991], [902, 'node', 59_992]]);
+    const { GET } = await import('./route');
+    await GET();
+    expect(lookups().map(([file, args]) => [file, args[args.indexOf('-p') + 1]])).toEqual([['lsof', '901,902'], ['ps', '901,902']]);
+
+    fixture.execFile.mockClear();
+    now += 11_000;
+    await GET();
+    expect(lookups()).toHaveLength(0);
+
+    fixture.execFile.mockClear();
+    now += 5 * 60_000;
+    await GET();
+    expect(lookups().map(([file, args]) => [file, args[args.indexOf('-p') + 1]])).toEqual([['lsof', '902'], ['ps', '902']]);
   });
 
   it('shares one scan between requests that miss the cache together', async () => {

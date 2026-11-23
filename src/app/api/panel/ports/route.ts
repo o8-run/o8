@@ -31,12 +31,19 @@ interface PortGroup {
 }
 
 // ── Response cache (ports don't change fast enough to scan every request) ──
-let portsCache: { data: unknown; ts: number } | null = null;
+// `signal` is the listening-address list the full scan began from.
+let portsCache: { data: unknown; ts: number; fullAt: number; signal: string | null } | null = null;
 const PORTS_CACHE_TTL_MS = 10_000; // 10s cache — ports don't change every second
+// Past the TTL, a scan whose listening addresses read the same is reused for up
+// to this long; the full scan also refreshes page/service probes this often.
+const PORTS_FULL_SCAN_MS = 60_000;
 // One scan at a time: requests that miss the cache together share it.
 let scanning: Promise<unknown> | null = null;
 // A listening process keeps its cwd and command line, so each pid is resolved once.
-const processByPid = new Map<number, { process: string; cwd: string; command: string }>();
+// A lookup that came back incomplete (another user's process, a lookup that
+// timed out) is kept too and tried again only after INCOMPLETE_RETRY_MS.
+const processByPid = new Map<number, { process: string; cwd: string; command: string; retryAt?: number }>();
+const INCOMPLETE_RETRY_MS = 5 * 60_000;
 
 const execFileAsync = promisify(execFileReadOnly);
 
@@ -167,11 +174,42 @@ export async function GET() {
   if (portsCache && (Date.now() - portsCache.ts) < PORTS_CACHE_TTL_MS) {
     return NextResponse.json(portsCache.data, { headers: serverTimingHeaders(startedAt) });
   }
-  scanning ??= scanPorts().finally(() => { scanning = null; });
+  scanning ??= refreshPorts().finally(() => { scanning = null; });
   return NextResponse.json(await scanning, { headers: serverTimingHeaders(startedAt) });
 }
 
-async function scanPorts(): Promise<unknown> {
+/**
+ * The machine's listening TCP addresses, sorted: `netstat -anL` lists them for
+ * about 4 ms of CPU, where the full `lsof -i` scan takes about 200 ms. macOS
+ * only; elsewhere null, and every scan is a full one.
+ */
+async function listeningSignal(): Promise<string | null> {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const raw = await readTool('netstat', ['-anL', '-p', 'tcp'], 2000);
+    const addresses = new Set<string>();
+    for (const line of raw.split('\n')) {
+      const [queue, address] = line.trim().split(/\s+/);
+      if (address && /^\d+\/\d+\/\d+$/.test(queue)) addresses.add(address);
+    }
+    return [...addresses].sort().join(' ');
+  } catch {
+    return null;
+  }
+}
+
+async function refreshPorts(): Promise<unknown> {
+  // Read before scanning: a listener that appears during the scan changes the
+  // next read, so it is picked up then.
+  const signal = await listeningSignal();
+  if (signal !== null && portsCache?.signal === signal && Date.now() - portsCache.fullAt < PORTS_FULL_SCAN_MS) {
+    portsCache.ts = Date.now();
+    return portsCache.data;
+  }
+  return scanPorts(signal);
+}
+
+async function scanPorts(signal: string | null): Promise<unknown> {
   try {
     const raw = await readTool('lsof', ['-i', '-P', '-n', '-sTCP:LISTEN', '-F', 'pcn'], 5000);
 
@@ -209,7 +247,11 @@ async function scanPorts(): Promise<unknown> {
     for (const pid of processByPid.keys()) if (!uniquePids.includes(pid)) processByPid.delete(pid);
     // A reused pid shows up under a different process name and is looked up again.
     const processOf = new Map(candidates.map(e => [e.pid, e.process]));
-    const newPids = uniquePids.filter(pid => processByPid.get(pid)?.process !== processOf.get(pid));
+    const newPids = uniquePids.filter((pid) => {
+      const known = processByPid.get(pid);
+      if (!known || known.process !== processOf.get(pid)) return true;
+      return known.retryAt !== undefined && Date.now() >= known.retryAt;
+    });
     if (newPids.length > 0) {
       const pidList = newPids.join(',');
       const cwdByPid = new Map<number, string>();
@@ -235,11 +277,16 @@ async function scanPorts(): Promise<unknown> {
         entry.cwd = cwdByPid.get(entry.pid) ?? '';
         entry.command = cmdByPid.get(entry.pid) ?? '';
       }
-      // Remember only complete answers so a failed lookup is retried on the next scan.
+      // An incomplete answer is kept with a retry time, so one unreadable
+      // process does not cost two child processes on every scan.
       for (const pid of newPids) {
         const cwd = cwdByPid.get(pid);
         const command = cmdByPid.get(pid);
-        if (cwd !== undefined && command !== undefined) processByPid.set(pid, { process: processOf.get(pid) ?? '', cwd, command });
+        const complete = cwd !== undefined && command !== undefined;
+        processByPid.set(pid, {
+          process: processOf.get(pid) ?? '', cwd: cwd ?? '', command: command ?? '',
+          ...(complete ? {} : { retryAt: Date.now() + INCOMPLETE_RETRY_MS }),
+        });
       }
     }
     for (const entry of candidates) {
@@ -323,7 +370,7 @@ async function scanPorts(): Promise<unknown> {
       serviceCount: ports.length - pageCount,
       total: ports.length,
     };
-    portsCache = { data: result, ts: Date.now() };
+    portsCache = { data: result, ts: Date.now(), fullAt: Date.now(), signal };
     return result;
   } catch (err) {
     return {
