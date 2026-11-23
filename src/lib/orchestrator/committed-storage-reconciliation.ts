@@ -6,7 +6,7 @@ import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { isLaneTerminal } from '@/lib/lane/terminal-states';
 import type { LaneStatus } from '@/lib/lane/types';
-import { listDurablePacketsWithId } from '@/lib/orchestrator/mission-registry';
+import { listDurablePacketsWithId, missionsStamp } from '@/lib/orchestrator/mission-registry';
 import { packetTerminalState } from '@/lib/orchestrator/packet-state';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import {
@@ -31,6 +31,21 @@ export interface CommittedStorageReconciliationResult {
   retainedLive: number;
   retainedUnknown: number;
   held: number;
+}
+
+// Each lookup scans every stored mission's JSON, so the sweep reuses an
+// owner's packets until a stored mission changes.
+let packetLookups: { stamp: string; byOwner: Map<string, OrchestratorPacket[]> } | null = null;
+
+function storedPacketsWithId(ownerId: string): OrchestratorPacket[] {
+  const stamp = missionsStamp();
+  if (packetLookups?.stamp !== stamp) packetLookups = { stamp, byOwner: new Map() };
+  let packets = packetLookups.byOwner.get(ownerId);
+  if (!packets) {
+    packets = listDurablePacketsWithId(ownerId);
+    packetLookups.byOwner.set(ownerId, packets);
+  }
+  return packets;
 }
 
 /**
@@ -59,7 +74,7 @@ export async function resolveCommittedPacketStorageOwner(
 
   const packets = dependencies.packets
     ? dependencies.packets.filter((packet) => packet.id === reservation.ownerId)
-    : listDurablePacketsWithId(reservation.ownerId);
+    : storedPacketsWithId(reservation.ownerId);
   if (packets.length > 1) {
     return {
       liveness: 'unknown',
