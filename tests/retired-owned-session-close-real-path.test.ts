@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -64,7 +65,7 @@ const [{ createOwnedSessionStore }, closeRoute, laneRoute] = await Promise.all([
   import('@/app/api/orchestrator/discard-packet/route'),
   import('@/app/api/lanes/route'),
 ]);
-const { closeDb } = await import('@/lib/db');
+const { closeDb, getSqlite } = await import('@/lib/db');
 const {
   attachSession,
   createLane,
@@ -268,6 +269,38 @@ async function closePacket(packetId: string, acknowledgeMissingWorktree = false)
     acknowledgeMissingWorktree,
     clientMutationId: `close-${packetId}`,
   }));
+}
+
+function insertWorkerToken(packetId: string, run: { marker: string | null; pid: number | null; group: number | null }): void {
+  getSqlite().prepare(`INSERT INTO worker_tokens (id, token_hash, scope, created_at, packet_id,
+    lease_process_marker, lease_process_pid, lease_process_group_id) VALUES (?, ?, 'local-packet', ?, ?, ?, ?, ?)`)
+    .run(`wtok_local_${randomUUID()}`, createHash('sha256').update(randomUUID()).digest('hex'), new Date().toISOString(), packetId, run.marker, run.pid, run.group);
+}
+
+/**
+ * The shape an older reset left: the worker exited without a confirmed kill
+ * receipt, its session was archived, its worktree is gone, and the lane row
+ * lost its packet, session and worktree fields while the packet still binds it.
+ */
+async function resetLeftover(label: string, packetWorktreePath: (fixture: Awaited<ReturnType<typeof createFixture>>) => string | null) {
+  const fixture = await createFixture(label, 'exit-clean');
+  let archived = await store.archiveSession(fixture.surfaceId);
+  for (let attempt = 0; !archived.archived && attempt < 100; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    archived = await store.archiveSession(fixture.surfaceId);
+  }
+  expect(archived.archived, archived.note).toBe(true);
+  git(fixture.repoPath, ['worktree', 'remove', '--force', fixture.worktreePath]);
+  setLaneStatus(fixture.lane.id, 'archived', 'system', 'closed_unmerged');
+  updateLane(fixture.lane.id, { sessionKey: null, worktreePath: null, packetId: '' }, 'system', { phase: 'reset' });
+  const state = readOrchestratorControlPlaneState();
+  const packet = state.packets[0]!;
+  Object.assign(packet, {
+    status: 'blocked', queueState: 'held', blockedReason: 'session_archive_unconfirmed', lastEventLabel: 'agent_completed',
+  });
+  packet.lane = { ...packet.lane!, worktreePath: packetWorktreePath(fixture) };
+  writeOrchestratorControlPlaneState(state);
+  return { ...fixture, archivePath: archived.archivePath! };
 }
 
 afterAll(() => {
@@ -482,5 +515,70 @@ describe('discard packet after an owned session already retired', () => {
     expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'archived', queueState: 'held' });
     // The archived session stays where it was.
     expect(existsSync(archived.archivePath!)).toBe(true);
+  }, 30_000);
+  it('closes a reset packet whose lane lost its packet and session fields, checking runs that never recorded a process', async () => {
+    const fixture = await resetLeftover('reset-leftover', (current) => current.worktreePath);
+    insertWorkerToken(fixture.packetId, { marker: null, pid: null, group: null });
+    insertWorkerToken(fixture.packetId, { marker: `run-${randomUUID()}`, pid: null, group: null });
+
+    const held = await closePacket(fixture.packetId);
+    expect(held.status).toBe(409);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'blocked', queueState: 'held' });
+
+    const response = await closeRoute.POST(operatorRequest('/api/orchestrator/discard-packet', {
+      packetId: fixture.packetId, disposition: 'superseded', acknowledgeMissingWorktree: true,
+      clientMutationId: `close-ack-${fixture.packetId}`,
+    }));
+    const payload = await response.json();
+    expect(response.status, JSON.stringify(payload)).toBe(200);
+    expect(payload).toMatchObject({
+      ok: true,
+      result: { closed: true, note: expect.stringContaining('2 earlier worker runs never recorded a process id') },
+    });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'archived' });
+    expect(existsSync(fixture.archivePath)).toBe(true);
+  }, 30_000);
+
+  it('still holds a reset packet whose token row records a pid without a run marker', async () => {
+    const fixture = await resetLeftover('reset-pid-without-marker', (current) => current.worktreePath);
+    insertWorkerToken(fixture.packetId, { marker: null, pid: 999_999, group: 999_999 });
+
+    const response = await closeRoute.POST(operatorRequest('/api/orchestrator/discard-packet', {
+      packetId: fixture.packetId, disposition: 'superseded', acknowledgeMissingWorktree: true,
+      clientMutationId: `close-ack-${fixture.packetId}`,
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ ok: false, error: { code: 'session_archive_unconfirmed' } });
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'blocked', queueState: 'held' });
+  }, 30_000);
+
+  it('closes a reset packet that never recorded a worktree path only when the missing worktree is acknowledged', async () => {
+    const fixture = await resetLeftover('reset-no-worktree', () => null);
+
+    const held = await closePacket(fixture.packetId);
+    expect(held.status).toBe(409);
+    await expect(held.json()).resolves.toMatchObject({ ok: false, error: { code: 'session_archive_unconfirmed' } });
+
+    const response = await closeRoute.POST(operatorRequest('/api/orchestrator/discard-packet', {
+      packetId: fixture.packetId, disposition: 'superseded', acknowledgeMissingWorktree: true,
+      clientMutationId: `close-ack-${fixture.packetId}`,
+    }));
+    const payload = await response.json();
+    expect(response.status, JSON.stringify(payload)).toBe(200);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'archived' });
+  }, 30_000);
+
+  it('closes a reset packet whose recorded worktree folder and its parent folders are gone', async () => {
+    const fixture = await resetLeftover('reset-parent-gone',
+      (current) => join(current.worktreePath, '..', 'removed-base', 'nested', 'packet-worktree'));
+
+    const response = await closeRoute.POST(operatorRequest('/api/orchestrator/discard-packet', {
+      packetId: fixture.packetId, disposition: 'superseded', acknowledgeMissingWorktree: true,
+      clientMutationId: `close-ack-${fixture.packetId}`,
+    }));
+    const payload = await response.json();
+    expect(response.status, JSON.stringify(payload)).toBe(200);
+    expect(payload).toMatchObject({ ok: true, result: { closed: true, worktreeCleanup: 'missing' } });
   }, 30_000);
 });

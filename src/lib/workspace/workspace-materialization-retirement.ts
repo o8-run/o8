@@ -116,7 +116,14 @@ function certifiesMergeEvidence(
 
 function canonicalWorkspaceNamespace(workspacePath: string): string {
   const resolved = path.resolve(workspacePath);
-  return path.join(realpathSync.native(path.dirname(resolved)), path.basename(resolved));
+  try {
+    return path.join(realpathSync.native(path.dirname(resolved)), path.basename(resolved));
+  } catch (error) {
+    // A workspace whose parent folder is gone has no other real path; its
+    // snapshot can only have been recorded under the resolved path.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return resolved;
+    throw error;
+  }
 }
 
 /** The one durable snapshot for a workspace, matched by its resolved or its real path. */
