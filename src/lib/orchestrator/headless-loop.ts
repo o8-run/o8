@@ -10,6 +10,7 @@ import {
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
+import { getBootRecoveryLaunchBlocker } from '@/lib/orchestrator/scheduling';
 import { applyHeadlessTickDeadline } from '@/lib/orchestrator/headless-tick-deadline';
 import { listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionStateForPersistence } from '@/lib/orchestrator/persisted-mission';
@@ -67,7 +68,12 @@ function hasWorktreeMaintenanceDemand(state: OrchestratorMissionState) {
   return state.packets.some((packet) => !packet.archivedAt && packet.releaseState !== 'released' && (
     packet.status === 'launching'
     || packet.status === 'running'
-    || (!packet.operatorStopped && packet.queueState === 'queued' && packet.storageAdmission?.state === 'held')
+    || (!packet.operatorStopped && packet.queueState === 'queued' && packet.storageAdmission?.state === 'held'
+      // Freeing space only helps a packet that could launch. One the recovery
+      // guard skips (no pinned runtime) kept a full prune of every lane
+      // repository running every ten minutes at rest; pinning it changes the
+      // state and brings the cleanup back.
+      && getBootRecoveryLaunchBlocker({ packet, pinnedRuntime: packet.dispatchRuntimePin ?? null }) === null)
   ));
 }
 
