@@ -1,6 +1,6 @@
 import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile, spawn } from '@/lib/providers/child-process';
-import { existsSync } from 'node:fs';
+import { existsWhenReachable } from '@/lib/fs/protected-folders';
 import { basename, join } from 'node:path';
 import { fileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { promisify } from 'node:util';
@@ -494,7 +494,7 @@ function buildCandidates(): Candidate[] {
       const boundWorktreePath = lane?.worktreePath?.trim()
         || packet.lane?.worktreePath?.trim()
         || '';
-      const repoPath = (boundWorktreePath && existsSync(boundWorktreePath) ? boundWorktreePath : '')
+      const repoPath = (boundWorktreePath && existsWhenReachable(boundWorktreePath) ? boundWorktreePath : '')
         || lane?.repoPath
         || packet.lane?.repoPath?.trim()
         || packet.workspaceTargetPath?.trim()
@@ -528,7 +528,7 @@ function buildCandidates(): Candidate[] {
       && (lane.branch !== lane.baseBranch || Boolean(lane.packetId))
     ))
     .map((lane) => {
-      const worktree = lane.worktreePath && existsSync(lane.worktreePath) ? lane.worktreePath : null;
+      const worktree = lane.worktreePath && existsWhenReachable(lane.worktreePath) ? lane.worktreePath : null;
       const repoPath = worktree || lane.repoPath || '';
       return {
         packet: null,
@@ -539,7 +539,7 @@ function buildCandidates(): Candidate[] {
         laneId: lane.id,
       };
     })
-    .filter((candidate) => Boolean(candidate.repoPath && existsSync(candidate.repoPath)));
+    .filter((candidate) => Boolean(candidate.repoPath && existsWhenReachable(candidate.repoPath)));
 
   return [...packetCandidates, ...laneOnlyCandidates];
 }

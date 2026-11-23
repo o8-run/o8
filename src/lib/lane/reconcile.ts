@@ -1,6 +1,6 @@
 import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from '@/lib/providers/child-process';
-import { existsSync } from 'node:fs';
+import { existsWhenReachable, missingWhenReachable } from '@/lib/fs/protected-folders';
 import { join } from 'node:path';
 import { fileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { promisify } from 'node:util';
@@ -266,7 +266,7 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   const worktreeGone = reconcilableLanes.filter((lane) => (
     typeof lane.worktreePath === 'string'
     && lane.worktreePath.length > 0
-    && !existsSync(lane.worktreePath)
+    && missingWhenReachable(lane.worktreePath)
   ));
 
   // Branch-gone candidates (#558) — worktree still on disk but branch removed
@@ -277,7 +277,7 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   const branchSetsByRepo = new Map<string, Set<string> | null>();
   const branchGone: ReconciliationLane[] = [];
   for (const lane of reconcilableLanes) {
-    if (lane.worktreePath && !existsSync(lane.worktreePath)) continue; // already caught by worktreeGone
+    if (lane.worktreePath && !existsWhenReachable(lane.worktreePath)) continue; // gone (caught above) or behind a pending prompt
     if (!lane.branch) continue;
     const fingerprint = branchAnswerFingerprint(lane);
     if (fingerprint !== null && unchangedBranchAnswers.get(lane.id) === fingerprint) continue;

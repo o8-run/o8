@@ -1,5 +1,5 @@
 // Inventory aggregation. See docs/internals/runtime-adapter-contract.md
-import { existsSync } from 'node:fs';
+import { missingWhenReachable } from '@/lib/fs/protected-folders';
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentRuntime, RuntimeSession, RuntimeSessionStatus } from '@/lib/runtimes/types';
@@ -412,8 +412,10 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
       if (!cwd) return true;
       const expanded = cwd.startsWith('~') ? cwd.replace(/^~/, os.homedir()) : cwd;
       if (!path.isAbsolute(expanded)) return true;
+      // A folder behind a pending privacy prompt keeps its session: checking it
+      // now would stop the event loop until the prompt is answered.
       try {
-        return existsSync(expanded);
+        return !missingWhenReachable(expanded);
       } catch {
         return false;
       }
@@ -427,7 +429,7 @@ async function buildCliRuntimeSnapshot(options: { fresh: boolean }): Promise<Fle
     const key = `${catalogSession.runtimeId}:${catalogSession.sessionKey}`;
     if (!runtime || discoveredKeys.has(key)) continue;
     const cwd = catalogSession.cwd.trim();
-    if (path.isAbsolute(cwd) && !existsSync(cwd)) continue;
+    if (path.isAbsolute(cwd) && missingWhenReachable(cwd)) continue;
     discoveredAll.push({
       runtime,
       session: {

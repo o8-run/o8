@@ -1,4 +1,5 @@
 import { execFile } from '@/lib/providers/child-process';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -182,6 +183,12 @@ export async function getLiveReviewChangeSet(
   // a poll would spawn four failing git processes per pass. The packaged
   // server's own folder is such a folder. The answer is the same empty set.
   // A registered repository that was deleted is not a repository either.
+  // Behind a pending privacy prompt, keep the last answer: reading the folder
+  // now would stop the event loop until the prompt is answered.
+  if (!isPathReachable(cacheKey)) {
+    return liveReviewChangeCache.get(cacheKey)?.changeSet
+      ?? { repoPath, workspacePath, sessionKey, changedFiles: [], additions: 0, deletions: 0, files: 0 };
+  }
   if (!existsSync(cacheKey) || !await mayHaveGitRepositoryContext(cacheKey)) {
     liveReviewChangeCache.delete(cacheKey);
     return { repoPath, workspacePath, sessionKey, changedFiles: [], additions: 0, deletions: 0, files: 0 };

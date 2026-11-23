@@ -7,6 +7,7 @@
  */
 import 'server-only';
 import { getSqlite } from '@/lib/db';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import type { RepoRegistryEntry } from './types';
 import { normalizeProjectIcon, ProjectIconInputError, type ProjectIconProjection, type ProjectIconSettings } from './project-icon-types';
 import { projectIconResolver, projectIconResource, validateProjectIconPath } from './project-icon-resolver';
@@ -57,6 +58,8 @@ export async function projectIconProjection(repo: { id: string; localPath: strin
   }
   // Resolution failures are not negative cache entries. Keep the sidebar usable
   // and retry on the next listing, with the existing monogram as the fallback.
+  // A folder behind a pending privacy prompt is not read until it is answered.
+  if (!isPathReachable(repo.localPath)) return null;
   const resource = await projectIconResource(repo.localPath, settings.faviconPath).catch(() => null);
   return resource ? { kind: 'image', ...resource } : null;
 }

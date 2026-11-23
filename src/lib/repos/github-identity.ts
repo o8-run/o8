@@ -1,4 +1,5 @@
 import { execFileSync } from '@/lib/providers/child-process';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 
 export interface RepoGithubIdentity {
   githubOwner: string | null;
@@ -64,7 +65,10 @@ export function resolveRepoGithubIdentity(
   const cached = identityCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.identity;
 
-  const remoteUrl = pathKey ? readGitRemoteUrl(pathKey) : null;
+  // A synchronous Git child on a folder behind a pending privacy prompt would
+  // hold the event loop until its timeout; use the saved remote meanwhile.
+  const reachable = !pathKey || isPathReachable(pathKey);
+  const remoteUrl = pathKey && reachable ? readGitRemoteUrl(pathKey) : null;
   const remoteIdentity = parseGithubRemoteIdentity(remoteUrl);
   const fallbackIdentity = parseGithubRemoteIdentity(fallbackKey);
   const nextIdentity = remoteIdentity.githubOwner && remoteIdentity.githubRepo
@@ -72,6 +76,6 @@ export function resolveRepoGithubIdentity(
     : fallbackIdentity.githubOwner && fallbackIdentity.githubRepo
       ? fallbackIdentity
       : EMPTY_IDENTITY;
-  identityCache.set(cacheKey, { identity: nextIdentity, expiresAt: Date.now() + CACHE_TTL_MS });
+  if (reachable) identityCache.set(cacheKey, { identity: nextIdentity, expiresAt: Date.now() + CACHE_TTL_MS });
   return nextIdentity;
 }

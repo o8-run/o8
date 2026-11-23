@@ -43,12 +43,16 @@ import type {
   RepoRegistryPostBody,
 } from '@/lib/repos/types';
 import { withRepoInventoryChange } from '@/lib/repos/inventory-change-publish';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { projectIconProjection, updateProjectIconSettings } from '@/lib/repos/project-icon-settings';
 import { ProjectIconInputError, type ProjectIconProjection } from '@/lib/repos/project-icon-types';
 
 const execFileAsync = promisify(execFile);
 
 async function pathExists(localPath: string) {
+  // Behind a pending privacy prompt the check would hold a pool thread until it
+  // is answered; list the repository as present and check on the next listing.
+  if (!isPathReachable(localPath)) return true;
   try {
     await access(localPath);
     return true;

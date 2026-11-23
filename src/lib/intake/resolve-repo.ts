@@ -9,6 +9,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { parseOriginUrl } from '@/lib/repos/remote';
 
 interface RegisteredRepo { path: string; slug: string | null }
@@ -58,7 +59,8 @@ function registeredRepos(): RegisteredRepo[] {
     const repoPath = repo.localPath ?? repo.path;
     if (!repoPath) continue;
     const path = resolve(repoPath.replace(/^~(?=\/|$)/, homedir()));
-    if (!existsSync(path)) continue;
+    // Behind a pending privacy prompt this check would stop the event loop.
+    if (!isPathReachable(path) || !existsSync(path)) continue;
     const origin = readOrigin(path);
     out.push({ path, slug: slugOf(origin === undefined ? repo.remoteUrl : origin) });
   }

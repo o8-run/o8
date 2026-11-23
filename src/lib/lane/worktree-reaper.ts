@@ -22,7 +22,7 @@ import { resolveGitBinary } from '@/lib/git/binary';
  */
 
 import { execFile } from '@/lib/providers/child-process';
-import { existsSync } from 'node:fs';
+import { existsWhenReachable, missingWhenReachable } from '@/lib/fs/protected-folders';
 import { promisify } from 'node:util';
 import { appendEvent, archiveLane, getLane, updateLane } from '@/lib/lane/registry';
 import { withAutomaticWorkspaceReconciliation, workspaceAllowsAutomaticReconciliation } from '@/lib/workspace/automatic-reconciliation-guard';
@@ -390,7 +390,7 @@ async function reconcileEligibleWorktreeLane(lane: Lane): Promise<void> {
     if (
       lane.status === 'reviewing'
       && lane.worktreePath
-      && !existsSync(lane.worktreePath)
+      && missingWhenReachable(lane.worktreePath)
       && ageMs > STALE_REVIEW_THRESHOLD_MS
     ) {
       console.log(`[worktree-reaper] ${lane.id} worktree missing on disk (${Math.round(ageMs / 60_000)}m stale) — archiving`);
@@ -428,7 +428,7 @@ async function reconcileEligibleWorktreeLane(lane: Lane): Promise<void> {
     // approvals so in-flight review work never disappears.
     const isEligibleForIdleReap = (lane.status === 'idle' || lane.status === 'paused')
       && ageMs > ABANDONED_IDLE_THRESHOLD_MS;
-    if (isEligibleForIdleReap && lane.worktreePath && existsSync(lane.worktreePath) && lane.baseBranch) {
+    if (isEligibleForIdleReap && lane.worktreePath && existsWhenReachable(lane.worktreePath) && lane.baseBranch) {
       const approvalPending = await laneHasPendingApproval(lane.id);
       if (approvalPending) continue;
 

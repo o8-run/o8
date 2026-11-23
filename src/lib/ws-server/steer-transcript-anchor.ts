@@ -1,9 +1,11 @@
 import { realpathSync } from 'node:fs';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { resolve } from 'node:path';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { SteerTranscriptAnchor } from '@/lib/transcripts/steer-anchor';
 
 function repoKey(repoPath: string) {
+  if (!isPathReachable(repoPath)) return resolve(repoPath);
   try { return realpathSync(repoPath); } catch { return resolve(repoPath); }
 }
 

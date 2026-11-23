@@ -1,6 +1,7 @@
 import { apiFrontDoorEnabled } from './lib/ws-server/api-front-door-config';
 import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
 import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { mobileModelError } from './lib/mobile/model-catalog';
 import { startProductSession, endProductSession } from '@/lib/analytics/session';
@@ -8171,6 +8172,8 @@ function ensureWorktreeWatchers(extraRepoPaths: string[] = []) {
   const repoPaths = new Set([REPO_ROOT, ...extraRepoPaths.map((repoPath) => resolve(repoPath))]);
   const bases: string[] = [];
   for (const repoPath of repoPaths) {
+    // A repository behind a pending privacy prompt is watched once it is answered.
+    if (!isPathReachable(repoPath)) continue;
     bases.push(...resolveWorktreeRootLayout(repoPath).bases);
     bases.push(resolve(repoPath, '.claude', 'worktrees'));
   }

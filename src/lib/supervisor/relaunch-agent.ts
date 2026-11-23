@@ -1,4 +1,5 @@
 import { currentRecoveryRun, recoveryInterrupted } from '@/lib/runtimes/shared/owned-session/automatic-recovery';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { packetAutomaticRecoveryHoldReason } from '@/lib/lane/packet-stop-hold';
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
@@ -49,6 +50,10 @@ export async function relaunchSupervisedAgent(
   if ((runtime !== 'codex' && runtime !== 'claude-code')
     || !retryOfSurfaceId.startsWith(`${runtime}-owned:`)) {
     return hold('the original runtime and session identity disagree');
+  }
+  // A folder behind a pending privacy prompt would stop the event loop here.
+  if ([lane.worktreePath, lane.repoPath, repoPath].some((path) => path && !isPathReachable(path))) {
+    return hold('the worktree folder is waiting for macOS file access');
   }
   if (!lane.worktreePath || !existsSync(lane.worktreePath)
     || realpathSync(lane.worktreePath) === realpathSync(lane.repoPath)

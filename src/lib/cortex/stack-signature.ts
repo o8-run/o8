@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { listRepos } from '@/lib/repos/registry';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 
@@ -267,7 +268,16 @@ async function computeSignatureStore(): Promise<SignatureStore | null> {
 
   const now = new Date().toISOString();
   const signatures: StoredEntry[] = [];
+  let previous: StoredEntry[] | null = null;
   for (const entry of entries) {
+    // Behind a pending privacy prompt the manifest reads would stop the event
+    // loop; keep the last signature until the prompt is answered.
+    if (!isPathReachable(entry.localPath)) {
+      previous ??= readSignatureStore().signatures;
+      const kept = previous.find((stored) => stored.repoId === entry.id && stored.repoPath === entry.localPath);
+      if (kept) signatures.push(kept);
+      continue;
+    }
     try {
       const sig = computeSignature(entry.localPath);
       if (!sig) continue;
