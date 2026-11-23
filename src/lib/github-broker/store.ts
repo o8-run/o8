@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { getSqlite } from '@/lib/db';
-import { resolveRepoPath } from '@/lib/intake/resolve-repo';
+import { createRepoPathResolver } from '@/lib/intake/resolve-repo';
 import type {
   OutsiderAttentionThread,
   OutsiderAttentionThreadKind,
@@ -662,6 +662,7 @@ export function listGitHubAttentionThreads(): OutsiderAttentionThread[] {
     UNION
     SELECT repo_full_name as repo FROM github_pull_requests
   `).all() as Array<{ repo: string }>;
+  const resolveRepoPath = createRepoPathResolver();
   const connectedRepos = repoRows
     .map((row) => row.repo)
     .filter((repo) => Boolean(resolveRepoPath(repo)));

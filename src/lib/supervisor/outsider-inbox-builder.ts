@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { listGitHubAttentionThreads } from '@/lib/github-broker/store';
-import { resolveRepoPath } from '@/lib/intake/resolve-repo';
+import { createRepoPathResolver } from '@/lib/intake/resolve-repo';
 import {
   findWaitingOutsiders,
   nextOutsiderWaitChangeAt,
@@ -183,6 +183,7 @@ export function reconcileOutsideHumanWaitingInbox(input: ReconcileOutsideInboxIn
 
   const waitingKeys = new Set<string>();
   const localRepoPaths = new Map<string, string | null>();
+  const resolveRepoPath = createRepoPathResolver();
   let created = 0;
   for (const candidate of waiting) {
     if (!localRepoPaths.has(candidate.repo)) {
