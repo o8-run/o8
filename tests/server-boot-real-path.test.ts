@@ -16,6 +16,7 @@ const root = mkdtempSync(join(tmpdir(), 'o8-server-boot-'));
 const state = join(root, 'state');
 const journal = join(root, 'boot.jsonl');
 const release = join(root, 'release');
+const maintenanceRelease = join(root, 'maintenance-release');
 // macOS socket paths have a short limit; avoid its long per-user temp path.
 const tmuxRoot = mkdtempSync(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'o8-boot-tmux-'));
 const tmuxServerName = `o8-boot-${randomUUID()}`;
@@ -32,15 +33,18 @@ function tmux(server: string, ...args: string[]): string {
   });
 }
 
-const steps = [
+// Requests wait only for these; the rest is maintenance that runs afterwards.
+const readySteps = [
   ['await terminalHostReady;', 'terminal-host'],
   ['expireStaleApprovals();', 'approvals'],
+  ['const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });', 'sessions'],
+] as const;
+const maintenanceSteps = [
   ['await pruneOrphanedCodexWorktreeBranches(REPO_ROOT);', 'branches'],
   ['await runWorktreeMaintenanceTick(REPO_ROOT);', 'worktrees'],
   ["const resolved = sweepMergedPacketVerificationIncidents({ event: 'startup_sweep' });", 'incidents'],
   ['await checkLaunchAgentHealth();', 'launch-health'],
   ['const result = await sweepPacketsMergedByAncestry();', 'merged-packets'],
-  ['const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });', 'sessions'],
   ['logStorageAdmissionReconciliation(await reconciliation.initial);', 'storage'],
   ['const result = await reconcileResourceLeasesAtStartup();', 'leases'],
   ['const receipt = await reconcileDependencyImagesAtStartup();', 'dependency-images'],
@@ -50,6 +54,7 @@ const steps = [
   ['  startBrowserDiscoveryRealtimeLoop();', 'browser-discovery'],
   ['  startAttachedBrowserRefreshLoop();', 'attached-browser'],
 ] as const;
+const steps = [...readySteps, ...maintenanceSteps];
 let api: Server | undefined;
 let child: ChildProcess | undefined;
 let socket: WebSocket | undefined;
@@ -85,7 +90,7 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-it('serves compiled WS health and ping before Next, and fences first use until every recovery phase finishes', async () => {
+it('serves compiled WS health and ping before Next, answers first use while recovery maintenance is still running, then runs every phase in order', async () => {
   mkdirSync(state);
   if (tmuxAvailable) tmux(tmuxServerName, 'start-server', ';', 'set-option', '-s', 'exit-empty', 'off');
   if (tmuxAvailable) for (const name of unrelatedSessions) {
@@ -114,6 +119,8 @@ it('serves compiled WS health and ping before Next, and fences first use until e
     if (!contents.includes(call)) throw new Error(`Missing boot observation: ${step}`);
     contents = contents.replace(call, `${call}\n__bootDone(${JSON.stringify(step)});`);
   }
+  // Hold the first maintenance step until the test releases it.
+  contents = contents.replace('    await pruneOrphanedCodexWorktreeBranches(REPO_ROOT);', `    while (!existsSync(${JSON.stringify(maintenanceRelease)})) await new Promise((done) => setTimeout(done, 25));\n    await pruneOrphanedCodexWorktreeBranches(REPO_ROOT);`);
   contents = contents.replace('const db = getDb();', `if (existsSync(${JSON.stringify(join(root, 'fail'))})) throw new Error('fixture recovery failure');\nconst db = getDb();`);
   contents = contents.replace('  switch (msg.type) {', `  if (msg.type === 'realtime-subscribe') __bootDone('first-ws-use');\n  switch (msg.type) {`);
   contents = `import { appendFileSync as __append } from 'node:fs';
@@ -181,8 +188,14 @@ ${contents}`;
   expect(existsSync(journal)).toBe(false);
   appendFileSync(release, 'ready');
   await expect(firstUse).resolves.toMatchObject({ sessions: [] });
-  expect(readFileSync(journal, 'utf8').trim().split('\n').map(line => JSON.parse(line)))
-    .toEqual(steps.map(([, step]) => step));
+  const journaled = () => readFileSync(journal, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  expect(journaled().filter(step => step !== 'first-ws-use')).toEqual(readySteps.map(([, step]) => step));
+  appendFileSync(maintenanceRelease, 'go');
+  const all = steps.map(([, step]) => step);
+  for (let attempt = 0; attempt < 200 && journaled().filter(step => step !== 'first-ws-use').length < all.length; attempt++) {
+    await new Promise(done => setTimeout(done, 25));
+  }
+  expect(journaled().filter(step => step !== 'first-ws-use')).toEqual(all);
 
   let exited = once(child, 'exit');
   child.kill('SIGTERM');

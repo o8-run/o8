@@ -373,8 +373,12 @@ async function runReconcileOrphanedWorktrees(): Promise<number> {
   return reconciled;
 }
 
-export async function reconcileStuckLanes(): Promise<void> {
-  const candidateLanes = listLanes().filter(isStuckLane);
+/** `createdBefore` (epoch ms) limits the pass to lanes from before this
+ * process started: a lane launched since is still starting, not stuck. */
+export async function reconcileStuckLanes(opts: { createdBefore?: number } = {}): Promise<void> {
+  const { createdBefore } = opts;
+  const candidateLanes = listLanes().filter((lane) => isStuckLane(lane)
+    && (createdBefore === undefined || !(Date.parse(lane.createdAt) >= createdBefore)));
   let recoveredCount = 0;
   // #4 Stage 2 — a stuck (running/launching) lane whose session is still in the
   // live set is RE-BOUND (left intact). When crash-survivable workers are on, a
