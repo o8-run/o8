@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 
@@ -14,6 +14,16 @@ const SURFACE_STATE_FILE = path.join(STATE_DIR, 'ide-surface-state.json');
 function normalizeRepoPath(repoPath?: string | null) {
   const trimmed = repoPath?.trim();
   return trimmed ? path.normalize(trimmed) : null;
+}
+
+/** Changes whenever the surface state file is written, replaced or removed. */
+export function ideSurfaceStateStamp(): string {
+  try {
+    const info = statSync(SURFACE_STATE_FILE, { bigint: true, throwIfNoEntry: false });
+    return info ? `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}` : '-';
+  } catch {
+    return '-';
+  }
 }
 
 export function readIdeSurfaceState(): IdeSurfaceState | null {

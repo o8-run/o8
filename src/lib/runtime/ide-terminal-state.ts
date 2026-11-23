@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { listIdeSurfaceRepoPaths } from '@/lib/runtime/ide-surface-state';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -60,29 +60,59 @@ function collectRepoPaths(tabs: PersistedTab[]) {
   return repoPaths;
 }
 
-export function readIdeTerminalStateFiles(): IdeTerminalStateFile[] {
-  if (!existsSync(TERMINAL_STATE_DIR)) return [];
+// Parsed files keyed by path, kept while the file's identity, size and times
+// match: every inbox build and chat listing reads these, and they rarely change.
+const parsedStateFiles = new Map<string, { stamp: string; file: IdeTerminalStateFile | null }>();
 
-  return readdirSync(TERMINAL_STATE_DIR)
-    .filter((file) => file.endsWith('.json'))
-    .reduce<IdeTerminalStateFile[]>((files, file) => {
-      const filePath = path.join(TERMINAL_STATE_DIR, file);
-      try {
-        const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as PersistedTabState;
-        files.push({
-          scope: file.replace(/\.json$/, ''),
-          filePath,
-          savedAt: parsed.savedAt,
-          savedAtMs: toMillis(parsed.savedAt),
-          activeTabId: parsed.activeTabId,
-          tabs: Array.isArray(parsed.tabs) ? parsed.tabs : [],
-        });
-      } catch {
-        // Ignore malformed persisted state files and continue scanning.
-      }
-      return files;
-    }, [])
-    .sort((left, right) => right.savedAtMs - left.savedAtMs);
+export function readIdeTerminalStateFiles(): IdeTerminalStateFile[] {
+  let names: string[];
+  try {
+    names = readdirSync(TERMINAL_STATE_DIR);
+  } catch {
+    parsedStateFiles.clear();
+    return [];
+  }
+
+  const files: IdeTerminalStateFile[] = [];
+  const present = new Set<string>();
+  for (const file of names) {
+    if (!file.endsWith('.json')) continue;
+    const filePath = path.join(TERMINAL_STATE_DIR, file);
+    present.add(filePath);
+    let stamp: string;
+    try {
+      const info = statSync(filePath, { bigint: true });
+      stamp = `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
+    } catch {
+      continue;
+    }
+    let entry = parsedStateFiles.get(filePath);
+    if (entry?.stamp !== stamp) {
+      entry = { stamp, file: parseStateFile(file, filePath) };
+      parsedStateFiles.set(filePath, entry);
+    }
+    if (entry.file) files.push(entry.file);
+  }
+  for (const filePath of parsedStateFiles.keys()) if (!present.has(filePath)) parsedStateFiles.delete(filePath);
+  return files.sort((left, right) => right.savedAtMs - left.savedAtMs);
+}
+
+function parseStateFile(file: string, filePath: string): IdeTerminalStateFile | null {
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as PersistedTabState;
+    // Frozen: callers share the cached parse.
+    return Object.freeze({
+      scope: file.replace(/\.json$/, ''),
+      filePath,
+      savedAt: parsed.savedAt,
+      savedAtMs: toMillis(parsed.savedAt),
+      activeTabId: parsed.activeTabId,
+      tabs: Array.isArray(parsed.tabs) ? parsed.tabs : [],
+    });
+  } catch {
+    // Ignore malformed persisted state files and continue scanning.
+    return null;
+  }
 }
 
 export function listCurrentIdeRepoPaths() {

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { getCanonicalChatHistoryPath, getChatHistoryFileVersion, listPersistedLlmChats, readPersistedLlmChat } from '@/lib/llm/chat-history-store';
 import { summarizeTranscript } from '@/lib/llm/transcript-preview';
 import { listCurrentIdeRepoPaths, readIdeTerminalStateFiles } from '@/lib/runtime/ide-terminal-state';
+import { ideSurfaceStateStamp } from '@/lib/runtime/ide-surface-state';
 
 export interface IdeLlmChatDescriptor {
   tabId: string;
@@ -63,6 +64,25 @@ function normalizeLabel(label?: string, repoName?: string, repoPath?: string) {
   if (trimmed && trimmed.toLowerCase() !== 'chat') return trimmed;
   const repoLabel = repoName?.trim() || (repoPath?.trim() ? path.basename(repoPath.trim()) : null);
   return repoLabel ? `${repoLabel} · Chat` : 'Chat';
+}
+
+const parsedFileIds = new WeakMap<object, number>();
+let nextParsedFileId = 0;
+
+/** Changes when anything listIdeLlmChatSessions reads changes: the terminal
+ * state files (a parse is kept while its file is unchanged, so its identity is
+ * its version), the surface state, and each listed chat's history file. */
+export function ideLlmChatSessionsVersion(): string {
+  const parts = [ideSurfaceStateStamp()];
+  for (const file of readIdeTerminalStateFiles()) {
+    let id = parsedFileIds.get(file);
+    if (id === undefined) parsedFileIds.set(file, id = ++nextParsedFileId);
+    parts.push(`#${id}`);
+    for (const tab of file.tabs ?? []) {
+      if (tab.kind === 'llm-chat' && tab.id?.trim()) parts.push(getChatHistoryFileVersion(getCanonicalChatHistoryPath(tab.id)) ?? '-');
+    }
+  }
+  return parts.join(',');
 }
 
 export function listIdeLlmChatSessions(): IdeLlmChatDescriptor[] {
