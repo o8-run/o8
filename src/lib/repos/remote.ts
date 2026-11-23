@@ -9,6 +9,30 @@ interface Origin { config: string; stamp: string; remote: string | null; checked
 const origins = new Map<string, Origin>();
 const pending = new Map<string, Promise<string | null | undefined>>();
 
+/** Origin URL from a repository config file, without Git. `undefined` means the
+ * file uses a form only Git's full parser resolves (includes, URL rewrites,
+ * quoting), so the caller keeps its saved value. */
+export function parseOriginUrl(config: string): string | null | undefined {
+  // Git resolves includes, URL rewrites and per-worktree overrides on the write
+  // path. Never mistake an unsupported configuration for a removed origin.
+  if (/^\s*\[(?:include|includeIf|url|extensions)(?:\s|\])/im.test(config)) return undefined;
+  let origin = false;
+  for (const line of config.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) {
+      origin = line.match(/^\s*\[remote\s+"([^"]+)"\]\s*(?:[#;].*)?$/i)?.[1] === 'origin';
+      continue;
+    }
+    if (!origin) continue;
+    const raw = line.match(/^\s*url\s*=\s*(.*?)\s*$/i)?.[1];
+    if (raw === undefined) continue;
+    // Quoting, escaping and comments need Git's full config parser. Preserve
+    // the saved value until write maintenance can resolve those forms.
+    if (/["\\#;]/.test(raw)) return undefined;
+    return raw || null;
+  }
+  return null;
+}
+
 /** File-only origin projection. Ambiguous config keeps the last explicit repair. */
 export async function readCurrentOriginReadOnly(root: string): Promise<string | null | undefined> {
   try {
@@ -23,25 +47,7 @@ export async function readCurrentOriginReadOnly(root: string): Promise<string | 
       if (error.code === 'ENOENT') return null;
       throw error;
     });
-    const config = await readFile(join(common === null ? gitDir : resolve(gitDir, common.trim()), 'config'), 'utf8');
-    // Git resolves includes, URL rewrites and per-worktree overrides on the write
-    // path. Never mistake an unsupported configuration for a removed origin.
-    if (/^\s*\[(?:include|includeIf|url|extensions)(?:\s|\])/im.test(config)) return undefined;
-    let origin = false;
-    for (const line of config.split(/\r?\n/)) {
-      if (/^\s*\[/.test(line)) {
-        origin = line.match(/^\s*\[remote\s+"([^"]+)"\]\s*(?:[#;].*)?$/i)?.[1] === 'origin';
-        continue;
-      }
-      if (!origin) continue;
-      const raw = line.match(/^\s*url\s*=\s*(.*?)\s*$/i)?.[1];
-      if (raw === undefined) continue;
-      // Quoting, escaping and comments need Git's full config parser. Preserve
-      // the saved value until write maintenance can resolve those forms.
-      if (/["\\#;]/.test(raw)) return undefined;
-      return raw || null;
-    }
-    return null;
+    return parseOriginUrl(await readFile(join(common === null ? gitDir : resolve(gitDir, common.trim()), 'config'), 'utf8'));
   } catch { return undefined; }
 }
 async function git(root: string, args: string[]) {

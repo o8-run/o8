@@ -9,7 +9,10 @@ const { listRepos } = vi.hoisted(() => ({ listRepos: vi.fn(async () => [
   { name: 'worktree', localPath: '/workspace/worktree', remoteUrl: 'git@github.com:example/repo.git' },
 ]) }));
 vi.mock('@/lib/repos/registry', () => ({ listRepos }));
-vi.mock('@/lib/intake/resolve-repo', () => ({ resolveRepoPath: (repo: string) => repo === 'example/repo' ? '/workspace/repo' : null }));
+vi.mock('@/lib/intake/resolve-repo', () => {
+  const resolveRepoPath = (repo: string) => repo === 'example/repo' ? '/workspace/repo' : null;
+  return { resolveRepoPath, createRepoPathResolver: () => resolveRepoPath };
+});
 
 const recent = () => new Date(Date.now() - 30 * 60_000).toISOString();
 function persistIssue(number: number, { repo = 'example/repo', state = 'open', labels = [] as string[], association = 'FIRST_TIME_CONTRIBUTOR', author = 'contributor' } = {}) {
