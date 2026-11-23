@@ -49,17 +49,17 @@ Ranked. Work on a lower item does not delay a higher one.
    - Next, in order:
      1. merge the approved commit through one governed operation ([#5817](https://github.com/o8-run/o8/issues/5817));
      2. a project automation policy, set once and shown before work runs, which lets o8 merge on its own within explicit rules ([#5822](https://github.com/o8-run/o8/issues/5822));
-     3. reviewers learn from verified past outcomes ([#5823](https://github.com/o8-run/o8/issues/5823)).
+     3. reviewers learn from verified past outcomes (#5823, done).
    - The goal is autonomous: o8 reviews, corrects and merges what the user intended, and asks a person only when a rule says so.
-2. **Governance and security.** The reason to trust the loop. No lane stalls silently ([#2197](https://github.com/o8-run/o8/issues/2197)), and a worker cannot reach anything its packet does not grant ([#2198](https://github.com/o8-run/o8/issues/2198), security lane).
+2. **Governance and security.** The reason to trust the loop. No lane stalls silently (#2197, done), and a worker cannot reach anything its packet does not grant ([#2198](https://github.com/o8-run/o8/issues/2198), security lane).
 3. **Other tools plug in.** Work written in another tool enters review without copy and paste. Its author sees verdicts and findings natively inside that tool, so nobody switches apps. o8's MCP server and CLI carry them ([#5841](https://github.com/o8-run/o8/issues/5841)).
 4. **The window shows the review.** o8 next keeps every surface it has. The sidebar lists work flowing in, and a selected item shows the reviewer's transcript. Reviewers can still spawn workers ([#5842](https://github.com/o8-run/o8/issues/5842)).
-   - In progress: a native Review scorecard beside Activity, with durable outcome figures and change lists ([#5879](https://github.com/o8-run/o8/issues/5879)).
-   - In progress: worker and reviewer sessions use the chat transcript and grouped traces ([#5878](https://github.com/o8-run/o8/issues/5878)).
-   - In progress: prompt navigation in every native transcript ([#5877](https://github.com/o8-run/o8/issues/5877)).
+   - Done: a native Review scorecard beside Activity, with durable outcome figures and change lists (#5879).
+   - Done: worker and reviewer sessions use the chat transcript and grouped traces (#5878).
+   - Done: prompt navigation in every native transcript (#5877).
 5. **Linux as a home for o8.** The machine that hosts o8 is often a Linux server. A fresh Ubuntu machine goes from install to a merged review ([#1672](https://github.com/o8-run/o8/issues/1672)).
 6. **Finish the Rust server port.** It is close to done, so it gets finished rather than left half moved. The remaining o8 next API paths move from the web server to the native daemon, one pull request per surface, with login rules unchanged ([#5243](https://github.com/o8-run/o8/issues/5243); plan in [#5422](https://github.com/o8-run/o8/issues/5422)). The classic web pages that nothing still loads are archived after it.
-7. **Next release.** What has merged since 0.1.818 ships together once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). Releases go through beta, then stable ([#2205](https://github.com/o8-run/o8/issues/2205)).
+7. **Next release.** What has merged since 0.1.818 ships together once the [release gate](#release-gate) passes. The integration suite on `main` must be green first ([#5317](https://github.com/o8-run/o8/issues/5317)). Releases go through beta, then stable (#2205, done).
 
 ### Release gate
 
