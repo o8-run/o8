@@ -214,7 +214,7 @@ describe('shared team lifecycle through delegate and persisted owned receipts', 
     try {
       await expect(settleSharedCheckoutTeam(target)).rejects.toThrow('Owned session liveness unavailable: unreadable metadata.');
       await settleSharedCheckoutTeams();
-      expect(warning).toHaveBeenCalledWith('[shared-checkout] Membership repair held:', `${team()!.id}.json`);
+      expect(warning).toHaveBeenCalledWith('[shared-checkout] Membership repair held:', `${team()!.id}.json`, 'Owned session liveness unavailable: unreadable metadata.');
       const handlers = mcp();
       const finish = await handlers.handleFinishSharedTeam({ reviewSummary: 'Reviewed fixture.', verification: 'Clean checkout verified.' });
       const status = await handlers.handleSharedTeamStatus();
