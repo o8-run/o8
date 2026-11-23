@@ -412,6 +412,49 @@ describe('bounded automatic worktree reconciliation', () => {
     expect(readExactWorkspaceClaim('managed-retirement', source.repoPath, source.workspace.id)).toBeNull();
   }, 120_000);
 
+  it('waits on a refused retirement claim until the claim changes or its backoff ends', async () => {
+    const source = await fixture();
+    const { prepareWorkspaceMaterializationRetirement } = await import('@/lib/workspace/workspace-materialization-retirement');
+    const { retireExactManagedDirectory } = await import('@/lib/workspace/exact-managed-directory-retirement');
+    const { readExactWorkspaceClaim } = await import('@/lib/workspace/exact-workspace-claim-state');
+    const entry = (await readWorktreeMetaSnapshot(source.repoPath))[source.workspace.id]!;
+    await prepareWorkspaceMaterializationRetirement(source.repoPath, source.workspace.path, 'cleanup');
+    await expect(retireExactManagedDirectory({ repositoryPath: source.repoPath, worktreeId: source.workspace.id,
+      directoryPath: source.workspace.path, identity: entry.materializationIdentity!,
+      parentIdentity: entry.materializationParentIdentity!,
+      afterRetirementRename: async () => { throw new Error('Interrupted after owned rename'); },
+    })).rejects.toThrow('Interrupted after owned rename');
+    // A purge that diverged from its journal: the exact cleanup refuses, every time.
+    const manager = getWorktreeManager(source.repoPath);
+    const refuse = vi.spyOn(Object.getPrototypeOf(manager), 'cleanup').mockResolvedValue(false);
+    const claimPass = async () => {
+      writeMaintenanceState('next-phase', 4);
+      getSqlite().prepare("DELETE FROM worktree_maintenance_state WHERE key = 'cursor:claims'").run();
+      const pass = await runBoundedWorktreeMaintenance(async () => {}, { primaryRepoPath: source.repoPath, maxCandidates: 1 });
+      return { pass, attempted: pass.outcomes.some((outcome) => outcome.phase === 'claims') };
+    };
+
+    const first = await claimPass();
+    expect(first.attempted).toBe(true);
+    expect(first.pass.outcomes.find((outcome) => outcome.phase === 'claims')?.outcome).toBe('held: exact retirement journal refused');
+    const second = await claimPass();
+    expect(second.attempted).toBe(false);
+    expect(second.pass.deferred).toBe(1);
+
+    // A changed claim row is retried at once.
+    getSqlite().prepare(`UPDATE workspace_exact_claims SET updated_at = updated_at + 1
+      WHERE kind = 'managed-retirement' AND repository_path = ? AND worktree_id = ?`)
+      .run(realpathSync(source.repoPath), source.workspace.id);
+    expect((await claimPass()).attempted).toBe(true);
+    expect((await claimPass()).attempted).toBe(false);
+
+    // After the backoff the refusal is retried; the real cleanup then finishes the retirement.
+    refuse.mockRestore();
+    getSqlite().prepare('UPDATE worktree_maintenance_refusals SET retry_after = 0').run();
+    expect((await claimPass()).attempted).toBe(true);
+    expect(readExactWorkspaceClaim('managed-retirement', source.repoPath, source.workspace.id)).toBeNull();
+  }, 120_000);
+
   it('excludes a second process through the first admitted action settlement', async () => {
     createLane({ repoPath: root, runtime: 'codex', branch: 'cross-process' });
     writeMaintenanceState('next-phase', 0);
