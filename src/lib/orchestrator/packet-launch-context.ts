@@ -1,13 +1,33 @@
 import 'server-only';
 
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
-import { listMissionRegistryEntries } from '@/lib/orchestrator/mission-registry';
+import { listMissionRegistryEntries, missionsStamp } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { WorkerLaunchContext, WorkerWorkMode } from '@/lib/orchestrator/types';
 
 export interface ResolvedPacketLaunchContext {
   launchContext: WorkerLaunchContext;
   missionId: string | null;
+}
+
+// Every stored mission's packets, indexed once and kept until a stored mission
+// changes: resolving a lane's packet otherwise parses every stored mission on
+// each /api/lanes poll. The first stored packet with a launch context wins, as
+// in a scan of the registry in its order.
+let storedLaunchContexts: { stamp: string; byPacket: Map<string, ResolvedPacketLaunchContext> } | null = null;
+
+function storedLaunchContextIndex(): Map<string, ResolvedPacketLaunchContext> {
+  const stamp = missionsStamp();
+  if (storedLaunchContexts?.stamp === stamp) return storedLaunchContexts.byPacket;
+  const byPacket = new Map<string, ResolvedPacketLaunchContext>();
+  for (const entry of listMissionRegistryEntries({ includeArchived: true })) {
+    for (const packet of entry.mission.packets) {
+      if (!packet.launchContext || byPacket.has(packet.id)) continue;
+      byPacket.set(packet.id, { launchContext: packet.launchContext, missionId: entry.id });
+    }
+  }
+  storedLaunchContexts = { stamp, byPacket };
+  return byPacket;
 }
 
 export function resolvePacketLaunchContexts(
@@ -30,15 +50,11 @@ export function resolvePacketLaunchContexts(
   }
 
   if (unresolved.size === 0) return resolved;
-  for (const entry of listMissionRegistryEntries({ includeArchived: true })) {
-    for (const packet of entry.mission.packets) {
-      if (!unresolved.has(packet.id) || !packet.launchContext) continue;
-      resolved.set(packet.id, { launchContext: packet.launchContext, missionId: entry.id });
-      unresolved.delete(packet.id);
-    }
-    if (unresolved.size === 0) break;
+  const stored = storedLaunchContextIndex();
+  for (const packetId of unresolved) {
+    const found = stored.get(packetId);
+    if (found) resolved.set(packetId, found);
   }
-
   return resolved;
 }
 
