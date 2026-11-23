@@ -8,8 +8,11 @@ import {
   toMobileApprovalCard,
 } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
-import { listIdeLlmChatSessions } from '@/lib/runtime/ide-llm-chat-registry';
+import { ideLlmChatSessionsVersion, listIdeLlmChatSessions } from '@/lib/runtime/ide-llm-chat-registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { getSqlite } from '@/lib/db';
+import { laneEpoch } from '@/lib/orchestrator/settled-missions';
+import type { FleetSnapshot } from '@/lib/fleet/types';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileFleetAction, MobileFleetRuntime, MobileFleetSession, MobileFleetStatus, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
@@ -248,10 +251,49 @@ function relativeMobileAge(isoLike: string | null | undefined) {
 
 type InboxCacheLane = 'full' | 'sessions';
 
-const inboxCache = new Map<InboxCacheLane, { snapshot: MobileInboxSnapshot; timestamp: number }>();
-const inboxInflight = new Map<InboxCacheLane, { generation: number; promise: Promise<MobileInboxSnapshot> }>();
+type InboxCacheEntry = { snapshot: MobileInboxSnapshot; timestamp: number; builtAt: number; version: string | null };
+const inboxCache = new Map<InboxCacheLane, InboxCacheEntry>();
+const inboxInflight = new Map<InboxCacheLane, { generation: number; promise: Promise<InboxCacheEntry> }>();
 let inboxGeneration = 0;
 const INBOX_CACHE_TTL = 8000;
+// The phone and the window poll about every 8 s, just past the cache TTL, and
+// almost every poll finds nothing changed. Past the TTL, a snapshot whose
+// inputs read the same is reused instead of rebuilt; it is rebuilt at least
+// this often so relative times, review diffs and idle drafts stay current.
+const INBOX_REUSE_MAX_MS = 30_000;
+
+const fleetSignatures = new WeakMap<FleetSnapshot, string>();
+function fleetSignature(fleet: FleetSnapshot): string {
+  let signature = fleetSignatures.get(fleet);
+  if (signature === undefined) {
+    // Everything the build reads from the inventory.
+    signature = JSON.stringify([fleet.meta, fleet.agents, fleet.events]);
+    fleetSignatures.set(fleet, signature);
+  }
+  return signature;
+}
+
+/** What the snapshot is built from, read without building it: the runtime
+ * inventory, the workspace chats, lanes, and pending or unsettled approvals.
+ * Explicit invalidations clear the cache before this is consulted. */
+async function inboxInputsVersion(): Promise<string> {
+  const fleet = await getRuntimeInventorySnapshot({ fresh: false });
+  const sqlite = getSqlite();
+  const pending = sqlite.prepare(
+    "SELECT COUNT(*) AS n, MAX(updated_at) AS updated FROM approvals WHERE status = 'pending'",
+  ).get() as { n: number; updated: number | null };
+  // Answered from the continuation-status expression index alone.
+  const unsettled = sqlite.prepare(`SELECT COUNT(*) AS n, MAX(rowid) AS last FROM approvals
+    WHERE (CASE WHEN json_valid(resolution_json) THEN json_extract(resolution_json, '$.continuationStatus') END)
+      IN ('pending', 'outcome_unknown')`).get() as { n: number; last: number | null };
+  return [
+    fleetSignature(fleet),
+    ideLlmChatSessionsVersion(),
+    laneEpoch(),
+    `${pending.n}:${pending.updated ?? ''}`,
+    `${unsettled.n}:${unsettled.last ?? ''}`,
+  ].join('\n');
+}
 
 function limitMobileInboxSessions(snapshot: MobileInboxSnapshot, limit?: number): MobileInboxSnapshot {
   if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
@@ -315,16 +357,32 @@ export async function getMobileInboxSnapshot(options: {
 
   const inflight = inboxInflight.get(cacheLane);
   if (!fresh && inflight && inflight.generation === generation) {
-    const snapshot = await inflight.promise;
-    return finalizeMobileInboxSnapshot(snapshot, options.limit);
+    const entry = await inflight.promise;
+    return finalizeMobileInboxSnapshot(entry.snapshot, options.limit);
   }
 
-  const promise = buildMobileInboxSnapshot({ fresh, includeWorkspaceReview }).then((snapshot) => {
-    if (generation === inboxGeneration) {
-      inboxCache.set(cacheLane, { snapshot, timestamp: Date.now() });
+  if (!fresh && cached?.version != null && Date.now() - cached.builtAt < INBOX_REUSE_MAX_MS) {
+    const version = await inboxInputsVersion().catch(() => null);
+    if (version === cached.version && generation === inboxGeneration && inboxCache.get(cacheLane) === cached) {
+      cached.timestamp = Date.now();
+      return finalizeMobileInboxSnapshot(cached.snapshot, options.limit);
     }
-    return snapshot;
-  });
+    const started = inboxInflight.get(cacheLane);
+    if (started && started.generation === generation) {
+      return finalizeMobileInboxSnapshot((await started.promise).snapshot, options.limit);
+    }
+  }
+
+  const promise = (async (): Promise<InboxCacheEntry> => {
+    // Read before building: an input that changes during the build leaves this
+    // version behind, so the next poll rebuilds.
+    const version = await inboxInputsVersion().catch(() => null);
+    const snapshot = await buildMobileInboxSnapshot({ fresh, includeWorkspaceReview });
+    const now = Date.now();
+    const entry = { snapshot, timestamp: now, builtAt: now, version };
+    if (generation === inboxGeneration) inboxCache.set(cacheLane, entry);
+    return entry;
+  })();
   inboxInflight.set(cacheLane, { generation, promise });
   promise.then(
     () => {
@@ -334,8 +392,8 @@ export async function getMobileInboxSnapshot(options: {
       if (inboxInflight.get(cacheLane)?.promise === promise) inboxInflight.delete(cacheLane);
     },
   );
-  const snapshot = await promise;
-  return finalizeMobileInboxSnapshot(snapshot, options.limit);
+  const entry = await promise;
+  return finalizeMobileInboxSnapshot(entry.snapshot, options.limit);
 }
 
 async function buildMobileInboxSnapshot(options: {
