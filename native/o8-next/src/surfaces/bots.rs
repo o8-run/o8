@@ -25,7 +25,10 @@ pub(super) type View = view::BotThread;
 pub(super) struct Runtime {
     entries: Vec<BotEntry>,
     loading: bool,
-    fetched: Option<Instant>,
+    /// Bots are online while their agent sessions run: read on a thread,
+    /// agent or lane event, on coming back to the window, or every 30 s while
+    /// work runs or the user is active (crate::changes).
+    fetched: crate::changes::Follow,
     settings_revision: u64,
     error: Option<String>,
     scroll: gpui::ScrollHandle,
@@ -46,13 +49,13 @@ fn load_roster(shell: &mut Shell, force: bool, cx: &mut Context<Shell>) {
     if state.loading
         || !force
             && state.settings_revision == settings_revision
-            && (crate::foreground::hidden() || state.fetched.is_some_and(|t| t.elapsed() < POLL))
+            && (crate::foreground::hidden() || !state.fetched.due(POLL, crate::changes::lively()))
     {
         return;
     }
     state.settings_revision = settings_revision;
     state.loading = true;
-    state.fetched = Some(Instant::now());
+    state.fetched.read();
     let client = shell.client.clone();
     let task = cx.background_executor().spawn(async move { client.bots() });
     cx.spawn(async move |this, cx| {
@@ -61,7 +64,7 @@ fn load_roster(shell: &mut Shell, force: bool, cx: &mut Context<Shell>) {
             let state = &mut shell.surfaces.bots;
             state.loading = false;
             if settings_revision != crate::settings_fields::bot_rail_revision(&shell.client) {
-                state.fetched = None;
+                state.fetched.expire();
                 cx.notify();
                 return;
             }
