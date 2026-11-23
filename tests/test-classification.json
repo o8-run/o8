@@ -1498,6 +1498,12 @@
       ]
     },
     {
+      "path": "src/lib/ws-server/startup-sequence.test.ts",
+      "reasons": [
+        "worktree-api"
+      ]
+    },
+    {
       "path": "src/lib/ws-server/terminal-host.test.ts",
       "reasons": [
         "terminal-host"

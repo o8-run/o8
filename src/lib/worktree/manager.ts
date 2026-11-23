@@ -1,6 +1,7 @@
 import { WorktreePreparationCleanupError } from './preparation-failure';
 import { committedDiff } from '@/lib/worktree/committed-diff';
 import { assertNotKnowledgeSource } from '@/lib/cortex/knowledge/sources';
+import { startupRecoveryDone } from '@/lib/startup/recovery-barrier';
 /**
  * WorktreeManager — Orchestration Layer for Git Worktree Isolation
  *
@@ -352,6 +353,8 @@ export class WorktreeManager {
    *   at deploy time keep working until they drain.
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
+    // Startup recovery treats what it finds on disk as last run's leftovers.
+    await startupRecoveryDone();
     assertNotKnowledgeSource(this.repoRoot);
     assertNotKnowledgeSource(this.worktreeBase);
     if (opts.warmBaseCommit) {

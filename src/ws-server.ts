@@ -347,6 +347,10 @@ import {
 } from './lib/ws-server/orchestrator-command-idempotency';
 import { installProcessCrashCapture } from './lib/telemetry/crash-capture';
 import { initSentryNode } from './lib/telemetry/sentry-node';
+import { runStartupSequence } from './lib/ws-server/startup-sequence';
+
+/** Lanes created before this belong to an earlier run of the server. */
+const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 
 installProcessCrashCapture('ws-server');
 // Sentry (dormant unless PACKAGED + a DSN was baked). Fire-and-forget; the
@@ -8356,6 +8360,24 @@ async function bootstrapWsServer() {
 
   if (shuttingDown) return;
   try {
+    await rehydrateOrchestratorSessions({ onReboundEvent: handleReboundOrchestratorEvent });
+    const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });
+    if (codexRebound > 0) {
+      console.log(`[orchestrator-rehydrate] Re-bound ${codexRebound} Codex orchestrator turn${codexRebound === 1 ? '' : 's'}`);
+    }
+  } catch (error) {
+    console.warn(
+      `[orchestrator-rehydrate] WS startup rehydration failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+}
+
+/** Crash recovery and maintenance. Requests no longer wait for any of it;
+ * worktree creation waits on the startup recovery barrier instead. */
+async function runStartupMaintenance() {
+  if (shuttingDown) return;
+  try {
     await pruneOrphanedCodexWorktreeBranches(REPO_ROOT);
   } catch (error) {
     console.warn(
@@ -8414,19 +8436,6 @@ async function bootstrapWsServer() {
   } catch (error) {
     console.warn(
       `[merged-by-ancestry] Startup sweep failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  if (shuttingDown) return;
-  try {
-    await rehydrateOrchestratorSessions({ onReboundEvent: handleReboundOrchestratorEvent });
-    const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });
-    if (codexRebound > 0) {
-      console.log(`[orchestrator-rehydrate] Re-bound ${codexRebound} Codex orchestrator turn${codexRebound === 1 ? '' : 's'}`);
-    }
-  } catch (error) {
-    console.warn(
-      `[orchestrator-rehydrate] WS startup rehydration failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
@@ -8531,7 +8540,7 @@ async function bootstrapWsServer() {
     } else {
       console.warn('[workspace-reconcile] Startup reconciliation held until dependency-image leases reconcile.');
     }
-    await reconcileStuckLanes();
+    await reconcileStuckLanes({ createdBefore: PROCESS_STARTED_AT });
     await reconcileOrphanedWorktrees();
   } catch (error) {
     console.warn(
@@ -8826,10 +8835,16 @@ async function bootstrapWsServer() {
 }
 
 let shuttingDown = false;
-const wsStartupReady = bootstrapWsServer().then(() => {
-  if (!shuttingDown) void startProductSession();
-}).catch(() => {
+const startup = runStartupSequence({ ready: bootstrapWsServer, maintenance: runStartupMaintenance });
+const wsStartupReady = startup.ready.catch(() => {
   console.error('[ws-server] Startup initialization failed.');
+  shutdown('startup-failed', 1);
+});
+void startup.recovered.then(() => {
+  if (!shuttingDown) void startProductSession();
+}, () => {
+  if (shuttingDown) return;
+  console.error('[ws-server] Startup maintenance failed.');
   shutdown('startup-failed', 1);
 });
 
