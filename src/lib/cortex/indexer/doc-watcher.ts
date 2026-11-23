@@ -32,6 +32,7 @@ import { distillDocChunkBatch } from '@/lib/cortex/indexer/doc-distill';
 import { isWhitelistedDocPath } from '@/lib/cortex/indexer/doc-whitelist';
 import { getDb, getSqlite } from '@/lib/db';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isPathReachable, whenPathReachable } from '@/lib/fs/protected-folders';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -376,6 +377,31 @@ function seedChunkHashes(files: Array<{ repo: RegisteredRepo; absPath: string; r
   }
 }
 
+function watchRepoDocs(repos: RegisteredRepo[], handles: ReturnType<typeof watch>[]): void {
+  const files = collectWatchedFiles(repos);
+  if (files.length === 0) return;
+  seedChunkHashes(files);
+  console.log(`[doc-watcher] seeded hashes for ${chunkHashes.size} chunk(s) across ${files.length} file(s)`);
+
+  // One fs.watch handle per file (not per-directory) — avoids recursive watch
+  // issues on macOS and limits scope to exactly the whitelisted files.
+  for (const { repo, absPath, relPath } of files) {
+    if (!existsSync(absPath)) continue;
+    try {
+      const handle = watch(absPath, () => {
+        scheduleDistill(repo, absPath, relPath);
+      });
+      if (handle.unref) handle.unref();
+      handles.push(handle);
+    } catch (err) {
+      console.warn(
+        `[doc-watcher] could not watch ${relPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  console.log(`[doc-watcher] watching ${handles.length} file(s) for changes`);
+}
+
 /**
  * Start the doc watcher. Returns a stop function.
  * No-op (returns identity stop) when O8_DISABLE_DOC_WATCH=1.
@@ -392,36 +418,17 @@ function startRepoDocWatcher(): () => void {
     return () => {};
   }
 
-  const files = collectWatchedFiles(repos);
-  if (files.length === 0) {
-    console.log('[doc-watcher] no whitelisted docs found — skipping');
-    return () => {};
-  }
-
-  seedChunkHashes(files);
-  console.log(`[doc-watcher] seeded hashes for ${chunkHashes.size} chunk(s) across ${files.length} file(s)`);
-
-  // One fs.watch handle per file (not per-directory) — avoids recursive watch
-  // issues on macOS and limits scope to exactly the whitelisted files.
+  // A repository behind a pending privacy prompt is watched once the prompt is
+  // answered; walking it now would block the server's event loop until then.
   const handles: ReturnType<typeof watch>[] = [];
-  for (const { repo, absPath, relPath } of files) {
-    if (!existsSync(absPath)) continue;
-    try {
-      const handle = watch(absPath, () => {
-        scheduleDistill(repo, absPath, relPath);
-      });
-      if (handle.unref) handle.unref();
-      handles.push(handle);
-    } catch (err) {
-      console.warn(
-        `[doc-watcher] could not watch ${relPath}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+  let stopped = false;
+  const later = repos.filter((repo) => !isPathReachable(repo.localPath));
+  for (const repo of later) {
+    void whenPathReachable(repo.localPath).then(() => { if (!stopped) watchRepoDocs([repo], handles); });
   }
-
-  console.log(`[doc-watcher] watching ${handles.length} file(s) for changes`);
-
+  watchRepoDocs(repos.filter((repo) => !later.includes(repo)), handles);
   return () => {
+    stopped = true;
     for (const h of handles) {
       try { h.close(); } catch { /* already closed */ }
     }

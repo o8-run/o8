@@ -1,5 +1,6 @@
 import { existsSync, watch } from 'node:fs';
 import { resolve } from 'node:path';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { isWorktreeNoise } from './conflict-gate';
 
 /**
@@ -21,7 +22,7 @@ export function createReviewRepoWatch(input: {
     ensure(repoPaths: string[]): void {
       if ((input.platform ?? process.platform) !== 'darwin') return;
       for (const repoPath of repoPaths.map((path) => resolve(path))) {
-        if (watched.has(repoPath) || !existsSync(repoPath)) continue;
+        if (watched.has(repoPath) || !isPathReachable(repoPath) || !existsSync(repoPath)) continue;
         try {
           watch(repoPath, { recursive: true }, (_event, filename) => {
             if (isWorktreeNoise(filename)) return;

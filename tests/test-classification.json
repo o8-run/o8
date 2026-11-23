@@ -7251,6 +7251,17 @@
       ]
     },
     {
+      "path": "tests/protected-folder-prompt-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli",
+        "network-listener",
+        "process-signal",
+        "real-path",
+        "terminal-tool"
+      ]
+    },
+    {
       "path": "tests/provider-key-acp-handshake-race-real-path.test.ts",
       "reasons": [
         "real-path"

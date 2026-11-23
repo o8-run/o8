@@ -3,6 +3,7 @@ import { execFile } from '@/lib/providers/child-process';
 import { readFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 
 const run = promisify(execFile);
 interface Origin { config: string; stamp: string; remote: string | null; checkedAt: number }
@@ -35,6 +36,8 @@ export function parseOriginUrl(config: string): string | null | undefined {
 
 /** File-only origin projection. Ambiguous config keeps the last explicit repair. */
 export async function readCurrentOriginReadOnly(root: string): Promise<string | null | undefined> {
+  // A pending privacy prompt would hold a pool thread; keep the saved remote.
+  if (!isPathReachable(root)) return undefined;
   try {
     let gitDir = join(root, '.git');
     const marker = await stat(gitDir);

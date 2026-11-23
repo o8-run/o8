@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { resolve } from 'node:path';
 import { isNetworkThread } from '@/lib/bots/network-store';
 import { readPersistedLlmChatSummary } from '@/lib/llm/chat-history-store';
@@ -15,6 +16,8 @@ import type { ComposerWsIngress } from '@/lib/ws-server/composer-owner-rpc';
 
 /** Durable keys remain addressable even if a checkout is offline. */
 export function composerQueueRepoKey(repoPath: string): string {
+  // Behind a pending privacy prompt realpath would stop the event loop.
+  if (!isPathReachable(repoPath)) return resolve(repoPath);
   try { return realpathSync(repoPath); } catch { return resolve(repoPath); }
 }
 
@@ -27,6 +30,7 @@ export function validateComposerQueueTarget(input: unknown, requireSaved = true)
   if (isNetworkThread(target.threadId)) throw new Error('Network threads send through the agent bus, not the orchestrator queue.');
   const saved = readPersistedLlmChatSummary(target.threadId);
   if ((!saved?.repoPath && requireSaved) || (saved?.repoPath && composerQueueRepoKey(saved.repoPath) !== composerQueueRepoKey(target.repoPath))) throw new Error('The queued message must target its saved chat repository.');
+  if (requireSaved && !isPathReachable(target.repoPath)) throw new Error('The repository folder is waiting for macOS file access.');
   return { repoPath: requireSaved ? realpathSync(target.repoPath) : composerQueueRepoKey(target.repoPath), threadId: target.threadId };
 }
 

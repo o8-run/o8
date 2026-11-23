@@ -1,5 +1,5 @@
 import { execFile } from '@/lib/providers/child-process';
-import { existsSync } from 'node:fs';
+import { existsWhenReachable } from '@/lib/fs/protected-folders';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ApprovalRecord } from '@/lib/approvals/types';
@@ -210,7 +210,7 @@ export async function collectSessionReviewDiff(session: AgentSummary): Promise<M
     // Fall back to the runtime surface cwd below.
   }
 
-  if (!worktreePath || !existsSync(worktreePath)) return null;
+  if (!worktreePath || !existsWhenReachable(worktreePath)) return null;
 
   const sections: string[] = [];
   if (baseBranch) {

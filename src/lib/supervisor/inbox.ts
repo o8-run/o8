@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { missingWhenReachable } from '@/lib/fs/protected-folders';
 import { getSqlite } from '@/lib/db';
 import { ensureSupervisorInboxSchema } from '@/lib/db/v83-runtime-tables-migration';
 import { listLanes } from '@/lib/lane/registry';
@@ -565,7 +565,7 @@ export function runRetentionSweep(nowMs = Date.now()): number {
     // that a redispatch is about to recreate.
     if (nowMs - createdMs < ORPHANED_WORKTREE_GRACE_MS) continue;
     const worktreePath = payloadStringFromRaw(row.payload, 'worktreePath');
-    if (!worktreePath || existsSync(worktreePath)) continue;
+    if (!worktreePath || !missingWhenReachable(worktreePath)) continue;
     dismissInboxItem(row.id);
     dismissed += 1;
   }

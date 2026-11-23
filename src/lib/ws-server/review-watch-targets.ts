@@ -2,6 +2,7 @@ import { statSync } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 
 export interface ReviewWatchTarget {
@@ -26,6 +27,9 @@ export async function listReviewWatchTargets(rootPath: string, registeredRepoPat
 
   const targets: ReviewWatchTarget[] = [];
   for (const repoPath of repoPaths) {
+    // Scanning a repository behind a pending privacy prompt would block the
+    // event loop; it joins the scan once the prompt is answered.
+    if (!isPathReachable(repoPath)) continue;
     targets.push({ repoPath, workspacePath: repoPath });
     try {
       for (const worktreeBase of resolveWorktreeRootLayout(repoPath).bases) {

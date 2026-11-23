@@ -35,6 +35,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { getDataDir } from '@/lib/data-dir-migration';
+import { isPathReachable } from '@/lib/fs/protected-folders';
 import { appendDirectiveTrailer } from '@/lib/cortex/directive-merges';
 import { listRepos } from '@/lib/repos/registry';
 import { readPollBranchTip } from '@/lib/git/poll-branch-tip';
@@ -243,7 +244,7 @@ export async function ingestExternalMerges(): Promise<{
   for (const repo of repos) {
     summary.scannedRepos += 1;
     const repoPath = repo.localPath;
-    if (!repoPath || !existsSync(repoPath)) continue;
+    if (!repoPath || !isPathReachable(repoPath) || !existsSync(repoPath)) continue;
 
     try {
       const cursor = state.cursors[repoPath];
