@@ -234,6 +234,10 @@ async function postInternalPacketTailEvent(event: PacketTailEvent): Promise<void
     headers: {
       Authorization: `Bearer ${getOrCreateWsToken()}`,
       'Content-Type': 'application/json',
+      // The server's own lane writes are not someone using o8. Without this, every
+      // event a background loop recorded (a refused retirement's close_timing, a
+      // review-stall pass) woke the idle gate and kept every loop running.
+      'x-o8-background': '1',
     },
     body: JSON.stringify(event),
     signal: AbortSignal.timeout(PACKET_TAIL_INTERNAL_TIMEOUT_MS),
