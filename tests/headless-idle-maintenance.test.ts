@@ -114,10 +114,27 @@ describe('headless idle worktree maintenance', () => {
     expect(prune).toHaveBeenCalledExactlyOnceWith(repoPath);
   });
 
+  it.each(['current', 'registry'] as const)('runs no worktree sweep for a storage-held %s packet whose runtime is not pinned', async (location) => {
+    // The recovery guard skips it every tick, so freeing space cannot launch it.
+    const current = mission();
+    const held = location === 'current' ? current : mission();
+    holdForStorage(held);
+    if (location === 'registry') register(held);
+    writeOrchestratorControlPlaneState(current);
+
+    await runHeadlessSprintTick();
+    clock += 20 * 60_000;
+    vi.setSystemTime(new Date(clock));
+    await runHeadlessSprintTick();
+
+    expect(prune).not.toHaveBeenCalled();
+  });
+
   it.each(['current', 'registry'] as const)('retains cleanup retries for a storage-held %s packet', async (location) => {
     const current = mission();
     const held = location === 'current' ? current : mission();
     holdForStorage(held);
+    held.packets[0].dispatchRuntimePin = 'codex';
     if (location === 'registry') register(held);
     writeOrchestratorControlPlaneState(current);
 
