@@ -1,8 +1,18 @@
-import { mkdtempSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+const stateReads = vi.hoisted(() => ({ count: 0 }));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const readFileSync = ((...args: Parameters<typeof actual.readFileSync>) => {
+    if (String(args[0]).includes('codex-app-sync')) stateReads.count += 1;
+    return actual.readFileSync(...args);
+  }) as typeof actual.readFileSync;
+  return { ...actual, default: { ...actual, readFileSync }, readFileSync };
+});
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-codex-app-sync-'));
 process.env.CORTEX_IDE_DATA_DIR = dataDir;
@@ -82,3 +92,35 @@ it('backs off a chat whose Codex thread cannot be read, without starting an app-
   expect(opens).toBeLessThanOrEqual(15);
   expect(closes).toHaveBeenCalledTimes(opens);
 });
+
+it('reads the linked chats again only when one is saved, and still imports on a rollout change', async () => {
+  const rollout = join(dataDir, `rollout-${chat}.jsonl`);
+  writeFileSync(rollout, '{}\n');
+  const reader = { rolloutPath: async () => rollout, recentTurns: async () => [], close: async () => {} };
+  let opens = 0;
+  const deps = { isBusy: () => false, openReader: async () => { opens += 1; return reader; } };
+  // The first passes find the rollout and save it on the link.
+  await syncCodexAppThreads(deps);
+  await syncCodexAppThreads(deps);
+  stateReads.count = 0;
+  opens = 0;
+
+  for (let tick = 0; tick < 5; tick += 1) await syncCodexAppThreads(deps);
+  expect(stateReads.count).toBe(0);
+  expect(opens).toBe(0);
+
+  // A turn noted on another chat saves its link: the next pass reads the links once.
+  noteCodexAppTurn({ tabId: `thoughts-${chat}-other`, repoPath: '/repo', threadId: `thread-${chat}-other`, turnId: 'turn-1' });
+  stateReads.count = 0;
+  await syncCodexAppThreads({ ...deps, isBusy: (state) => state.tabId.endsWith('-other') });
+  expect(stateReads.count).toBeGreaterThan(0);
+  const afterSave = stateReads.count;
+  await syncCodexAppThreads({ ...deps, isBusy: (state) => state.tabId.endsWith('-other') });
+  expect(stateReads.count).toBe(afterSave);
+
+  // The Codex app writes the thread: the next pass reads its turns.
+  appendFileSync(rollout, '{}\n');
+  await syncCodexAppThreads({ ...deps, isBusy: (state) => state.tabId.endsWith('-other') });
+  expect(opens).toBe(1);
+});
+

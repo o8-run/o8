@@ -149,6 +149,7 @@ class ReaderOpenError extends Error {}
 
 /** Tests only. */
 export function resetCodexAppSyncState(): void {
+  stateCache = null;
   lastSeen.clear();
   recheckAt.clear();
   failures.clear();
@@ -162,14 +163,40 @@ export function resetCodexAppSyncState(): void {
 const UNSETTLED_TURN_QUIET_MS = 5 * 60_000;
 
 /** One sync pass over every o8 chat linked to a Codex thread. Returns turns imported per chat. */
-export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<string, number>> {
-  const imported = new Map<string, number>();
+/**
+ * The linked chats, read again only when the state folder changes. Every state
+ * save writes a temporary file and renames it into the folder, so an unchanged
+ * folder means unchanged states; each tick then only stats the Codex rollouts.
+ */
+let stateCache: { stamp: string; states: CodexAppSyncState[] } | null = null;
+
+function linkedStates(): CodexAppSyncState[] | null {
+  let stamp: string;
+  try {
+    const info = statSync(stateDir());
+    stamp = `${info.ino}:${info.mtimeMs}`;
+  } catch {
+    stateCache = null;
+    return null;
+  }
+  if (stateCache?.stamp === stamp) return stateCache.states;
   let files: string[];
   try {
     files = readdirSync(stateDir()).filter((file) => file.endsWith('.json'));
   } catch {
-    return imported;
+    stateCache = null;
+    return null;
   }
+  const states = files.map((file) => readState(join(stateDir(), file)))
+    .filter((state): state is CodexAppSyncState => state !== null);
+  stateCache = { stamp, states };
+  return states;
+}
+
+export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<string, number>> {
+  const imported = new Map<string, number>();
+  const states = linkedStates();
+  if (!states) return imported;
   if (backingOff(OPEN_KEY)) return imported;
   let reader: CodexAppThreadReader | null = null;
   const open = async () => {
@@ -184,9 +211,8 @@ export async function syncCodexAppThreads(deps: CodexAppSyncDeps): Promise<Map<s
     return reader;
   };
   try {
-    for (const file of files) {
-      const state = readState(join(stateDir(), file));
-      if (!state || deps.isBusy(state) || backingOff(state.tabId)) continue;
+    for (const state of states) {
+      if (deps.isBusy(state) || backingOff(state.tabId)) continue;
       try {
         const count = await syncThread(state, open, deps);
         failures.delete(state.tabId);
