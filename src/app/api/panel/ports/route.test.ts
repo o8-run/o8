@@ -70,9 +70,10 @@ describe('GET /api/panel/ports', () => {
   });
 
   it('classifies a redirect from its headers without using a pooled connection', async () => {
-    const requests: Array<{ method?: string; path?: string; connection?: string }> = [];
+    const requests: Array<{ method?: string; path?: string; connection?: string; background?: string | string[] }> = [];
     const server = createServer((request, response) => {
-      requests.push({ method: request.method, path: request.url, connection: request.headers.connection });
+      requests.push({ method: request.method, path: request.url, connection: request.headers.connection,
+        background: request.headers['x-o8-background'] });
       response.writeHead(302, { Location: '/redirect-target' });
       response.flushHeaders();
     });
@@ -89,7 +90,8 @@ describe('GET /api/panel/ports', () => {
       const result = await (await GET()).json();
 
       expect(result.ports).toEqual([expect.objectContaining({ port: address.port, kind: 'page' })]);
-      expect(requests).toEqual([{ method: 'GET', path: '/', connection: 'close' }]);
+      // A probe of o8's own port is the server's own request, not client activity.
+      expect(requests).toEqual([{ method: 'GET', path: '/', connection: 'close', background: '1' }]);
       expect(pooledFetch).not.toHaveBeenCalled();
     } finally {
       server.closeAllConnections();

@@ -10,6 +10,7 @@ import { join } from 'path';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import { classifyProbe, deriveServerLabel, type HttpProbeResult, type PortKind } from '@/lib/panel/port-classify';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { SELF_REQUEST_HEADERS } from '@/lib/background-work/idle-gate';
 
 interface PortEntry {
   port: number;
@@ -144,7 +145,8 @@ async function probePort(port: number): Promise<HttpProbeResult> {
         path: '/',
         agent: false,
         signal: controller.signal,
-        headers: { accept: '*/*', 'user-agent': 'o8-port-probe' },
+        // The scan reaches o8's own port too: never client activity for the idle gate.
+        headers: { accept: '*/*', 'user-agent': 'o8-port-probe', ...SELF_REQUEST_HEADERS },
       }, (response) => {
         const status = response.statusCode ?? null;
         const contentType = response.headers['content-type'] ?? null;

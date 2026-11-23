@@ -678,11 +678,12 @@ impl Shell {
         // A window opened without focus (at login, or launched behind another
         // app) would otherwise keep assuming it is in front until it is first
         // focused. Test windows never report focus, so they keep the default.
-        if !cfg!(test) && !self.offscreen {
-            crate::foreground::set(window.is_window_active());
-        }
+        // Whichever sees it first, this or the activation observer, refreshes.
+        let back = !cfg!(test)
+            && !self.offscreen
+            && crate::foreground::set(window.is_window_active());
         crate::foreground::set_visible(!self.offscreen && crate::foreground::on_screen(window));
-        features::tick(self, refresh, window, cx);
+        features::tick(self, refresh || back, window, cx);
     }
 }
 #[path = "shell_material.rs"]
