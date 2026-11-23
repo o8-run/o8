@@ -3,7 +3,7 @@ import { commitNativeCorrectionHold } from './session-rule-native-client';
 import { runtimeOwnerRequired } from '@/lib/runtime/owner-context';
 import { isNativeCortexReader } from '@/lib/cortex/owner-process';
 import { callSteerOwner } from '@/lib/orchestrator/operator-mission-service/steer-owner-client';
-import { advanceCorrectionStop, correctionStopVersion } from '@/lib/db/worker-correction-fences';
+import { correctionStopVersion } from '@/lib/db/worker-correction-fences';
 import { getSqlite } from '@/lib/db';
 import { addSessionRule } from '@/lib/db/session-rules-store';
 import { relatedWorkerMembership } from '@/lib/mcp/worker-observation';
@@ -84,14 +84,7 @@ function update(id: string, surfaceId: string, status: Delivery['status'], note:
   getSqlite().prepare(`UPDATE worker_correction_deliveries SET status = ?, note = ?, updated_at = ?
     WHERE correction_id = ? AND surface_id = ? AND status = 'sending'`).run(status, note, Date.now(), id, surfaceId);
 }
-export function holdWorkerCorrections(target: ComposerQueueTarget): void {
-  getSqlite().transaction(() => {
-    advanceCorrectionStop(`parent:${target.repoPath}\n${target.threadId}`);
-    getSqlite().prepare(`UPDATE worker_correction_deliveries SET status = 'held', note = 'Parent stopped. Inspect the worker before resuming.', updated_at = ?
-    WHERE status IN ('pending','sending') AND correction_id IN
-    (SELECT id FROM worker_corrections WHERE repo_path = ? AND thread_id = ?)`).run(Date.now(), target.repoPath, target.threadId);
-  })();
-}
+export { holdWorkerCorrections } from '@/lib/db/worker-correction-fences';
 
 interface AdmissionChecks { state: () => void; code: () => void; persist?: () => void }
 
