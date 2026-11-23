@@ -8587,6 +8587,13 @@
       ]
     },
     {
+      "path": "tests/stuck-purges-cli-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/supervisor-retry-identity-real-path.test.ts",
       "reasons": [
         "real-path"

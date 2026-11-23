@@ -1,9 +1,11 @@
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printJson, type OutputMode } from '../output.js';
+import { runStuckPurges } from './stuck-purges.js';
 
 /** Agent and operator clients use the same saved preview and selection as Settings. */
 export async function runWorkspaceCleanup(mode: OutputMode, verb: string | undefined, args: string[]): Promise<number> {
+  if (verb === 'stuck-purges') return runStuckPurges(mode, args);
   const values = (name: string) => args.flatMap((arg, index) => arg === name ? [args[index + 1] ?? ''] : []);
   const flag = (name: string) => values(name)[0] ?? '';
   const endpoint = '/api/orchestrator/workspace/maintenance';
@@ -16,7 +18,7 @@ export async function runWorkspaceCleanup(mode: OutputMode, verb: string | undef
   } else if (verb === 'execute' && flag('--plan') && flag('--approve') && values('--entry').length) {
     data = (await apiFetch(cfg, endpoint, { method: 'POST', body: { action: 'execute', planId: flag('--plan'),
       fingerprint: flag('--approve'), selection: values('--entry') } })).data;
-  } else throw new CliError('invalid_args', 'Use workspace-cleanup preview --repo <path>, status --plan <id>, or execute --plan <id> --approve <fingerprint> --entry <id> [--entry <id>].', EXIT.INVALID_ARGS);
+  } else throw new CliError('invalid_args', 'Use workspace-cleanup preview --repo <path>, status --plan <id>, or execute --plan <id> --approve <fingerprint> --entry <id> [--entry <id>], or stuck-purges [--abandon <operation-id>]... [--abandon-refused] [--apply].', EXIT.INVALID_ARGS);
   if (mode.human) process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
   else printJson({ schema: 'o8/cli/workspace-cleanup/v1', ...data as object });
   return EXIT.OK;

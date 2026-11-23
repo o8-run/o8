@@ -334,6 +334,7 @@ commands:
   threads show <id>    exact recorded thread evidence (--repo path)
   workspace-cleanup preview --repo <path>  review completed owned work and retained recovery
   workspace-cleanup execute --plan <id> --approve <fingerprint> --entry <id>  execute that exact selection; status --plan <id> reads its receipt
+  workspace-cleanup stuck-purges [--abandon <operation-id>]... [--abandon-refused] [--apply]  list retirements stuck in purging; abandon drops the claim, leaves the folder (dry run without --apply)
   problem list         recurring problems detected across independent work (--all includes suppressed)
   problem show <id>    full evidence, remedy, and closure state for one problem dossier
   plugin list          list reviewed executable actions [--plugin ID]
