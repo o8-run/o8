@@ -154,7 +154,9 @@ struct Dock {
     from_height: f32,
     scope: Option<String>,
     data: Data,
-    loaded: Option<Instant>,
+    /// Reads on a change, on coming back to the window, or on the cadence
+    /// below while work runs or the user is active (crate::changes).
+    follow: crate::changes::Follow,
     /// When the open dock last read pull requests, the slow `gh` path.
     pulls: Option<Instant>,
     /// When each running step was first seen, for steps without saved times.
@@ -172,7 +174,7 @@ impl Default for Dock {
             from_height: 0.,
             scope: None,
             data: Data::default(),
-            loaded: None,
+            follow: Default::default(),
             pulls: None,
             seen: Default::default(),
             spin: Instant::now(),
@@ -261,7 +263,7 @@ fn tick(s: &mut Shell, cx: &mut Context<Shell>) {
     } else {
         60
     };
-    let stale = dock.loaded.is_none_or(|at| at.elapsed().as_secs() >= every)
+    let stale = dock.follow.due(Duration::from_secs(every), crate::changes::lively())
         || dock.scope != s.state.selected;
     if !dock.shown.is_open() {
         if stale {
@@ -471,7 +473,7 @@ fn load(s: &mut Shell, cx: &mut Context<Shell>) {
         dock.pulls = None;
     }
     dock.scope = Some(workspace.clone());
-    dock.loaded = Some(Instant::now());
+    dock.follow.read();
     let pulls = pulls_due(dock.shown.is_open(), dock.pulls);
     if pulls {
         dock.pulls = Some(Instant::now());

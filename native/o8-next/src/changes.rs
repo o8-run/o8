@@ -23,6 +23,12 @@ pub(crate) fn set_working(working: bool) {
 pub(crate) fn working() -> bool {
     WORKING.load(Ordering::Relaxed)
 }
+/// For data that also changes outside o8 (git state, local ports, usage): a
+/// thread is running, or the user clicked or typed in the last minute (a
+/// command they ran may still be changing it).
+pub(crate) fn lively() -> bool {
+    working() || crate::foreground::touched_within(Duration::from_secs(60))
+}
 
 /// One view's last read.
 #[derive(Clone, Copy, Debug, Default)]

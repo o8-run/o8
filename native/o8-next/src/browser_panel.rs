@@ -192,18 +192,20 @@ impl BrowserPanel {
             self.restore(saved, cx);
         }
         cx.spawn(async move |this, cx| {
-            let mut read: Option<std::time::Instant> = None;
+            // Dev servers start from a command the user or an agent ran: read
+            // on a thread, agent or lane event, on coming back to the window,
+            // and every 5 s while work runs or the user was active in the
+            // last minute. Nobody can see the window: wait, and read as soon
+            // as it shows.
+            let mut follow = crate::changes::Follow::default();
             loop {
-                // Nobody can see the window: wait, and read as soon as it shows.
                 if crate::foreground::hidden()
-                    || read.is_some_and(|at| {
-                        at.elapsed() < crate::foreground::cadence(Duration::from_secs(5))
-                    })
+                    || !follow.due(Duration::from_secs(5), crate::changes::lively())
                 {
                     cx.background_executor().timer(Duration::from_secs(1)).await;
                     continue;
                 }
-                read = Some(std::time::Instant::now());
+                follow.read();
                 let client = client.clone();
                 let result = cx
                     .background_executor()

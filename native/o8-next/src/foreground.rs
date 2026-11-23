@@ -36,6 +36,11 @@ pub(crate) fn touched() {
     INPUT.store(epoch().elapsed().as_millis() as u64 + 1, Ordering::Relaxed);
 }
 
+/// The user clicked or typed within `window`.
+pub(crate) fn touched_within(window: Duration) -> bool {
+    let input = INPUT.load(Ordering::Relaxed);
+    input != 0 && (epoch().elapsed().as_millis() as u64 + 1).saturating_sub(input) <= window.as_millis() as u64
+}
 fn recent_input() -> bool {
     recent_at(epoch().elapsed().as_millis() as u64 + 1, INPUT.load(Ordering::Relaxed))
 }

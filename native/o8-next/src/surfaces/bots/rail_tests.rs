@@ -137,7 +137,7 @@ fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut 
         ready(&shell, &mut visual);
         for height in [400., 480., 520., 540., 628., 816.] {
             configure(&fixture, json!({"bots":[]}));
-            shell.update(&mut visual, |s, _| s.surfaces.bots.fetched = None);
+            shell.update(&mut visual, |s, _| s.surfaces.bots.fetched.expire());
             settle(&shell, &mut visual);
             visual.simulate_resize(size(px(800.), px(height)));
             draw(&mut visual);
@@ -151,7 +151,7 @@ fn bots_shell_rail_bounds_large_rosters_and_keeps_the_footer_clickable(cx: &mut 
                 "mainThread":{"kind":"mailbox","id":"agent-1"}
             })).collect::<Vec<_>>()}),
             );
-            shell.update(&mut visual, |s, _| s.surfaces.bots.fetched = None);
+            shell.update(&mut visual, |s, _| s.surfaces.bots.fetched.expire());
             settle(&shell, &mut visual);
             assert_eq!(
                 shell.read_with(&visual, |s, _| s.surfaces.bots.entries.len()),
@@ -273,7 +273,7 @@ fn bots_rosters_and_fetch_failures_are_window_scoped(cx: &mut TestAppContext) {
             .is_some()
     );
     configure(&first, json!({"rosterFailing":true}));
-    a.update(&mut av, |s, _| s.surfaces.bots.fetched = None);
+    a.update(&mut av, |s, _| s.surfaces.bots.fetched.expire());
     settle(&a, &mut av);
     assert!(av.debug_bounds("rail-bots-retry").is_some());
     assert!(
