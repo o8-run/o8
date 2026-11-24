@@ -135,8 +135,8 @@ Each control above has its own switch in the app's environment:
 analytics and the launcher's own update check, for as long as it is set. It
 wins over the saved settings and over the variables in the table, and it
 changes nothing that is saved. The launcher still finishes an interrupted
-update install before it stops checking. Settings shows the affected values
-as set by the environment.
+update install before it stops checking. Settings shows the three values in
+the table as set by the environment.
 
 To set it for the installed app on macOS, quit o8, run
 `launchctl setenv O8_NO_PHONE_HOME 1`, and open o8 again. Run
