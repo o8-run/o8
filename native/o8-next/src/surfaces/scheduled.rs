@@ -31,7 +31,7 @@ impl ShellView for View {
         view.update(cx, |s, cx| s.tick(refresh, cx));
     }
     fn refresh(view: &Entity<Self>, cx: &mut Context<Shell>) {
-        view.update(cx, |s, cx| s.load(cx));
+        view.update(cx, |s, cx| s.refresh(cx));
     }
     #[cfg(test)]
     fn ready(view: &Entity<Self>, cx: &App) -> bool {

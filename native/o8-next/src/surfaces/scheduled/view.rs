@@ -1,6 +1,7 @@
 //! The Scheduled page (AutomationsPage.tsx, AutomationRow.tsx and
 //! ConnectedAgentAutomations.tsx): local automations with run, pause, edit,
-//! delete and fire history, then the connected agents' own schedules.
+//! delete and fire history, the connected agents' own schedules, then
+//! everything scheduled on this Mac.
 use super::editor::Editor;
 use super::*;
 use crate::theme::current as theme;
@@ -12,6 +13,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 #[path = "http_tests.rs"]
 mod http_tests;
+#[path = "computer.rs"]
+mod computer;
 
 /// Classic's owner for the operator's own automations.
 pub(super) const OWNER: &str = "operator";
@@ -29,6 +32,9 @@ pub(crate) struct Scheduled {
     error: Option<String>,
     connected: Option<Result<Value, String>>,
     connected_at: Option<Instant>,
+    /// Every scheduled job on this Mac, read on open and on Refresh only.
+    computer: Option<Result<Value, String>>,
+    computer_in_flight: bool,
     /// Registered repositories as (local path, default branch).
     pub(super) repos: Vec<(String, String)>,
     fetched: Option<Instant>,
@@ -52,6 +58,8 @@ impl Scheduled {
             error: None,
             connected: None,
             connected_at: None,
+            computer: None,
+            computer_in_flight: false,
             repos: vec![],
             fetched: None,
             in_flight: false,
@@ -63,7 +71,14 @@ impl Scheduled {
             _editor_events: None,
         };
         view.load(cx);
+        view.load_computer(cx);
         view
+    }
+
+    /// The shell's Refresh: automations and this Mac's jobs.
+    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.load(cx);
+        self.load_computer(cx);
     }
 
     /// Classic refreshes every 15 seconds while the page is open.
@@ -170,6 +185,9 @@ impl Scheduled {
                         }
                     }
                     Err(error) => this.fail(&id, &error),
+                }
+                if id.starts_with("connected:") {
+                    this.load_computer(cx);
                 }
                 this.load(cx);
                 cx.notify();
@@ -697,7 +715,8 @@ impl Scheduled {
         }
         let mut section = div().flex().flex_col().gap(px(6.));
         for (label, mut jobs) in groups {
-            if jobs.is_empty() {
+            // This Mac's full list replaces the launchd and cron rows here.
+            if jobs.is_empty() || (label == "This Mac" && self.computer_listed()) {
                 continue;
             }
             jobs.sort_by_key(attention);
@@ -963,6 +982,7 @@ impl Render for Scheduled {
                                     cx,
                                 ))
                             })
+                            .children(self.computer_section(cx))
                             .child(div().flex_1())
                             .child(
                                 div()
