@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import { atRest, idleGateStats, noteActivity, noteClientMessage, noteRequest, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
+import { atRest, idleGateStats, noteActivity, noteClientMessage, noteRequest, onRestChange, pausedLoopNames, resetIdleGate, startIdleGate } from './idle-gate';
 import { recurring } from './ledger';
 
 let live: boolean | string = false;
@@ -66,6 +66,19 @@ it('wakes at once on client activity and keeps "always" loops running', () => {
   expect(idleSafe.mock.calls.length).toBe(pausedAt + 1);
   noteActivity();
   expect(atRest()).toBe(false);
+});
+
+it('tells rest listeners after the last pass and on wake before paused loops run', () => {
+  const order: string[] = [];
+  timers.push(recurring('fixture-listener-loop', () => order.push('loop'), 1_000));
+  onRestChange((resting) => order.push(resting ? 'rest' : 'wake'));
+  vi.advanceTimersByTime(65_000);
+  expect(atRest()).toBe(true);
+  expect(order.filter((entry) => entry !== 'loop')).toEqual(['rest']);
+  vi.advanceTimersByTime(30_000);
+  order.length = 0;
+  noteActivity();
+  expect(order).toEqual(['wake', 'loop']);
 });
 
 it('never rests with the gate turned off', () => {

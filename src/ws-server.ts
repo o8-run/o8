@@ -83,13 +83,13 @@ import { o8dStartsByDefault } from '@/lib/ws-server/o8d-binary';
 migrateDataDirOnce();
 
 import { expireStaleApprovals } from '@/lib/approvals/store';
-import { getDb } from '@/lib/db';
+import { getDb, setDbResting } from '@/lib/db';
 import { ownsDataDirRelayIdentity, resolvePortInfo } from '@/lib/panel/api-port';
 import { getInstanceIdentity } from '@/lib/panel/instance-identity';
 import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
-import { noteActivity, noteClientMessage, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
+import { noteActivity, noteClientMessage, noteRequest, onRestChange, startIdleGate } from '@/lib/background-work/idle-gate';
 import { sharedParkChecks } from '@/lib/background-work/park-checks';
 import { startParkReport } from '@/lib/background-work/park-report';
 import { hasOutstandingReview, laneBlockingIdle } from '@/lib/lane/outstanding-review';
@@ -8630,6 +8630,8 @@ async function runStartupMaintenance() {
     terminals: () => ([...terminalAttachments.values()].some((attachment) => attachment.snapshotSource !== 'tmux')
       ? 'terminal not backed by tmux' : null),
   });
+  // At rest the primary database keeps a small page cache (memory at rest).
+  onRestChange(setDbResting);
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
   startAttachedBrowserRefreshLoop();

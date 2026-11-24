@@ -93,6 +93,22 @@ let sessionsLive = false;
 let sessionEndedAt = 0;
 let resting = false;
 let checker: NodeJS.Timeout | null = null;
+const restListeners = new Set<(resting: boolean) => void>();
+
+/**
+ * Called with true after the last pass before rest and with false on wake,
+ * before paused loops run. Returns a function that removes the listener.
+ */
+export function onRestChange(listener: (resting: boolean) => void): () => void {
+  restListeners.add(listener);
+  return () => { restListeners.delete(listener); };
+}
+
+function notifyRest(value: boolean): void {
+  for (const listener of restListeners) {
+    try { listener(value); } catch { /* a listener reports its own failures */ }
+  }
+}
 
 export function idleGateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.O8_IDLE_GATE !== '0';
@@ -130,6 +146,7 @@ function runLoop(name: string, now: number): void {
 /** Run every paused loop once and clear the pause, so nothing is stale on wake. */
 function wake(now: number): void {
   resting = false;
+  notifyRest(false);
   const names = [...paused];
   paused.clear();
   for (const name of names) runLoop(name, now);
@@ -142,6 +159,7 @@ function enterRest(now: number): void {
   for (const [name, loop] of loops) {
     if (loop.lastRunAt < quietSince) runLoop(name, now);
   }
+  notifyRest(true);
 }
 
 function evaluate(now = Date.now()): void {
@@ -227,6 +245,7 @@ export function resetIdleGate(): void {
   signals = null;
   loops.clear();
   paused.clear();
+  restListeners.clear();
   resting = false;
   lastActivityAt = Date.now();
   sessionsCheckedAt = 0;
