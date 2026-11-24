@@ -135,7 +135,7 @@ describe('shared server bundles in the packaged layout', () => {
         catch { return false; }
       });
       const paths = ['/api/panel/operator-defaults?include=native', '/api/panel/projects', '/api/panel/repos',
-        '/api/panel/approvals', '/api/customize/inventory'];
+        '/api/panel/approvals'];
       // Race the first lazy handler load with rejected requests. A concurrent
       // import must neither skip the gate nor lose a response during startup.
       await Promise.all(paths.flatMap(path => [true, false].map(async authorized => {

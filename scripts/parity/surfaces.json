@@ -239,18 +239,6 @@
       "webText": "Projects"
     },
     {
-      "id": "customize",
-      "flags": [
-        "--customize"
-      ],
-      "nativeCommand": "Open Customize",
-      "webRoute": "/dashboard",
-      "webEvent": "o8:open-customize",
-      "nativeSelectors": [
-        "custom-search"
-      ]
-    },
-    {
       "id": "scheduled",
       "flags": [
         "--scheduled"

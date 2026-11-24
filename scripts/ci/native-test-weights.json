@@ -64,8 +64,6 @@
   "shell::bots::tests::unicode_tests": 3,
   "shell::bots::view::tests": 11,
   "shell::brain::tests": 6,
-  "shell::customize::tests": 6,
-  "shell::customize::tests::review": 6,
   "shell::fake": 3,
   "shell::fake::parity_tests": 3,
   "shell::feature_tests": 7,

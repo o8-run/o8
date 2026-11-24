@@ -33,7 +33,7 @@ export function listDashTmuxSessionsWithAge(): DashSessionInventory[] {
 interface ReapDashSessionsOptions extends DashGcOptions {
   dataDir?: string;
   liveSessionNames: Iterable<string>;
-  collectAdditionalReferences: () => Iterable<string>;
+  collectAdditionalReferences?: () => Iterable<string>;
   beforeKill: (sessionName: string) => void;
 }
 
@@ -96,7 +96,7 @@ export function reapOrphanDashTmuxSessions(options: ReapDashSessionsOptions): nu
     sessions = listDashTmuxSessionsWithAge().filter((session) => session.profileOwner === owner);
     if (!sessions.length) return 0;
     referenced = collectPersistedTmuxSessions(dataDir);
-    for (const name of options.collectAdditionalReferences()) referenced.add(name);
+    for (const name of options.collectAdditionalReferences?.() ?? []) referenced.add(name);
   } catch {
     return 0;
   }

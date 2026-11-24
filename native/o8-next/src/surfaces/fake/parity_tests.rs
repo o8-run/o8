@@ -9,7 +9,6 @@ fn render_errors(cx: &mut VisualTestContext) -> Vec<&'static str> {
         "projects-error",
         "inbox-error",
         "issue-error",
-        "custom-error",
         "setup-error",
     ]
     .into_iter()

@@ -166,6 +166,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/cortex/ask/answer', 'POST', () => import('@/app/api/cortex/ask/answer/route')),
   ],
   activity: [
+    route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
     route('/api/panel/commits/[hash]', 'GET', () => import('@/app/api/panel/commits/[hash]/route')),
     route('/api/review/workspace', 'GET', () => import('@/app/api/review/workspace/route')),
     route('/api/cortex/proposals', 'GET POST', () => import('@/app/api/cortex/proposals/route')),
@@ -312,6 +313,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/agent-control/action', 'POST', () => import('@/app/api/agent-control/action/route')),
   ],
   settings: [
+    route('/api/setup/mcp-servers', 'GET POST PATCH DELETE', () => import('@/lib/mcp/setup-mcp-servers-route')),
     // Paired-device list (Settings > Paired devices). GET only: operator-gated by principal
     // (not client-addr), a pure SELECT with no write, and the body carries no token or hash (#5243).
     route('/api/mobile/devices', 'GET', () => import('@/app/api/mobile/devices/route')),
@@ -543,12 +545,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/review/last-turn', 'GET', () => import('@/app/api/review/last-turn/route')),
     route('/api/review/push', 'POST', () => import('@/lib/review/push-route')),
     route('/api/review/commit', 'POST', () => import('@/app/api/review/commit/route')),
-  ],
-  customize: [
-    route('/api/customize/inventory', 'GET', () => import('@/app/api/customize/inventory/route')),
-    route('/api/customize/actions', 'GET POST', () => import('@/app/api/customize/actions/route')),
-    route('/api/cortex/directives', 'GET POST', () => import('@/app/api/cortex/directives/route')),
-    route('/api/setup/mcp-servers', 'GET POST PATCH DELETE', () => import('@/lib/mcp/setup-mcp-servers-route')),
   ],
 };
 

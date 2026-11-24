@@ -102,7 +102,6 @@ import { resolveAppVersion } from '@/lib/telemetry/crash-store';
 import '@/lib/ws-runtime-env';
 import { resolveWorktreeRootLayout } from '@/lib/worktree/root-layout';
 import { WebSocketServer, WebSocket } from 'ws';
-import { pluginTerminalSessionReferences } from '@/lib/action-plugins/receipts';
 import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';
@@ -1627,7 +1626,6 @@ function reapOrphanDashSessions() {
     .map(([name]) => name);
   const killed = reapOrphanDashTmuxSessions({
     liveSessionNames,
-    collectAdditionalReferences: pluginTerminalSessionReferences,
     nowMs: Date.now(),
     minAgeMs: DASH_GC_MIN_AGE_MS,
     maxSessions: DASH_GC_MAX_SESSIONS,

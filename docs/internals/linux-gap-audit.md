@@ -39,14 +39,6 @@ Excluded: #5274, #5318, #5319, #5320, #5384, #1672, #5191.
 | OS permission settings | Nothing: no native operating-system permission page. Shared native gap. | `PARITY.md:77`; `src/settings_fields.rs:266-287`. | M |
 | Cloud-worker settings | Nothing: no dedicated cloud-worker settings page. Dispatch defaults, worker actions and Machines are separate existing surfaces. Shared native gap. | `PARITY.md:74`; `src/settings_fields.rs:266-287`. | L |
 | Local model lifecycle management | Editable model names for an already configured inference endpoint; no install/remove/start/stop model manager. Shared native gap. | `PARITY.md:65`; `src/settings_fields.rs:724-740` exposes only model-name fields. | L |
-| Plugin catalog | Local action-folder review/link/run management exists; no remote catalog/search/install/update workflow. Shared native gap. | `PARITY.md:37,89`; `src/surfaces/customize/plugins.rs:1-16`; `view.rs:14-22`. | L |
-| Customize Commands | Nothing: no Commands tab/inventory in Customize; the shell palette is available separately. Shared native gap. | `PARITY.md:86`; `src/surfaces/customize/view.rs:14-22`. | M |
-| Customize Instructions | Authored inventory; indexed references are excluded and there is no backing-file edit/forget workflow. Shared native gap. | `PARITY.md:85`; `src/surfaces/customize/inventory.rs:118-126`; | M |
-| Customize Prompts | Create/edit/copy/delete exists; no import or scope-reassignment control. Composer insertion is available separately. Shared native gap. | `PARITY.md:87`; `src/surfaces/customize/view.rs:219-263` preserves an existing prompt’s scope. | M |
-| Customize Skills | Metadata rows; no full-content view, import or bundle-management controls. Shared native gap. | `PARITY.md:88`; `src/surfaces/customize/inventory.rs:93-119`; `view.rs`. | M |
-| Customize Connections | Metadata/built-in inventory; no server-management controls in this tab. Settings does have external-client connection controls. Shared native gap. | `PARITY.md:90`; `src/surfaces/customize/inventory.rs`; `src/surfaces/settings/mcp.rs`. | M |
-| Customize Agents | Metadata rows; no backing-file view. Shared native gap. | `PARITY.md:91`; `src/surfaces/customize/inventory.rs:93-119`; `view.rs`. | M |
-| Customize Hooks | Event metadata rows; no complete hook configuration/backing-file workflow. Shared native gap. | `PARITY.md:92`; `src/surfaces/customize/inventory.rs:93-119`; `view.rs`. | M |
 | Composer IME coverage | The editor remains available with Linux key mappings, but two macOS-only tests omit IME/emoji/paste and command-navigation assertions here. This is a coverage gap, not a demonstrated Linux input failure. | `src/input_tests.rs:54,123`: `macos_ime_emoji_paste_and_command_shortcuts`, `macos_command_navigation_and_deletion`. | M |
 | Native shell visual regression coverage | Normal module runs skip the owned-X11 screenshot probe. The shell measurement captures a fixture frame but does not replace these visual assertions. | `src/shell_tests.rs:116-119`: `shell::tests::correction_native_screenshots`; `src/shell_look_tests.rs:25-28`: `shell::tests::look::correction_native_screenshots`. | M |
 | Large-file timing receipt coverage | Large-file editor tests run normally, but the explicit 10k/100k/1M open/scroll/edit/highlight receipt is ignored by default. | `src/files_panel/tests.rs:715-716`: `files_panel::tests::large_file_receipt`. | S |
@@ -227,8 +219,6 @@ Rows with broad “full workflow” remainders and no concrete missing control s
 | Usage (`usage`) | Missing label is stale: native Usage tab reads limits and local usage history. | src/surfaces/usage.rs |
 | Automations (`automations`) | Missing label is stale: Scheduled tab supports local/manual/cron automation and connected schedules. | src/surfaces/scheduled.rs |
 | Activity feed and packet controls | Present; the older missing-controls list is stale for lane stop/resume/merge, archive/restore, proposals and dossiers. Full parity remains unverified; no macOS gate found. | src/surfaces/activity/packet_controls.rs; proposals.rs; dossiers_view.rs; updates.rs |
-| Plugin catalog (`plugins`) | Gap table: local action plugins exist; remote catalog absent. | src/surfaces/customize/plugins.rs |
-| Customize (`customize`) | Present; every tab’s remaining scope is reconciled separately below. | src/surfaces/customize/view.rs |
 | README and Markdown documents (`readme`) | Missing label is stale: Files panel and Workspace Notes render Markdown. No separate document tab is claimed. | src/files_panel/markdown_view.rs; spec.rs |
 | Images and PDFs (`image`) | Image placeholder description is stale: raster images have native previews. PDF/media-preview remainder is listed above. | src/files_panel/media.rs; transcript_images.rs |
 | Interactive visualization cards (`visualization`) | Excluded: #5274. | src/visualizations/mod.rs; retained.rs; visualization_tests.rs |
@@ -261,14 +251,6 @@ Rows with broad “full workflow” remainders and no concrete missing control s
 | Settings: Permissions | Gap table: OS permission page absent. | src/settings_fields.rs:266-287 |
 | Settings: Diagnostics | Missing label is stale: feature audit and switch diagnostics exist; external transcript retention defers to provider controls. | src/settings_diagnostics.rs |
 | Settings: About | Missing label is stale: version/platform/update information and links exist. | src/settings_about.rs |
-| Customize: Instructions (`rules`) | Gap table: authored inventory; backing-file edit/forget and indexed references absent. | src/surfaces/customize/inventory.rs; view.rs |
-| Customize: Commands | Gap table: no Commands tab. | src/surfaces/customize/view.rs:14-22 |
-| Customize: Prompts | Gap table: CRUD/copy exists; import and scope reassignment absent. Composer has a separate insertion picker. | src/surfaces/customize/view.rs; composer/prompt_controls.rs |
-| Customize: Skills | Gap table: metadata; no import/content/bundle management. | src/surfaces/customize/inventory.rs; view.rs |
-| Customize: Plugins | Gap table: local action management exists; remote catalog absent. | src/surfaces/customize/plugins.rs |
-| Customize: Connections | Gap table: inventory here; external-client management exists separately in Settings. | src/surfaces/customize/inventory.rs; surfaces/settings/mcp.rs |
-| Customize: Agents | Gap table: metadata; backing-file view absent. | src/surfaces/customize/inventory.rs; view.rs |
-| Customize: Hooks | Gap table: event metadata; configuration workflow absent. | src/surfaces/customize/inventory.rs; view.rs |
 
 ## Complete macOS cfg sweep
 

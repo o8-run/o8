@@ -56,17 +56,6 @@
       }
     },
     {
-      "path": "/api/customize/inventory",
-      "o8d": {
-        "p50Ms": 1.47,
-        "p95Ms": 2.53
-      },
-      "next": {
-        "p50Ms": 4.34,
-        "p95Ms": 7.53
-      }
-    },
-    {
       "path": "/api/mobile/history?sessionKey=llm-chat:thoughts-measure&limit=100",
       "o8d": {
         "p50Ms": 1.73,

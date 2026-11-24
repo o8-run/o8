@@ -1,7 +1,7 @@
 use super::*;
 // The dock's Tools button and its drawer: every destination the old rail held
 // (new chat, terminal, scheduled, plugins) plus RailMoreMenu.tsx's Projects,
-// Customize, Settings and Setup, opening upward from the end of the dock.
+// Settings and Setup, opening upward from the end of the dock.
 struct RailMore;
 register_shell_feature!(RailMore);
 impl ShellFeature for RailMore {
@@ -65,10 +65,9 @@ fn close(s: &mut Shell, cx: &mut Context<Shell>) {
     cx.notify();
 }
 
-/// Projects, Customize, Settings or Setup, whichever is open, marks the button.
+/// Projects, Settings or Setup, whichever is open, marks the button.
 fn selected(s: &Shell) -> bool {
     s.surfaces.projects.open
-        || s.surfaces.customize.open
         || s.surfaces.settings.view.is_some()
         || s.surfaces.setup.view.is_some()
 }
@@ -163,7 +162,6 @@ fn items(s: &Shell) -> Vec<Item> {
         }),
         ("rail-more-terminal", Icon::Terminal.path(), "Terminal", None, active == Some(Tab::Terminal), false, |s, w, cx| run(Command::Terminal, s, w, cx)),
         ("rail-more-scheduled", Icon::Clock.path(), "Scheduled", None, active == Some(Tab::Scheduled), false, |s, w, cx| run(Command::Scheduled, s, w, cx)),
-        ("rail-more-plugins", Icon::Puzzle.path(), "Plugins", None, false, false, |s, w, cx| s.show_customize_tab("plugins", w, cx)),
         ("rail-more-mobile", MOBILE, "Mobile", None, false, false, |s, w, cx| {
             // Straight to a fresh pairing code, as the app's own command does.
             run(Command::Settings, s, w, cx);
@@ -172,15 +170,6 @@ fn items(s: &Shell) -> Vec<Item> {
             }
         }),
         ("rail-more-projects", PROJECTS, "Projects", None, s.surfaces.projects.open, true, |s, w, cx| run(Command::Projects, s, w, cx)),
-        (
-            "rail-more-customize",
-            CUSTOMIZE,
-            "Customize",
-            Some("Agent and workspace capabilities"),
-            s.surfaces.customize.open,
-            true,
-            |s, w, cx| run(Command::Customize, s, w, cx),
-        ),
         (
             "rail-more-settings",
             SETTINGS,
@@ -354,7 +343,6 @@ const UPDATES: &str = "M12 15V3 M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l
 const MOBILE: &str = "M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z M12 18h.01";
 const GRID: &str = "M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z";
 const PROJECTS: &str = "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
-const CUSTOMIZE: &str = "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6";
 const SETTINGS: &str =
     "M20 7h-9 M14 17H5 M17 14a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M7 4a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z";
 const SETUP: &str = "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z";

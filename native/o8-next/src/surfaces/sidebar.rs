@@ -30,7 +30,6 @@ struct Navigation {
     shown: Option<String>,
     settings_open: bool,
     projects_open: bool,
-    customize_open: bool,
     refresh_revision: u64,
 }
 #[derive(Default)]
@@ -748,7 +747,6 @@ pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
         }),
         settings_open: s.surfaces.settings.view.is_some(),
         projects_open: s.surfaces.projects.open,
-        customize_open: s.surfaces.customize.open,
         refresh_revision: s.active().and_then(|tab| s.content.get(&s.key(&tab)))
             .map_or(0, |content| match content {
                 Content::Session(view) => view.read(cx).navigation_refresh_revision,
