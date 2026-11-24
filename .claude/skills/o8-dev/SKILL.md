@@ -29,7 +29,7 @@ Use this loop only after the dispatch decision above is satisfied.
 
 1. **Dispatch:** create a bounded mission with explicit scope, done condition, verification, compact
    handback, model, and effort. Require explicit pathspecs and never `git add -A`.
-2. **Watch:** `wait_for_mission_ready({missionId, timeoutMs:1800000})` — long-poll that returns the instant a packet hits review/terminal; that return re-enters your turn (this is how you "get pinged" — o8 workers are NOT harness-tracked, so re-arm it or piggyback on a ginsu/background-task notification). Verify liveness via `get_mission_status` + the owned rollout tails; the UI packet card via `o8_view_*`.
+2. **Watch:** `wait_for_mission_ready({missionId, timeoutMs:1800000})` — long-poll that returns the instant a packet hits review/terminal; that return re-enters your turn (this is how you "get pinged" — o8 workers are NOT harness-tracked, so re-arm it or piggyback on a ginsu/background-task notification). Verify liveness via `get_mission_status` + the owned rollout tails.
 3. **Review every delegated diff:** inspect the raw diff and verification receipts. Read high-risk
    authentication, authorization, schema, payment, destructive, and security evidence directly.
 4. **Merge or salvage:**

@@ -32,7 +32,6 @@ const answerRoute = await import('@/app/api/cortex/ask/answer/route');
 const streamRoute = await import('@/app/api/cortex/ask/route');
 const { handleOperatorMcpMessage } = await import('@/lib/mcp/operator-mcp-host');
 const runtimeRoute = await import('@/app/api/runtime/action/route');
-const { O8WebviewClient } = await import('@/lib/mcp/o8-webview-client');
 
 type ToolResult = { isError?: boolean; content: Array<{ text: string }> };
 
@@ -240,25 +239,6 @@ globalThis.fetch = (url, init) => new Promise((resolve, reject) => {
     expect(JSON.stringify(result)).not.toContain(marker);
     expect(result.content[0].text).toContain('o8 operation failed');
     expect(log.mock.calls.flat().some((value) => value instanceof Error && value.message.includes(marker))).toBe(true);
-  });
-
-  it('hides webview and directory bridge exceptions through registered operator tools', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    // #4789 refuses to fall back to the installed app socket under an isolated data dir,
-    // so name a fixture socket; the bridge calls below are stubbed and never connect.
-    vi.stubEnv('O8_TAURI_MCP_SOCKET', join(tmpdir(), 'o8-mcp-error-results-fixture.sock'));
-    vi.spyOn(O8WebviewClient.prototype, 'screenshot').mockRejectedValue(new Error(marker));
-    vi.spyOn(O8WebviewClient.prototype, 'inspectDirectoryDialog').mockRejectedValue(new Error(marker));
-    vi.spyOn(O8WebviewClient.prototype, 'evalJs').mockResolvedValue({ result: JSON.stringify({ ok: false, error: marker }) });
-    for (const name of ['o8_view_screenshot', 'o8_view_inspect_directory_dialog', 'o8_view_surface_state']) {
-      const response = await handleOperatorMcpMessage({
-        jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: {} },
-      });
-      const result = response?.result as ToolResult;
-      expect(result.isError).toBe(true);
-      expect(JSON.stringify(result)).not.toContain(marker);
-      expect(result.content[0].text).toContain('o8 operation failed');
-    }
   });
 
   it('keeps streaming ask pipeline exceptions out of SSE errors', async () => {

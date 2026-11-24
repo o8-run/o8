@@ -1,5 +1,3 @@
-import { savedImageReadScript, type SavedImageTarget } from '@/lib/mcp/o8-saved-image-read';
-import { validateImageAttachment, validateComposerInspection, imageRequestId, type ImageAttachmentRequest } from '@/lib/composer/image-attachment';
 import { readFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 
@@ -23,7 +21,6 @@ import {
   type O8AppInfo, type O8EventsAction, type O8NavigateWebviewAction,
   type O8WindowInfo, type O8WindowOperation, type SocketResponse,
 } from '@/lib/mcp/o8-webview-client-data';
-import { parseDirectoryResolve, type DirectoryResolve } from '@/lib/mcp/o8-directory-dialog-tools';
 export type {
   O8AppInfo, O8EventsAction, O8MonitorInfo, O8NavigateWebviewAction, O8WindowInfo, O8WindowOperation,
 } from '@/lib/mcp/o8-webview-client-data';
@@ -49,31 +46,6 @@ export class O8WebviewClient {
 
     process.once('beforeExit', cleanup);
     process.once('exit', cleanup);
-  }
-
-  async inspectSavedImage(target: SavedImageTarget): Promise<Record<string, unknown>> {
-    return JSON.parse((await this.evalJs(savedImageReadScript(target))).result);
-  }
-
-  async hardReload(args: { operation: 'observe' | 'reload'; document_id?: string }): Promise<Record<string, unknown>> {
-    const observed = JSON.parse((await this.evalJs(savedImageReadScript())).result) as Record<string, unknown>;
-    if (observed.status !== 'ready') return observed;
-    if (args.operation === 'observe') return { ...observed, document_changed: args.document_id ? observed.document_id !== args.document_id : null };
-    if (observed.document_id !== args.document_id) return { status: 'error', code: 'stale_document', action_dispatched: false, document_id: observed.document_id };
-    try {
-      await this.navigateWebview({ action: 'reload' });
-      return { status: 'pending', document_id: args.document_id, action_dispatched: true, next: 'Observe document identity; never automatically replay reload' };
-    } catch {
-      return { status: 'unknown', document_id: args.document_id, action_dispatched: null, next: 'Observe document identity; never automatically replay reload' };
-    }
-  }
-
-  async inspectDirectoryDialog(): Promise<Record<string, unknown>> {
-    return unwrapCommandData(await this.sendCommand('inspect_directory_dialog', {}));
-  }
-
-  async resolveDirectoryDialog(args: DirectoryResolve): Promise<Record<string, unknown>> {
-    return unwrapCommandData(await this.sendCommand('resolve_directory_dialog', parseDirectoryResolve(args)));
   }
 
   async screenshot(): Promise<{ imageBase64: string; mimeType: string; width: number; height: number }> {
@@ -257,38 +229,6 @@ export class O8WebviewClient {
       return (root?.innerText || '').trim();
     })()`);
     return { text: result.result };
-  }
-
-  // Fixed app-owned bridge calls only. execute_js is never reconnect-replayed.
-  private async composerImageCall(method: 'inspect' | 'attach' | 'status', argument: unknown = null): Promise<Record<string, unknown>> {
-    const code = `(() => { const bridge = window.__o8ComposerImages__; return JSON.stringify(bridge ? bridge.${method}(${JSON.stringify(argument)}) : {status:'error',code:'bridge_unavailable'}); })()`;
-    const { result } = await this.evalJs(code);
-    const data = JSON.parse(result) as Record<string, unknown>;
-    if (!data || typeof data !== 'object' || !['ready', 'pending', 'completed', 'error'].includes(String(data.status))) {
-      throw createCodedError('Invalid composer bridge receipt', 'bridge_unavailable');
-    }
-    if (data.status !== 'error') {
-      if (typeof data.allow_background !== 'boolean' || typeof data.document_visibility !== 'string' || (method !== 'status' && data.allow_background !== ((argument as { allow_background?: boolean }).allow_background === true))) {
-        throw createCodedError('Uncorrelated attachment mode', 'outcome_unknown');
-      }
-      if (method === 'inspect' && data.status !== 'ready') throw createCodedError('Invalid inspection receipt', 'bridge_unavailable');
-      if (method !== 'inspect') {
-        const id = method === 'status' ? argument : (argument as ImageAttachmentRequest).request_id;
-        if (data.status === 'ready' || data.request_id !== id || (method === 'attach' && data.composer_id !== (argument as ImageAttachmentRequest).composer_id)) {
-          throw createCodedError('Uncorrelated attachment receipt', 'outcome_unknown');
-        }
-      }
-    }
-    return data;
-  }
-  async inspectImageComposer(options: { allow_background?: boolean } = {}): Promise<Record<string, unknown>> {
-    return this.composerImageCall('inspect', validateComposerInspection(options));
-  }
-  async attachComposerImage(request: ImageAttachmentRequest): Promise<Record<string, unknown>> {
-    return this.composerImageCall('attach', validateImageAttachment(request));
-  }
-  async imageAttachmentStatus(requestId: string): Promise<Record<string, unknown>> {
-    return this.composerImageCall('status', imageRequestId(requestId));
   }
 
   async evalJs(code: string): Promise<{ result: string }> {
