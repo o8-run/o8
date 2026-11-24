@@ -247,6 +247,16 @@ impl Window {
         false
     }
 
+    /// Tells the running window that opened files are waiting, so it takes
+    /// them now instead of asking every 250 ms. False when it cannot be told.
+    pub(super) fn announce_documents(&self) -> bool {
+        lock(&self.relay.input).as_ref().is_some_and(|input| {
+            input
+                .try_send(b"{\"type\":\"open-files\"}\n".to_vec())
+                .is_ok()
+        })
+    }
+
     /// True once the window asked to quit o8 (#6532). The launcher's own
     /// bounded shutdown answers it, as it answers Dock Quit.
     pub(super) fn quit_requested(&self) -> bool {
