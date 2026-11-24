@@ -85,7 +85,7 @@ function catalog(ref) {
     if (/test|fixture|__mocks__/.test(file) || !/^(src\/|src-tauri\/|scripts\/|\.claude\/)/.test(file)) continue;
     const text = source(file, ref);
     if (!text) continue;
-    if (/prompt-library|prompt-stash|customize\/|voice-settings\/|api\/setup\//.test(file)) continue;
+    if (/prompt-stash|customize\/|voice-settings\/|api\/setup\//.test(file)) continue;
     if (/TranscriptNavigator|OrchestratorPromptControls|thoughts\/utils\.ts/.test(file)) continue;
     if (assets.has(file)) { add(file, 'asset', text); continue; }
     if (file.endsWith('.rs')) {

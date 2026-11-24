@@ -28,37 +28,29 @@ impl Surface {
     pub(super) fn submit_prompt_form(&mut self, cx: &mut Context<Self>) {
         let editor = self.composer.clone();
         let open = editor.read(cx).controls.open.unwrap_or("");
-        if editor.read(cx).controls.prompt.loading {
+        if open != "branch-create" || editor.read(cx).controls.prompt.loading {
             return;
         }
-        let fields: Vec<String> = editor
+        let branch = editor
             .read(cx)
             .controls
             .prompt
             .fields
-            .iter()
+            .first()
             .map(|f| f.read(cx).text.trim().to_owned())
-            .collect();
-        let repo = self.intent_repo(cx).unwrap_or_default();
-        let scope = editor.read(cx).controls.prompt.scope;
-        if fields.first().is_none_or(|s| s.is_empty())
-            || (open == "save-prompt" && fields.get(2).is_none_or(|s| s.is_empty()))
-        {
+            .unwrap_or_default();
+        if branch.is_empty() {
             editor.update(cx, |i, cx| {
-                i.controls.prompt.error = "A title/name and prompt body are required.".into();
+                i.controls.prompt.error = "A branch name is required.".into();
                 cx.notify();
             });
             cx.notify();
             return;
         }
+        let repo = self.intent_repo(cx).unwrap_or_default();
         let client = self.client.clone();
-        let branch = fields[0].clone();
-        let body = if open == "branch-create" {
-            let current = editor.read(cx).controls.prompt.branch_base.clone();
-            json!({"path":repo,"branch":branch,"baseBranch":current})
-        } else {
-            json!({"title":fields[0],"tags":fields.get(1).map(|s|s.split(',').map(str::trim).filter(|s|!s.is_empty()).collect::<Vec<_>>()).unwrap_or_default(),"body":fields.get(2),"scope":if scope{"repo"}else{"global"},"repoPath":if scope{Some(repo)}else{None}})
-        };
+        let current = editor.read(cx).controls.prompt.branch_base.clone();
+        let body = json!({"path":repo,"branch":branch,"baseBranch":current});
         let generation = editor.update(cx, |i, cx| {
             i.controls.prompt.loading = true;
             i.controls.prompt.error.clear();
@@ -66,17 +58,9 @@ impl Surface {
             cx.notify();
             i.controls.prompt.generation
         });
-        let task = cx.background_executor().spawn(async move {
-            post(
-                &client,
-                if open == "branch-create" {
-                    "/api/panel/branches"
-                } else {
-                    "/api/prompt-library"
-                },
-                body,
-            )
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { post(&client, "/api/panel/branches", body) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = editor.update(cx, |i, cx| {
@@ -85,7 +69,7 @@ impl Surface {
                 }
                 i.controls.prompt.loading = false;
                 match result {
-                    Ok(value) if open == "branch-create" => {
+                    Ok(value) => {
                         if let Some(created) = value["created"].as_str() {
                             i.controls.prompt.branch = created.to_owned();
                             i.controls.open = None;
@@ -93,18 +77,6 @@ impl Surface {
                             i.controls.prompt.error =
                                 "The server did not confirm the new branch.".into();
                         }
-                    }
-                    Ok(value) if value["prompt"]["id"].is_string() => {
-                        i.controls.prompt.result = if value["created"] == false {
-                            "This prompt is already saved in that scope."
-                        } else {
-                            "Prompt saved."
-                        }
-                        .into()
-                    }
-                    Ok(_) => {
-                        i.controls.prompt.error =
-                            "The server did not confirm the saved prompt.".into()
                     }
                     Err(error) => i.controls.prompt.error = error,
                 }
@@ -131,11 +103,6 @@ impl Surface {
             "/fleet" => "/orchestrate",
             _ => token.as_str(),
         };
-        if command == "/prompts" {
-            self.composer.update(cx, |i, cx| i.set_text("", cx));
-            self.open_prompt("prompts", window, cx);
-            return;
-        }
         if command == "/rules" {
             self.composer.update(cx, |i, cx| i.set_text("", cx));
             self.open_prompt("rules", window, cx);

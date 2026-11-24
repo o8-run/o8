@@ -47,7 +47,7 @@ function connect(origin: string, token: string, headers: Record<string, string> 
   socket.on('error', () => {});
   return { socket, frames, get code() { return code; } };
 }
-it.runIf(process.platform === 'linux')('delivers committed prompt and rule writes once, keeps refusals silent and hands back to TS', async () => {
+it.runIf(process.platform === 'linux')('delivers committed rule writes once, keeps refusals silent and hands back to TS', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-native-global-'))), server = join(root, 'server');
   let owner: ChildProcess | undefined, client: ChildProcess | undefined;
   const sockets: WebSocket[] = []; let clientOutput = '', stderr = '';
@@ -80,7 +80,7 @@ it.runIf(process.platform === 'linux')('delivers committed prompt and rule write
       await until(() => json(join(root, 'commit-client-ready')) !== null || (() => { try { return readFileSync(join(root, 'commit-client-ready'), 'utf8') === 'ready'; } catch { return false; } })(), 'production Client ready');
     }
     if (!clientBinary) console.info('[native-client-proof] Client leg requires O8_LAUNCHER_TRANSPORT_TEST_BINARY; integration runs socket proof without building the GUI.');
-    const events = () => observer.frames.flatMap(f => f.data?.events ?? []).filter(e => e.data?.mutation?.action?.match(/^(prompt-library|session-rule)\./));
+    const events = () => observer.frames.flatMap(f => f.data?.events ?? []).filter(e => e.data?.mutation?.action?.startsWith('session-rule.'));
     const expected: {action:string;surfaceId:string;native:boolean}[] = [];
     const call = (path:string, method:string, payload?:unknown) => fetch(origin + path, {method, headers:{...headers,'content-type':'application/json'}, ...(payload === undefined ? {} : {body:JSON.stringify(payload)})});
     const confirm = async (action:string, surfaceId:string) => {
@@ -88,12 +88,6 @@ it.runIf(process.platform === 'linux')('delivers committed prompt and rule write
       await until(() => events().some(e => e.data.mutation.action === action && e.data.mutation.surfaceId === surfaceId), 'Native committed '+action+' event was not reached', 5000);
       expect(events().filter(e => e.data.mutation.action === action && e.data.mutation.surfaceId === surfaceId)).toHaveLength(1);
     };
-    const created = await call('/api/prompt-library','POST',{title:'commit fixture',body:'isolated body'});
-    expect(created.status).toBe(201); expect(created.headers.get('x-o8d-native')).toBe('1'); const prompt=(await created.json()).prompt;
-    await confirm('prompt-library.create',prompt.id);
-    expect((await call('/api/prompt-library/'+prompt.id,'PATCH',{title:'edited'})).status).toBe(200); await confirm('prompt-library.edit',prompt.id);
-    expect((await call('/api/prompt-library/'+prompt.id+'/use','POST')).status).toBe(200); await confirm('prompt-library.use',prompt.id);
-    expect((await call('/api/prompt-library/'+prompt.id,'DELETE')).status).toBe(200); await confirm('prompt-library.delete',prompt.id);
     const thread='thoughts-native-commit';
     const added=await call('/api/orchestrator/session-rules','POST',{threadId:thread,text:'isolated rule'});expect(added.status).toBe(200);expect(added.headers.get('x-o8d-native')).toBe('1');const rule=(await added.json()).result.rule;
     await confirm('session-rule.add',thread);
@@ -108,8 +102,8 @@ it.runIf(process.platform === 'linux')('delivers committed prompt and rule write
       db.exec("CREATE TRIGGER fail_hold BEFORE INSERT ON worker_corrections BEGIN SELECT RAISE(ABORT,'isolated rollback'); END");
       expect((await call('/api/orchestrator/session-rules?operation=correction-hold','POST',{...hold,id:'rollback-hold-fixture'})).status).toBe(500);
       expect(counts()).toEqual(before);db.exec('DROP TRIGGER fail_hold');
-      expect((await call('/api/prompt-library','POST',{})).status).toBe(400);
-      expect((await fetch(origin+'/api/prompt-library',{method:'POST',headers:{authorization:'Bearer wrong','content-type':'application/json'},body:'{}'})).status).toBe(503);
+      expect((await call('/api/orchestrator/session-rules','POST',{})).status).toBe(400);
+      expect((await fetch(origin+'/api/orchestrator/session-rules',{method:'POST',headers:{authorization:'Bearer wrong','content-type':'application/json'},body:'{}'})).status).toBe(503);
       await new Promise(r=>setTimeout(r,300));expect(events()).toHaveLength(expected.length);
     } finally {db.close();}
     rmSync(join(root,'hold-ws-start'));
@@ -120,18 +114,19 @@ it.runIf(process.platform === 'linux')('delivers committed prompt and rule write
     await until(()=>attached.socket.readyState===WebSocket.OPEN,'producer upgrade');
     attached.socket.send(JSON.stringify({type:'realtime-subscribe',subscriptions:[{stream:'global'}]}));
     await until(()=>attached.frames.some(f=>f.channel==='realtime'),'producer checkpoint');
-    const next=await call('/api/prompt-library','POST',{title:'attached commit',body:'isolated attached body'});expect(next.status).toBe(201);const nextId=(await next.json()).prompt.id;
-    const attachedEvents=()=>attached.frames.flatMap(f=>f.data?.events??[]).filter(e=>e.data?.mutation?.action==='prompt-library.create'&&e.data.mutation.surfaceId===nextId);
+    const nextId='thoughts-attached-commit';
+    const next=await call('/api/orchestrator/session-rules','POST',{threadId:nextId,text:'isolated attached rule'});expect(next.status).toBe(200);
+    const attachedEvents=()=>attached.frames.flatMap(f=>f.data?.events??[]).filter(e=>e.data?.mutation?.action==='session-rule.add'&&e.data.mutation.surfaceId===nextId);
     await until(()=>attachedEvents().length>0,'producer-sequenced native commit');
     await new Promise(r=>setTimeout(r,300));expect(attachedEvents()).toHaveLength(1);
     expect(attached.frames.filter(f=>f.data?.events?.some(e=>e.data?.mutation?.surfaceId===nextId)).every(f=>!f.data.epoch.startsWith('o8d-native:'))).toBe(true);
-    expected.push({action:'prompt-library.create',surfaceId:nextId,native:false});
+    expected.push({action:'session-rule.add',surfaceId:nextId,native:false});
     if(client)await until(()=>{try{return readFileSync(join(root,'commit-client-events.jsonl'),'utf8').includes(nextId);}catch{return false;}},'Client producer notification');
     writeFileSync(join(root,'commit-client-expected.json'),JSON.stringify(expected));
     if(client){writeFileSync(join(root,'transport-stop'),'stop');await until(()=>client!.exitCode!==null,'Client finish');expect(client.exitCode).toBe(0);expect(clientOutput.includes('1 passed')).toBe(true);}
     const secondProducer=json(join(root,'launcher-ws.json')).pid as number;
     await stop(owner);expect(owner.exitCode).toBe(0);expect(alive(daemonPid)).toBe(false);expect(alive(secondProducer)).toBe(false);
     const captured=readFileSync(join(root,'logs/o8d.log'),'utf8')+readFileSync(join(root,'o8d-request-counts.jsonl'),'utf8')+stderr+JSON.stringify(events());
-    for(const privateValue of [token,'isolated body','isolated rule','hold fixture'])expect(captured.includes(privateValue)).toBe(false);
+    for(const privateValue of [token,'isolated rule','isolated attached rule','hold fixture'])expect(captured.includes(privateValue)).toBe(false);
   } finally {for(const socket of sockets)socket.terminate();if(client&&client.exitCode===null)client.kill('SIGTERM');await stop(owner);rmSync(root,{recursive:true,force:true});}
 },240_000);

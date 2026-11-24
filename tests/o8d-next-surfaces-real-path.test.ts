@@ -149,7 +149,7 @@ it.each([
   ['Projects', 'GET', '/api/panel/projects', 200],
   ['Issues', 'GET', '/api/panel/repos', 200],
   ['Inbox', 'GET', '/api/panel/approvals', 200],
-  ['Customize', 'GET', '/api/prompt-library', 200],
+  ['Customize', 'GET', '/api/customize/inventory', 200],
   ['Brain', 'POST', '/api/cortex/ask', 400],
   ['Setup', 'GET', '/api/setup/config', 200],
   ['Terminal', 'GET', '/api/mobile/terminal-sessions', 200],
@@ -712,25 +712,22 @@ it('streams Brain immediately, then survives a pane disconnect and concurrent re
 
 it('keeps concurrent route parameters and request bodies isolated', async () => {
   const headers = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
-  const create = await fetch(`${origin}/api/prompt-library`, { method: 'POST', headers,
-    body: JSON.stringify({ title: 'Concurrent fixture', body: 'Initial fixture prompt', scope: 'global' }),
-  });
-  expect(create.status).toBe(201);
-  const created = await create.json();
-  const prompt = created.prompt ?? created;
-  const requests = Array.from({ length: 6 }, (_, index) => fetch(`${origin}/api/prompt-library/${encodeURIComponent(prompt.id)}`, {
-    method: 'PATCH', headers, body: JSON.stringify({ title: `Fixture ${index}`, body: `Body ${index}`, expectedUpdatedAt: prompt.updatedAt }),
-  }));
-  const responses = await Promise.all(requests);
-  expect(responses.filter(response => response.ok)).toHaveLength(1);
-  expect(responses.filter(response => response.status === 409)).toHaveLength(5);
-  for (const response of responses) await response.arrayBuffer();
+  const threads = Array.from({ length: 6 }, (_, index) => `concurrent-fixture-${index}`);
+  const responses = await Promise.all(threads.map((threadId, index) => fetch(`${origin}/api/orchestrator/session-rules`, {
+    method: 'POST', headers, body: JSON.stringify({ threadId, text: `Rule ${index}` }),
+  })));
+  for (const response of responses) { expect(response.status).toBe(200); await response.arrayBuffer(); }
+  const lists = await Promise.all(threads.map(threadId => fetch(`${origin}/api/orchestrator/session-rules?threadId=${threadId}`, { headers })));
+  for (const [index, list] of lists.entries()) {
+    expect(list.status).toBe(200);
+    expect((await list.json()).result.rules.map((rule: { text: string }) => rule.text)).toEqual([`Rule ${index}`]);
+  }
 });
 
 it('returns a bounded upload refusal without resetting the connection', async () => {
-  const response = await fetch(`${origin}/api/prompt-library`, { method: 'POST',
+  const response = await fetch(`${origin}/api/orchestrator/session-rules`, { method: 'POST',
     headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ title: 'Large fixture', body: 'x'.repeat(16 * 1024 * 1024) }),
+    body: JSON.stringify({ threadId: 'large-fixture', text: 'x'.repeat(16 * 1024 * 1024) }),
   });
   expect(response.status).toBe(413);
   expect(await response.json()).toEqual({ error: 'Request exceeds 16 MiB' });
@@ -738,10 +735,10 @@ it('returns a bounded upload refusal without resetting the connection', async ()
 
 it('refuses read-only workers and invalid credentials on native writes', async () => {
   for (const bearer of ['o8ro_fixture-read-only', 'fixture-invalid']) {
-    const response = await fetch(`${origin}/api/prompt-library`, { method: 'POST', headers: {
+    const response = await fetch(`${origin}/api/orchestrator/session-rules`, { method: 'POST', headers: {
       authorization: `Bearer ${bearer}`, 'content-type': 'application/json',
       'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1',
-    }, body: JSON.stringify({ title: 'Denied fixture', body: 'Must not persist' }) });
+    }, body: JSON.stringify({ threadId: 'denied-fixture', text: 'Must not persist' }) });
     expect(response.status).toBe(bearer.startsWith('o8ro_') ? 403 : 401);
     await response.arrayBuffer();
   }
@@ -826,7 +823,7 @@ it('preserves packet-worker lane diff and visualization ownership through o8d', 
   });
   expect(foreignVisualization.status).toBe(404);
   await foreignVisualization.arrayBuffer();
-  const unrelated = await fetch(`${origin}/api/prompt-library`, { headers: { authorization: `Bearer ${fixture.token}` } });
+  const unrelated = await fetch(`${origin}/api/panel/operator-defaults`, { headers: { authorization: `Bearer ${fixture.token}` } });
   expect(unrelated.status).toBe(403);
   await promisify(execFile)(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', '--eval', `
     const { getSqlite, closeDb } = require('./src/lib/db/index.ts');

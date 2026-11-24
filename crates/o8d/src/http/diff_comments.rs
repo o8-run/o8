@@ -1,5 +1,5 @@
 //! Single product owner for the phone's inline diff comments. No row cache.
-use super::prompt_library::trim;
+use super::text::trim;
 use super::session_rules::{clipped_text, row_text};
 use super::*;
 use rusqlite::{
@@ -109,12 +109,12 @@ fn open(store: &ReadContext<'_>) -> Result<Connection, ()> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| ())?
         .iter()
-        .map(|s| super::prompt_writes::normalize_sql(s))
+        .map(|s| super::text::normalize_sql(s))
         .collect::<Vec<_>>();
     let mut expected = include_str!("mobile_diff_comments.sql")
         .split(';')
         .filter(|s| !s.trim().is_empty())
-        .map(super::prompt_writes::normalize_sql)
+        .map(super::text::normalize_sql)
         .collect::<Vec<_>>();
     actual.sort();
     expected.sort();

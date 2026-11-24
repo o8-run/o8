@@ -15,12 +15,12 @@ fn custom_click(cx: &mut VisualTestContext, selector: &'static str) {
 }
 
 #[gpui::test]
-fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
+fn customize_inventory_search_and_reopen(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--customize");
     let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
     let repo = repos["repos"][0]["localPath"].as_str().unwrap().to_owned();
     let state = State {
-        selected: Some(repo.clone()),
+        selected: Some(repo),
         ..State::default()
     };
     let (shell, mut visual) = open(
@@ -109,59 +109,6 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
             .unwrap()
             .contains("Fixture instruction")
     );
-    custom_click(cx, "custom-tab-prompts");
-    assert!(cx.debug_bounds("custom-empty").is_some());
-    custom_click(cx, "custom-new");
-    custom_click(cx, "custom-save");
-    assert!(
-        cx.debug_bounds("custom-error").is_some(),
-        "server validation must retain the editor"
-    );
-    custom_click(cx, "custom-title");
-    cx.simulate_input("Saved fixture");
-    custom_click(cx, "custom-body");
-    cx.simulate_input("Reusable fixture text");
-    custom_click(cx, "custom-tags");
-    cx.simulate_input("review, fixture");
-    custom_click(cx, "custom-save");
-    let saved: Value = fixture
-        .client
-        .get(
-            "/api/prompt-library",
-            &[("repoPath", &repo), ("scope", "available")],
-        )
-        .unwrap();
-    assert_eq!(saved["prompts"][0]["title"], "Saved fixture");
-    assert_eq!(saved["prompts"][0]["tags"], json!(["review", "fixture"]));
-    assert_eq!(
-        fs::canonicalize(saved["prompts"][0]["repoPath"].as_str().unwrap()).unwrap(),
-        fs::canonicalize(&repo).unwrap()
-    );
-    custom_click(cx, "custom-copy-0");
-    assert_eq!(
-        cx.read_from_clipboard().unwrap().text().unwrap(),
-        "Reusable fixture text"
-    );
-    custom_click(cx, "custom-edit-0");
-    custom_click(cx, "custom-title");
-    cx.simulate_keystrokes("ctrl-a");
-    cx.simulate_input("Cancelled");
-    custom_click(cx, "custom-cancel");
-    let cancelled: Value = fixture
-        .client
-        .get("/api/prompt-library", &[("repoPath", &repo)])
-        .unwrap();
-    assert_eq!(cancelled["prompts"][0]["title"], "Saved fixture");
-    custom_click(cx, "custom-edit-0");
-    custom_click(cx, "custom-title");
-    cx.simulate_keystrokes("ctrl-a");
-    cx.simulate_input("Updated fixture");
-    custom_click(cx, "custom-save");
-    let updated: Value = fixture
-        .client
-        .get("/api/prompt-library", &[("repoPath", &repo)])
-        .unwrap();
-    assert_eq!(updated["prompts"][0]["title"], "Updated fixture");
     custom_click(cx, "custom-search");
     let start = Instant::now();
     cx.simulate_input("unmatched");
@@ -190,26 +137,14 @@ fn customize_inventory_and_prompt_crud(cx: &mut TestAppContext) {
         "reopening Customize must retain its view and selection"
     );
     custom_click(cx, "custom-copy-0");
-    assert_eq!(
-        cx.read_from_clipboard().unwrap().text().unwrap(),
-        "Reusable fixture text"
+    assert!(
+        cx.read_from_clipboard()
+            .unwrap()
+            .text()
+            .unwrap()
+            .contains("Fixture instruction")
     );
-
     custom_click(cx, "custom-refresh");
-    custom_click(cx, "custom-delete-0");
-    custom_click(cx, "custom-delete-cancel");
-    let retained: Value = fixture
-        .client
-        .get("/api/prompt-library", &[("repoPath", &repo)])
-        .unwrap();
-    assert_eq!(retained["prompts"].as_array().unwrap().len(), 1);
-    custom_click(cx, "custom-delete-0");
-    custom_click(cx, "custom-delete-confirm");
-    let empty: Value = fixture
-        .client
-        .get("/api/prompt-library", &[("repoPath", &repo)])
-        .unwrap();
-    assert_eq!(empty["prompts"], json!([]));
     // Picking the open Customize again from Tools closes it.
     custom_click(cx, "rail-more");
     custom_click(cx, "rail-more-customize");

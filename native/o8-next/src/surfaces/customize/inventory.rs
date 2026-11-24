@@ -1,4 +1,4 @@
-//! The inventories Customize lists: instructions, skills, connections and prompts.
+//! The inventories Customize lists: instructions, skills and connections.
 use crate::client::Client;
 use serde_json::Value;
 
@@ -9,36 +9,6 @@ pub(super) struct Row {
     pub body: String,
     pub tags: Vec<String>,
     pub scope: String,
-    pub updated_at: Option<u64>,
-    pub repo_path: Option<String>,
-}
-impl Row {
-    pub fn prompt(item: &Value) -> Result<Self, String> {
-        let text = |key: &str| {
-            item[key]
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| "Invalid saved prompt. Refresh before trying again.".to_owned())
-        };
-        let updated_at = item["updatedAt"]
-            .as_u64()
-            .filter(|v| *v > 0)
-            .ok_or("Invalid saved prompt revision. Refresh before trying again.")?;
-        Ok(Self {
-            id: text("id")?,
-            title: text("title")?,
-            body: text("body")?,
-            scope: text("scope")?,
-            tags: item["tags"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect(),
-            updated_at: Some(updated_at),
-            repo_path: item["repoPath"].as_str().map(str::to_owned),
-        })
-    }
 }
 #[derive(Clone, Default)]
 pub(super) struct Inventory {
@@ -54,28 +24,11 @@ impl Inventory {
         let query = repo.map(|r| vec![("repoPath", r)]).unwrap_or_default();
         let rules: Value = client.get("/api/cortex/directives", &query)?;
         let connections: Value = client.get("/api/setup/mcp-servers", &[])?;
-        let mut prompt_query = vec![
-            (
-                "scope",
-                if repo.is_some() {
-                    "available"
-                } else {
-                    "global"
-                },
-            ),
-            ("limit", "100"),
-        ];
-        if let Some(repo) = repo {
-            prompt_query.push(("repoPath", repo));
-        }
-        let prompts: Value = client.get("/api/prompt-library", &prompt_query)?;
         if ["agents", "skills", "hooks"]
             .iter()
             .any(|kind| !inventory[*kind].is_array())
             || !rules["directives"].is_array()
             || !connections["servers"].is_array()
-            || prompts["ok"] != true
-            || !prompts["prompts"].is_array()
         {
             return Err(
                 "The server returned an invalid customization inventory. Try again.".into(),
@@ -104,8 +57,6 @@ impl Inventory {
                         body,
                         tags: vec![],
                         scope: item["scope"].as_str().unwrap_or("").into(),
-                        updated_at: None,
-                        repo_path: None,
                     },
                 ));
             }
@@ -129,8 +80,6 @@ impl Inventory {
                     body: item["body"].as_str().unwrap_or("").into(),
                     tags: vec![],
                     scope: item["scope"].as_str().unwrap_or("").into(),
-                    updated_at: None,
-                    repo_path: None,
                 },
             ));
         }
@@ -143,8 +92,6 @@ impl Inventory {
                     body: String::new(),
                     tags: vec![],
                     scope: "global".into(),
-                    updated_at: None,
-                    repo_path: None,
                 },
             ));
         }
@@ -167,13 +114,8 @@ impl Inventory {
                     },
                     tags: vec![],
                     scope: "global".into(),
-                    updated_at: None,
-                    repo_path: None,
                 },
             ));
-        }
-        for item in prompts["prompts"].as_array().into_iter().flatten() {
-            result.rows.push(("prompts".into(), Row::prompt(item)?));
         }
         result.rows.sort_by(|(_, a), (_, b)| {
             (a.scope != "project")

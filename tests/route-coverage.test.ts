@@ -274,7 +274,6 @@ const LOOPBACK_READ = [
   /^\/api\/setup\/identity\/?$/,
 ];
 const EXPLICIT_GATED = [
-  /^\/api\/prompt-library(\/|$)/,
   /^\/api\/mcp\/?$/,
   /^\/api\/orchestrator\/receipts\/?$/,
   /^\/api\/broadcast\/tokens\/?$/,

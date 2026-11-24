@@ -57,13 +57,13 @@ it.runIf(process.platform === 'linux')('launcher keeps the public o8d owner acro
     const bridgeKey = ownerEnvironment.O8D_BRIDGE_KEY; expect(Boolean(bridgeKey)).toBe(true);
 
     for (const bearer of ['', 'wrong-fixture-token']) {
-      const refused = await fetch(origin + '/api/prompt-library', { headers: { authorization: 'Bearer ' + bearer, 'x-o8d-bridge': 'public-forgery' } });
+      const refused = await fetch(origin + '/api/orchestrator/session-rules?threadId=launcher-gap', { headers: { authorization: 'Bearer ' + bearer, 'x-o8d-bridge': 'public-forgery' } });
       expect(refused.status).toBe(401); expect(refused.headers.get('x-o8d-native')).toBeNull();
     }
     const identity = await fetch(origin + '/api/setup/identity', { headers });
     expect(identity.headers.get('x-o8d-native')).toBe('1'); expect((await identity.json()).version).toBe(packageJson.version);
-    const created = await fetch(origin + '/api/prompt-library', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'launcher gap fixture', body: 'Native data remains readable during the producer gap' }) });
-    expect(created.headers.get('x-o8d-native')).toBe('1'); expect(created.status).toBe(201); const prompt = (await created.json()).prompt;
+    const created = await fetch(origin + '/api/orchestrator/session-rules', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ threadId: 'launcher-gap', text: 'Native data remains readable during the producer gap' }) });
+    expect(created.headers.get('x-o8d-native')).toBe('1'); expect(created.status).toBe(200); const rule = (await created.json()).result.rule;
     if (windowClient) {
       client = spawn(windowClient, ['launcher_owner_tests::producer_gap_reconnects','--ignored','--exact'], { env: { PATH: process.env.PATH, HOME: root, NODE_ENV: 'test', O8_LAUNCHER_CLIENT_ORIGIN: origin, O8_LAUNCHER_CLIENT_DATA: root }, stdio: ['pipe','pipe','pipe'] });
       client!.stdout!.on('data', chunk => clientOutput += chunk); client!.stderr!.on('data', chunk => clientOutput += chunk);
@@ -76,7 +76,7 @@ it.runIf(process.platform === 'linux')('launcher keeps the public o8d owner acro
     expect(json(join(root, 'launcher-o8d.json'))).toMatchObject({ pid: o8dPid, port, parent: owner.pid });
     expect(Number(readFileSync(join(root, 'api-port'), 'utf8').trim())).toBe(port);
     expect(Number(readFileSync(join(root, 'ws-port'), 'utf8').trim())).toBe(port);
-    const gap = await fetch(origin + '/api/prompt-library', { headers }); expect(gap.headers.get('x-o8d-native')).toBe('1'); expect((await gap.json()).prompts).toContainEqual(prompt);
+    const gap = await fetch(origin + '/api/orchestrator/session-rules?threadId=launcher-gap', { headers }); expect(gap.headers.get('x-o8d-native')).toBe('1'); expect((await gap.json()).result.rules.map((r: { id: string }) => r.id)).toContain(rule.id);
     const proxy = await fetch(origin + '/health'); expect(proxy.status).toBe(503); expect(proxy.headers.get('retry-after')).toBeTruthy();
     const closed = await new Promise<number>((resolve, reject) => { const ws = new WebSocket(origin.replace('http:', 'ws:') + '/ws?token=wrong-token'); ws.on('message', () => reject(Error('No producer must not serve WS application data'))); ws.on('close', code => resolve(code)); ws.on('error', reject); }); expect(closed).toBe(1013);
     if (client) await until(() => Boolean(json(join(root, 'transport-reconnecting.json'))), 'window reconnecting during gap');

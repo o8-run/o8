@@ -73,8 +73,8 @@ impl Surface {
             .py(px(4.))
             // Repository and base branch moved into the "+" drawer: classic
             // retired the Work on row (20d627a8d) and it crowded the composer.
-            // Classic has no Commands or Prompts buttons: quick actions open
-            // with Cmd+Shift+K or "/", saved prompts from the "+" menu.
+            // Classic has no Commands button: quick actions open with
+            // Cmd+Shift+K or "/".
             .when(!feedback.is_empty(), |v| {
                 v.child(
                     self.prompt_trigger(
@@ -197,7 +197,6 @@ impl Surface {
             let mut i = Composer::new(cx);
             i.placeholder = match open {
                 "quick" => "Search actions…",
-                "prompts" => "Search saved prompts…",
                 "branch" => "Search branches…",
                 "rules" => "Add a session rule…",
                 _ => "Search repositories…",
@@ -206,7 +205,7 @@ impl Surface {
             i
         });
         let owner = editor.downgrade();
-        let subscription = cx.observe(&query, move |s, input, cx| {
+        let subscription = cx.observe(&query, move |_, input, cx| {
             let Some(owner) = owner.upgrade() else {
                 return;
             };
@@ -218,12 +217,8 @@ impl Surface {
                 i.controls.prompt.last_query = text;
                 i.controls.prompt.selected = 0;
             });
-            if s.composer == owner && owner.read(cx).controls.open == Some("prompts") {
-                s.load_prompt_rows("prompts", cx);
-            }
             cx.notify();
         });
-        let has_repo = self.intent_repo(cx).is_some();
         let branch_base = editor
             .read(cx)
             .controls
@@ -234,31 +229,8 @@ impl Surface {
             .and_then(|r| r["name"].as_str())
             .unwrap_or("main")
             .to_owned();
-        let draft = editor.read(cx).text.clone();
         let mut fields = vec![];
-        if open == "save-prompt" {
-            for (index, text) in [
-                draft
-                    .lines()
-                    .find(|s| !s.trim().is_empty())
-                    .unwrap_or("Saved prompt")
-                    .chars()
-                    .take(80)
-                    .collect::<String>(),
-                String::new(),
-                draft,
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                fields.push(cx.new(|cx| {
-                    let mut i = Composer::new(cx);
-                    i.newline_on_enter = index == 2;
-                    i.set_text(&text, cx);
-                    i
-                }));
-            }
-        } else if open == "branch-create" {
+        if open == "branch-create" {
             fields.push(cx.new(Composer::new));
         }
         editor.update(cx, |i, cx| {
@@ -266,7 +238,6 @@ impl Surface {
             i.controls.error.clear();
             i.controls.prompt.rows.clear();
             i.controls.prompt.error.clear();
-            i.controls.prompt.result.clear();
             i.controls.prompt.loading = false;
             if open == "branch-create" {
                 i.controls.prompt.branch_base = branch_base;
@@ -275,12 +246,11 @@ impl Surface {
             i.controls.prompt.last_query.clear();
             i.controls.prompt.fields = fields;
             i.controls.prompt.query = Some(query.clone());
-            i.controls.prompt.scope = has_repo;
             i.controls.prompt.query_subscription = Some(subscription);
             i.controls.prompt.opened = Some(cx.background_executor().now());
             cx.notify();
         });
-        if matches!(open, "repo" | "branch" | "prompts" | "rules") {
+        if matches!(open, "repo" | "branch" | "rules") {
             self.load_prompt_rows(open, cx);
         }
         if let Some(field) = editor.read(cx).controls.prompt.fields.first() {
@@ -293,7 +263,6 @@ impl Surface {
     pub(super) fn load_prompt_rows(&mut self, open: &'static str, cx: &mut Context<Self>) {
         let editor = self.composer.clone();
         let repo = self.intent_repo(cx).unwrap_or_default();
-        let query = editor.read(cx).controls.prompt.last_query.clone();
         let thread = self.selected.clone().unwrap_or_default();
         let generation = editor.update(cx, |i, cx| {
             i.controls.prompt.generation += 1;
@@ -303,7 +272,6 @@ impl Surface {
             i.controls.prompt.generation
         });
         let client = self.client.clone();
-        let debounce = open == "prompts" && !query.is_empty();
         let fetch = async move {
             let result: Value = match open {
                 "repo" => client.get("/api/panel/repos", &[])?,
@@ -313,15 +281,6 @@ impl Surface {
                     }
                     client.get("/api/panel/branches", &[("path", repo.as_str())])?
                 }
-                "prompts" => client.get(
-                    "/api/prompt-library",
-                    &[
-                        ("query", query.as_str()),
-                        ("repoPath", repo.as_str()),
-                        ("scope", "available"),
-                        ("limit", "100"),
-                    ],
-                )?,
                 _ => client.get(
                     "/api/orchestrator/session-rules",
                     &[("threadId", thread.as_str())],
@@ -330,7 +289,6 @@ impl Surface {
             let key = match open {
                 "repo" => "repos",
                 "branch" => "branches",
-                "prompts" => "prompts",
                 _ => "rules",
             };
             let mut rows = (if open == "rules" {
@@ -373,11 +331,6 @@ impl Surface {
             Ok::<_, String>(rows)
         };
         cx.spawn(async move |this, cx| {
-            if debounce {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-            }
             if !editor
                 .update(cx, |i, _| {
                     i.controls.open == Some(open) && i.controls.prompt.generation == generation
@@ -472,24 +425,15 @@ impl Surface {
                             ),
                         )
                     }
-                    "prompts" => (
-                        row["id"].as_str()?.to_owned(),
-                        row["title"].as_str().unwrap_or("Saved prompt").to_owned(),
-                        row["body"]
-                            .as_str()
-                            .unwrap_or("")
-                            .lines()
-                            .next()
-                            .unwrap_or("")
-                            .to_owned(),
-                    ),
                     _ => (
                         row["id"].as_str()?.to_owned(),
                         row["text"].as_str().unwrap_or("").to_owned(),
                         "Session rule".into(),
                     ),
                 };
-                (open == "prompts" || format!("{label} {detail}").to_lowercase().contains(&query))
+                format!("{label} {detail}")
+                    .to_lowercase()
+                    .contains(&query)
                     .then_some((id, label, detail, row.clone()))
             })
             .collect()
@@ -573,7 +517,7 @@ impl Surface {
             cx.stop_propagation();
             return true;
         }
-        if !matches!(open, "quick" | "repo" | "branch" | "prompts") {
+        if !matches!(open, "quick" | "repo" | "branch") {
             return false;
         }
         // Search results hidden by the loading state cannot be applied by Enter.
@@ -624,10 +568,6 @@ impl Surface {
     ) {
         let (id, _, _, row) = item;
         match open {
-            "quick" if id == "prompts" => {
-                self.open_prompt("prompts", window, cx);
-                return;
-            }
             "quick" => {
                 if let Some(body) = row["body"].as_str() {
                     self.composer.update(cx, |i, cx| {
@@ -638,24 +578,6 @@ impl Surface {
                         };
                         i.set_text(&next, cx);
                     });
-                }
-            }
-            "prompts" => {
-                if let Some(body) = row["body"].as_str() {
-                    self.composer.update(cx, |i, cx| i.insert_prompt(body, cx));
-                    let client = self.client.clone();
-                    cx.background_executor()
-                        .spawn(async move {
-                            if let Ok(mut url) = client.url("/api/prompt-library/") {
-                                url.path_segments_mut()
-                                    .unwrap()
-                                    .pop_if_empty()
-                                    .push(&id)
-                                    .push("use");
-                                let _ = client.request("POST", &url).send_json(json!({}));
-                            }
-                        })
-                        .detach();
                 }
             }
             "repo" => {

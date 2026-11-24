@@ -102,7 +102,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
         // gate authoritative; the bridge credential cannot authorize a principal.
         // Diff comments have only the mobile middleware gate, including paired
         // devices. Do not add the unrelated remote operator-only panel gate.
-        const denied = !diffCommentRoute && (req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects', '/api/prompt-library'].includes(url.pathname) || match.route.path === '/api/projects/[id]' || match.route.path === '/api/prompt-library/[id]')
+        const denied = !diffCommentRoute && (req.method !== 'GET' || ['/api/orchestrator/composer-queue', '/api/runtime/provider-instances', '/api/runtime/capabilities', '/api/runtime/service-tiers', '/api/v2/keys', '/api/projects'].includes(url.pathname) || match.route.path === '/api/projects/[id]')
           ? (await import('@/lib/panel/auth')).requirePanelAuth(new NextRequest(url, init)) : null;
         let projectDenied: Response | null = null;
         if (url.pathname === '/api/panel/repo-icon') {

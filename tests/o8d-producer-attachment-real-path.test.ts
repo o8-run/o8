@@ -78,7 +78,7 @@ it('accepts fragmented commit metadata only after the authenticated epoch acknow
   let peer:Socket|undefined;
   const server=createServer(socket=>{peer=socket;socket.on('error',()=>{});socket.once('data',()=>socket.write(JSON.stringify({version:1,pid:process.pid,generation:1,epoch:'notice-epoch'})+'\n'));});
   const producer=new O8dProducer(path,'isolated-bridge-fixture','127.0.0.1:18002','notice-epoch',()=>undefined);
-  const request={kind:'mutation',refreshTargets:['global'],mutation:{mutationId:'fixture-committed-id',source:'server',action:'prompt-library.create',status:'completed',surfaceId:'fixture-prompt-id',createdAt:'2026-11-18T00:00:00.000Z'}};
+  const request={kind:'mutation',refreshTargets:['global'],mutation:{mutationId:'fixture-committed-id',source:'server',action:'session-rule.add',status:'completed',surfaceId:'fixture-thread-id',createdAt:'2026-11-18T00:00:00.000Z'}};
   try {
     await new Promise<void>(resolve=>server.listen(path,resolve));chmodSync(path,0o600);await producer.start();vi.mocked(publishRealtimeMutation).mockClear();
     const line=JSON.stringify({version:1,kind:'native-commit',epoch:'notice-epoch',request})+'\n';

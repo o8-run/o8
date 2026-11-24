@@ -64,7 +64,7 @@ fn identity(pid: u32) -> Result<Option<Value>, ()> {
 }
 fn clean_part(s: &str) -> Result<String, ()> {
     let s = s
-        .split(super::prompt_library::whitespace)
+        .split(super::text::whitespace)
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(" ");

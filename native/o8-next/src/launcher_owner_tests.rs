@@ -166,9 +166,7 @@ fn native_commits_and_handback() {
                         )
                         .unwrap();
                     }
-                    if !action.starts_with("prompt-library.")
-                        && !action.starts_with("session-rule.")
-                    {
+                    if !action.starts_with("session-rule.") {
                         continue;
                     }
                     assert_eq!(event["protocol"], 1);
@@ -193,11 +191,6 @@ fn native_commits_and_handback() {
     let expected: Vec<Value> =
         serde_json::from_slice(&fs::read(root.join("commit-client-expected.json")).unwrap())
             .unwrap();
-    assert!(
-        expected
-            .iter()
-            .any(|e| e["action"] == "prompt-library.create")
-    );
     assert!(expected.iter().any(|e| e["action"] == "session-rule.add"));
     assert_eq!(
         received.len(),

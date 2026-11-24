@@ -18,8 +18,6 @@ pub(crate) struct State {
     pub generation: u64,
     pub opened: Option<std::time::Instant>,
     pub store: Option<std::path::PathBuf>,
-    pub scope: bool,
-    pub result: String,
     pub last_query: String,
     pub query_subscription: Option<Subscription>,
     pub feedback: String,

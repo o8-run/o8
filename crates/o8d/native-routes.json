@@ -354,18 +354,6 @@
     "redaction": "viewer"
   },
   {
-    "path": "/api/prompt-library",
-    "methods": [
-      "GET",
-      "POST"
-    ],
-    "fallback": true,
-    "reason": "Rust owns operator list/create on the product transport; other principal admission and classic mode remain Node. Product Node writers refuse.",
-    "state": "rust-with-fallback",
-    "test": "tests/o8d-prompt-writes-real-path.test.ts",
-    "owned": true
-  },
-  {
     "path": "/api/lanes/[id]/diff",
     "methods": [
       "GET"
@@ -387,30 +375,6 @@
     "state": "rust-with-fallback",
     "reason": "Rust owns fresh directive files, supported parsing/trailers, filtering and ordering. Node retains auth, data-directory initialization and canonical per-request project scope; malformed, unsafe, oversized or unsupported files/scope/collation defer in full. All writes and FTS remain Node.",
     "test": "tests/o8d-directives-real-path.test.ts"
-  },
-  {
-    "path": "/api/prompt-library/[id]",
-    "methods": [
-      "GET",
-      "PATCH",
-      "DELETE"
-    ],
-    "owned": true,
-    "fallback": true,
-    "state": "rust-with-fallback",
-    "reason": "Rust owns operator entry reads/edit/delete on the product transport; product Node writers refuse. Other principal admission and classic mode remain Node.",
-    "test": "tests/o8d-prompt-writes-real-path.test.ts"
-  },
-  {
-    "path": "/api/prompt-library/[id]/use",
-    "methods": [
-      "POST"
-    ],
-    "fallback": true,
-    "reason": "Rust owns product operator prompt use transactions; product Node writers, including import, refuse. Other principals retain Node admission.",
-    "state": "rust-with-fallback",
-    "test": "tests/o8d-prompt-writes-real-path.test.ts",
-    "owned": true
   },
   {
     "path": "/api/orchestrator/session-rules",

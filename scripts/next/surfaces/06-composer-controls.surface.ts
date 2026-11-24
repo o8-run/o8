@@ -35,12 +35,8 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
   execFileSync('git', ['-C', repo, 'checkout', '-q', 'main']);
   const { addRepo } = await import('../../../src/lib/repos/registry');
   await addRepo(repo);
-  const { createPromptLibraryEntry } = await import('../../../src/lib/prompt-library/store');
-  createPromptLibraryEntry({ title: 'Review a change', body: 'Review the patch and report the checks.', tags: ['review'], scope: 'global', repoPath: null });
   const repos = await import('../../../src/app/api/panel/repos/route');
   const branches = await import('../../../src/app/api/panel/branches/route');
-  const prompts = await import('../../../src/app/api/prompt-library/route');
-  const use = await import('../../../src/app/api/prompt-library/[id]/use/route');
   const rules = await import('../../../src/app/api/orchestrator/session-rules/route');
   const directives = await import('../../../src/app/api/cortex/directives/route');
   const archive = await import('../../../src/app/api/orchestrator/archive/route');
@@ -65,19 +61,12 @@ export default async function register({ repo }: SurfaceContext): Promise<Surfac
       'GET /api/panel/repos': repos.GET,
       'GET /api/panel/branches': branches.GET,
       'POST /api/panel/branches': branches.POST,
-      'GET /api/prompt-library': prompts.GET,
-      'POST /api/prompt-library': prompts.POST,
       'GET /api/orchestrator/session-rules': rules.GET,
       'POST /api/orchestrator/session-rules': rules.POST,
       'DELETE /api/orchestrator/session-rules': rules.DELETE,
       'GET /api/cortex/directives': directives.GET,
       'GET /api/orchestrator/archive': archive.GET,
       'GET /api/mobile/orchestrator/models': models.GET,
-    },
-    match: (method, path) => {
-      const id = path.match(/^\/api\/prompt-library\/([^/]+)\/use$/)?.[1];
-      if (method === 'POST' && id) return request => use.POST(request, { params: Promise.resolve({ id }) });
-      return undefined;
     },
   };
 }

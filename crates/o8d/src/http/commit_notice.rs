@@ -4,7 +4,7 @@ use super::*;
 pub(crate) struct CommitNotice(pub Value);
 impl CommitNotice {
     /// Composer's legacy mutation contract has a desktop source and a repo
-    /// target. Keep it separate from the six-key server notices above.
+    /// target. Keep it separate from the six-key server notices below.
     pub(crate) fn composer(id: &str, thread: &str, repo: &str, now: i64) -> Option<Self> {
         if thread.starts_with("wsi:") {
             return None;
@@ -32,15 +32,15 @@ impl CommitNotice {
             "refreshTargets":["global"]})))
     }
 }
-pub(super) fn committed(response: &mut Response, action: &str, surface: &str) {
-    if let Some(notice) = CommitNotice::new(action, surface) {
-        response.extensions_mut().insert(notice);
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn committed(response: &mut Response, action: &str, surface: &str) {
+        if let Some(notice) = CommitNotice::new(action, surface) {
+            response.extensions_mut().insert(notice);
+        }
+    }
     #[test]
     fn composer_notice_matches_the_locked_seven_key_desktop_variant() {
         let notice = CommitNotice::composer("fixture-id", "thoughts-fixture", "/fixture", 1234)
@@ -63,7 +63,7 @@ mod tests {
     #[test]
     fn receipt_is_private_metadata_and_bounds_never_change_the_response() {
         let mut response = reply(StatusCode::CREATED, json!({"ok":true}));
-        committed(&mut response, "prompt-library.create", "fixture-prompt");
+        committed(&mut response, "session-rule.add", "fixture-thread");
         let notice = response.extensions().get::<CommitNotice>().unwrap();
         assert_eq!(notice.0["refreshTargets"], json!(["global"]));
         assert_eq!(notice.0["mutation"].as_object().unwrap().len(), 6);
