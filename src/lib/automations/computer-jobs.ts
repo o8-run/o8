@@ -5,6 +5,7 @@
  * environment, which can hold secrets.
  */
 import { execFile } from '@/lib/providers/child-process';
+import { createHash } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -245,7 +246,8 @@ export function crontabJobs(table: string): ComputerJob[] {
     const program = command.split(/\s+/).find((word) => !word.includes('=')) ?? null;
     const label = program ? basename(program) : 'cron job';
     rows.push({
-      id: `cron:${rows.length}:${label}`, label, scope: 'cron', program, plist: null,
+      // The line's own hash: a later action must name this exact line, not a position.
+      id: `cron:${createHash('sha256').update(line).digest('hex').slice(0, 16)}`, label, scope: 'cron', program, plist: null,
       triggers: [special ? when : `cron ${when}`],
       runsPerDay: special ? SPECIAL_PER_DAY[when] ?? null : cronRunsPerDay(when!),
       loaded: null, running: false, pid: null, runs: null, lastExit: null, disabled: false,
