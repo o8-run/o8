@@ -26,6 +26,23 @@ it('keeps restricted workers credential-free despite a saved provider key', () =
   const env = ownedSpawnEnvironment({ executionPolicy: { mode: 'single-attempt' } } as unknown as OwnedSessionRecord, {});
   expect(env.GEMINI_API_KEY).toBeUndefined(); expect(env.GOOGLE_API_KEY).toBeUndefined();
 });
+it('passes an operator model endpoint to restricted Claude Code workers without their credentials', () => {
+  vi.stubEnv('ANTHROPIC_BASE_URL', 'http://127.0.0.1:4010/fixture-endpoint');
+  vi.stubEnv('ANTHROPIC_API_KEY', 'fixture-ambient-anthropic');
+  vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'fixture-ambient-token');
+  try {
+    const session = { surfaceId: 'claude-code-owned:fixture', executionPolicy: { mode: 'single-attempt' } } as unknown as OwnedSessionRecord;
+    const env = ownedSpawnEnvironment(session, {});
+    expect(env.ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:4010/fixture-endpoint');
+    expect(refreshChildEnvironment(env).ANTHROPIC_BASE_URL).toBe('http://127.0.0.1:4010/fixture-endpoint');
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined(); expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    // Other runtimes never receive the Claude Code endpoint.
+    expect(ownedSpawnEnvironment({ surfaceId: 'codex-owned:fixture', executionPolicy: { mode: 'single-attempt' } } as unknown as OwnedSessionRecord, {}).ANTHROPIC_BASE_URL).toBeUndefined();
+  } finally {
+    vi.unstubAllEnvs();
+    vi.stubEnv('O8_MASTER_KEY', Buffer.alloc(32, 61).toString('base64url'));
+  }
+});
 it('preserves an adapter native-auth suppression without re-injecting OpenRouter', () => {
   mutateProviderKey('OPENROUTER_API_KEY', { key: 'fixture-saved-router' });
   expect(ownedSpawnEnvironment({} as OwnedSessionRecord, { OPENROUTER_API_KEY: '' }).OPENROUTER_API_KEY).toBe('');

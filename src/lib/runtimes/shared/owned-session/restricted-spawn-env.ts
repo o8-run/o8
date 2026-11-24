@@ -11,6 +11,9 @@ const ADAPTER_KEYS = ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_TMPDIR', '
 const CONTROLLED_KEYS = ['TMPDIR', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL',
   'ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'];
+// An operator-set model endpoint is not a credential. Unrestricted launches
+// inherit it through the worker environment; restricted ones keep it too.
+const ENDPOINT_KEYS: Record<string, string[]> = { 'claude-code': ['ANTHROPIC_BASE_URL'] };
 const RUN_KEYS = ['PWD', 'PATH', 'NODE_ENV', 'FORCE_COLOR', 'NO_COLOR', 'BROWSER',
   'O8_WORKER_TOKEN', 'O8_OWNED_RUN_MARKER', 'O8_API_PORT', 'O8_WS_PORT'];
 
@@ -24,7 +27,7 @@ export function ownedSpawnEnvironment(session: OwnedSessionRecord, env: Record<s
   const restricted = session.executionPolicy !== undefined;
   const controlled = Boolean(session.controlledTask && controlledProviderPins(session.model, session.effort, session.runtimeConfig));
   const input = restricted
-    ? { NODE_ENV: 'development', ...pick(process.env, BASE_KEYS), ...pick(env, [...ADAPTER_KEYS, ...RUN_KEYS,
+    ? { NODE_ENV: 'development', ...pick(process.env, [...BASE_KEYS, ...(ENDPOINT_KEYS[runtimeId] ?? [])]), ...pick(env, [...ADAPTER_KEYS, ...RUN_KEYS,
       ...(controlled ? CONTROLLED_KEYS : [])]) }
     : childEnvironment({ runtimeId, env });
   const resolved = providerSpawnEnvironment(input, { inject: !restricted, clearInherited, runtimeId });
