@@ -45,21 +45,46 @@ pub(super) fn background(header: &str) -> bool {
         })
 }
 
-/// One `start-node` request to the launcher; true when it accepted.
-async fn start_node(socket: PathBuf) -> bool {
-    timeout(LAUNCHER_DEADLINE, async {
-        let mut peer = UnixStream::connect(socket).await.ok()?;
-        peer.write_all(br#"{"op":"start-node"}"#).await.ok()?;
-        peer.shutdown().await.ok()?;
+/// One `start-node` request to the launcher; the error says why it was not accepted.
+async fn start_node(socket: PathBuf) -> Result<(), String> {
+    let exchange = async {
+        let mut peer = UnixStream::connect(socket)
+            .await
+            .map_err(|e| format!("launcher unavailable: {e}"))?;
+        peer.write_all(br#"{"op":"start-node"}"#)
+            .await
+            .map_err(|e| format!("request not sent: {e}"))?;
+        peer.shutdown()
+            .await
+            .map_err(|e| format!("request not sent: {e}"))?;
         let mut reply = Vec::new();
-        peer.take(4096).read_to_end(&mut reply).await.ok()?;
-        let reply: Value = serde_json::from_slice(reply.split(|b| *b == b'\n').next()?).ok()?;
-        Some(reply["ok"] == true)
-    })
-    .await
-    .ok()
-    .flatten()
-    .unwrap_or(false)
+        peer.take(4096)
+            .read_to_end(&mut reply)
+            .await
+            .map_err(|e| format!("no answer: {e}"))?;
+        let line = reply.split(|b| *b == b'\n').next().unwrap_or_default();
+        let reply: Value = serde_json::from_slice(line)
+            .map_err(|_| format!("unreadable answer ({} bytes)", reply.len()))?;
+        if reply["ok"] == true {
+            Ok(())
+        } else {
+            Err(format!(
+                "refused: {}",
+                reply["error"].as_str().unwrap_or("no reason")
+            ))
+        }
+    };
+    timeout(LAUNCHER_DEADLINE, exchange)
+        .await
+        .unwrap_or_else(|_| Err("no answer within 2 s".into()))
+}
+
+/// The request line without its query string, for the log.
+fn request_key(header: &str) -> String {
+    let mut line = header.lines().next().unwrap_or("").split_whitespace();
+    let method = line.next().unwrap_or("?");
+    let path = line.next().unwrap_or("").split('?').next().unwrap_or("");
+    format!("{method} {path}")
 }
 
 /// With parking on, for a request that is not background traffic: start Node
@@ -79,14 +104,31 @@ async fn producer_via(
     if let Some(attached) = selection.borrow_and_update().clone() {
         return Some(attached);
     }
-    if !start_node(socket).await {
+    let started = std::time::Instant::now();
+    if let Err(reason) = start_node(socket).await {
+        eprintln!(
+            "[o8d] parked Node not started for {}: {reason}",
+            request_key(header)
+        );
         return None;
     }
     let attached = timeout(HOLD, selection.wait_for(Option::is_some))
         .await
-        .ok()?
-        .ok()?
-        .clone();
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|producer| producer.clone());
+    match &attached {
+        Some(_) => eprintln!(
+            "[o8d] started a parked Node for {} in {} ms",
+            request_key(header),
+            started.elapsed().as_millis()
+        ),
+        None => eprintln!(
+            "[o8d] parked Node did not attach within {} s for {}",
+            HOLD.as_secs(),
+            request_key(header)
+        ),
+    }
     attached
 }
 
@@ -100,7 +142,12 @@ pub(super) fn nudge(header: &str, selection: &Selection) {
     if background(header) || selection.borrow().is_some() {
         return;
     }
-    tokio::spawn(start_node(socket));
+    let key = request_key(header);
+    tokio::spawn(async move {
+        if let Err(reason) = start_node(socket).await {
+            eprintln!("[o8d] parked Node not started for {key}: {reason}");
+        }
+    });
 }
 
 #[cfg(test)]

@@ -505,7 +505,14 @@ fn a_request_to_a_parked_node_starts_it_and_is_answered() {
         "a parked Node answered a request in {} ms",
         elapsed.as_millis()
     );
-    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        status,
+        200,
+        "{body}\no8d: {}\nws: {}\nlauncher: {}",
+        f.log("logs/o8d.log"),
+        f.log("logs/ws-server.log"),
+        f.log("launcher-stderr")
+    );
     assert!(body.contains("bootId"), "{body}");
     assert!(elapsed < Duration::from_secs(10));
     assert_eq!(f.starts("ws-starts").len(), 2);
