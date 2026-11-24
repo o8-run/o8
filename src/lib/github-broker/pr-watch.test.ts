@@ -19,6 +19,9 @@ it('persists a baseline through reconnect and deduplicates unchanged, equal-time
 });
 it('records one source event, keeps unknown data distinct, and resumes on meaningful changes', () => {
   const input = { ...snapshot, number: 2, repoPath: '/fixture/watch' };
+  // Source events are kept only while a watch reads the source.
+  getSqlite().prepare(`INSERT INTO automations (id, name, owner, repo_path, runtime, prompt, trigger_kind, watch_source_kind)
+    VALUES ('watch-repository', 'watch', 'fixture', '/fixture/watch', 'codex', 'fixture', 'watch', 'repository')`).run();
   recordPrWatchSnapshot(input);
   expect(recordPrWatchSnapshot({ ...input, checks: [{ name: 'test', status: 'failed' }] }).changes).toEqual(['checks']);
   expect(recordPrWatchSnapshot({ ...input, checksUnavailable: true, discussionIncomplete: true }).changes).toEqual([]);

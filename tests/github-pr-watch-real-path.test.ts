@@ -3,6 +3,7 @@ import { GET, POST } from '@/app/api/panel/prs/[number]/route';
 import { getSqlite } from '@/lib/db';
 import { githubInstallationFetch } from '@/lib/github-broker/auth';
 import { cacheStats } from '@/lib/github/cache';
+import { watchAutomationSource } from './helpers/automation-watch';
 
 const state = vi.hoisted(() => ({ installation: 8100, token: 'fixture-token', head: 'a'.repeat(40), comments: [] as Array<{ id: number; body: string; user: { login: string }; created_at: string }> }));
 vi.mock('@/lib/github-broker/env', () => ({ getGitHubAppConfig: () => null }));
@@ -35,6 +36,7 @@ it('exposes outgoing API calls in the PR watch diagnostics through the real rout
 });
 
 it('protects the durable route baseline when overlapping reads finish backwards', async () => {
+  await watchAutomationSource('repository', '/fixture/github-watch');
   await read(2100);
   let finish!: (response: Response) => void; let entered!: () => void;
   const started = new Promise<void>(resolve => { entered = resolve; });
