@@ -7,8 +7,11 @@
  * activity for IDLE_AFTER_MS. Client activity is any request or client message,
  * except the server's own requests (`x-o8-background: 1`), a read that carries
  * `x-o8-foreground: 0` (one the user did not cause: a window behind another
- * app, or a timer or socket event in a window in front), and a client's socket
- * keepalive (`{"type":"ping"}`).
+ * app, or a timer or socket event in a window in front), a read an agent tool
+ * makes through o8's MCP servers (`x-o8-agent-tool: 1`), and a client's socket
+ * keepalive (`{"type":"ping"}`). o8's MCP proxy marks a session's handshake
+ * (initialize, catalog listings, notifications) as background too; its tool
+ * calls still wake the server.
  *
  * A loop is "idle-safe" unless it is registered as "always" with a written
  * reason. An idle-safe loop may also declare a `busy` check: while it returns
@@ -181,6 +184,7 @@ export function noteRequest(headers: Record<string, string | string[] | undefine
   const foreground = headers['x-o8-foreground'];
   const header = Array.isArray(foreground) ? foreground[0] : foreground;
   if ((method === 'GET' || method === 'HEAD') && header === '0') { count(stats.ignored, 'background window read'); return; }
+  if ((method === 'GET' || method === 'HEAD') && headers['x-o8-agent-tool'] === '1') { count(stats.ignored, 'agent tool read'); return; }
   noteActivity(Date.now(), requestKey(method, path));
 }
 

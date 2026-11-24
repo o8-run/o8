@@ -4559,6 +4559,14 @@
       ]
     },
     {
+      "path": "tests/mcp-session-gate-quiet-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/mcp-source-boot.test.ts",
       "reasons": [
         "child-process",
