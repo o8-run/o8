@@ -3,8 +3,8 @@
 The always-on [AGENTS.md](../../AGENTS.md) keeps outcome ownership, authority, non-mutation,
 preservation, evidence, blocker reporting, verification scope, and explicit skill routes.
 It is 1918 bytes, under the strict 2000-byte budget. The original file was 7287 bytes.
-Six task skills use the repository's existing folder and frontmatter format, documented in
-[instruction plugins](./instruction-plugins.md). No model, effort, tool, hook, automation, or
+Six task skills use the repository's existing folder and frontmatter format
+(`.agents/skills/<name>/SKILL.md`). No model, effort, tool, hook, automation, or
 permission default changes.
 
 ## Routing decision

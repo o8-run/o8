@@ -67,7 +67,6 @@ register_surfaces! {
         sidebar: Sidebar = "surfaces/sidebar.rs";
         settings: Settings = "surfaces/settings.rs";
         projects: Projects = "surfaces/projects.rs";
-        customize: Customize = "surfaces/customize.rs";
         setup: Setup = "surfaces/setup.rs";
         palette: Palette = "surfaces/palette.rs";
     }

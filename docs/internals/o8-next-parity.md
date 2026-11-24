@@ -259,17 +259,6 @@ cover mapping drift, process cleanup and the expanded capture.
 | projects | files | Missing | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
 | projects | diff | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
 | projects | terminal | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | sidebar | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | rail | Missing | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | top bar | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | worker pane | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | transcript | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | composer | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | palette | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | settings | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | files | Missing | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | diff | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
-| customize | terminal | Partial | [#4548](https://github.com/o8-run/o8/issues/4548) | 1024×720: unmeasured; 1440×900: unmeasured |
 | setup | sidebar | Partial | [#4660](https://github.com/o8-run/o8/issues/4660) | 1024×720: unmeasured; 1440×900: unmeasured |
 | setup | rail | Missing | [#4660](https://github.com/o8-run/o8/issues/4660) | 1024×720: unmeasured; 1440×900: unmeasured |
 | setup | top bar | Partial | [#4660](https://github.com/o8-run/o8/issues/4660) | 1024×720: unmeasured; 1440×900: unmeasured |

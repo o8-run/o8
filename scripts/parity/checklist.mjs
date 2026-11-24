@@ -5,7 +5,7 @@ const report = { cases: process.argv.slice(2).flatMap(file => JSON.parse(readFil
 const file = new URL('../../docs/internals/o8-next-parity.md', import.meta.url);
 const owners = { shortcuts: 4670, sidebar: 4642, session: 4711, workers: 4736, brain: 4548, grid: 4530, activity: 4548, pull_requests: 4652,
   inbox: 4548, issues: 4548, diff: 4548, terminal: 4487, settings: 4548, projects: 4548,
-  customize: 4548, setup: 4660, palette: 4702 };
+  setup: 4660, palette: 4702 };
 const rows = [];
 for (const surface of manifest.surfaces) {
   for (const element of Object.keys(manifest.elements)) {

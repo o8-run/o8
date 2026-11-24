@@ -31,7 +31,6 @@ pub(super) enum Icon {
     Terminal,
     Clock,
     PullRequest,
-    Puzzle,
 }
 
 impl Icon {
@@ -44,9 +43,6 @@ impl Icon {
             Self::Gauge => "m12 14 4-4 M3.34 19a10 10 0 1 1 17.32 0",
             Self::Terminal => "m4 17 6-6-6-6 M12 19h8",
             Self::Clock => "M12 6v6l4 2 M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20Z",
-            Self::Puzzle => {
-                "M8 3H5a2 2 0 0 0-2 2v3a3 3 0 1 1 0 6v3a2 2 0 0 0 2 2h3a3 3 0 1 1 6 0h3a2 2 0 0 0 2-2v-3a3 3 0 1 0 0-6V5a2 2 0 0 0-2-2h-3a3 3 0 1 0-6 0Z"
-            }
             Self::PullRequest => {
                 "M18 15a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M6 3a3 3 0 1 0 0 6 3 3 0 1 0 0-6Z M13 6h3a2 2 0 0 1 2 2v7 M6 9v12"
             }
@@ -1003,16 +999,13 @@ pub(crate) fn symon_mark_sized(size: f32, active: bool) -> impl IntoElement {
 }
 
 impl Shell {
-    /// Closes Projects, Settings, Customize and an idle Setup, the overlays the rail
+    /// Closes Projects, Settings and an idle Setup, the overlays the rail
     /// and its More menu open over the workspace.
     pub(crate) fn close_rail_overlays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.surfaces.projects.open = false;
         if self.surfaces.settings.view.take().is_some() {
             self.surfaces.settings.subscription = None;
             self.revision += 1;
-        }
-        if self.surfaces.customize.open {
-            self.close_customize(window, cx);
         }
         if self
             .surfaces

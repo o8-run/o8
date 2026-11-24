@@ -52,37 +52,6 @@
       ]
     },
     {
-      "path": "src/app/api/customize/actions/github-source.test.ts",
-      "reasons": [
-        "child-process",
-        "network-listener"
-      ]
-    },
-    {
-      "path": "src/app/api/customize/actions/route.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "git-cli",
-        "network-listener"
-      ]
-    },
-    {
-      "path": "src/app/api/customize/actions/state.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "process-signal"
-      ]
-    },
-    {
-      "path": "src/app/api/customize/actions/terminals.test.ts",
-      "reasons": [
-        "child-process",
-        "terminal-tool"
-      ]
-    },
-    {
       "path": "src/app/api/mobile/sync/route.test.ts",
       "reasons": [
         "child-process"

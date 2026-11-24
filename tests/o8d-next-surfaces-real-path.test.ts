@@ -149,7 +149,6 @@ it.each([
   ['Projects', 'GET', '/api/panel/projects', 200],
   ['Issues', 'GET', '/api/panel/repos', 200],
   ['Inbox', 'GET', '/api/panel/approvals', 200],
-  ['Customize', 'GET', '/api/customize/inventory', 200],
   ['Brain', 'POST', '/api/cortex/ask', 400],
   ['Setup', 'GET', '/api/setup/config', 200],
   ['Terminal', 'GET', '/api/mobile/terminal-sessions', 200],

@@ -41,8 +41,6 @@
   "/api/cortex/recent-outcomes",
   "/api/cortex/reingest",
   "/api/cortex/sources",
-  "/api/customize/actions",
-  "/api/customize/inventory",
   "/api/devices/agent",
   "/api/github/webhook",
   "/api/lanes",
