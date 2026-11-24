@@ -123,41 +123,44 @@ afterEach(async () => {
 });
 
 describe('machine relay attach real path', () => {
-  it('presents the machine ticket and serves generic web HTTP mux through the local operator gate', async () => {
-    let responseFrame: Record<string, unknown> | null = null;
-    const localWebSocket = await startRelay();
+  it('presents the machine ticket and replays only notice-page reads, with no local credential', async () => {
+    const responses = new Map<string, Record<string, unknown>>();
     const relay = await startRelay((socket) => {
       socket.send(JSON.stringify({ t: 'mux-open', sid: 'web-1' }));
       socket.on('message', (raw) => {
         const outer = parseFrame(raw);
         if (outer.t === 'mux-ready') {
-          socket.send(JSON.stringify({
-            t: 'mux',
-            sid: 'web-1',
-            seq: 1,
-            payload: Buffer.from(JSON.stringify({
-              t: 'http-req',
-              rid: 'request-1',
-              method: 'GET',
-              path: '/api/panel/repos',
-              authorization: 'Bearer untrusted-web-value',
-            }), 'utf8').toString('base64'),
-          }));
+          const requests = [
+            { rid: 'page', method: 'GET', path: '/mobile', authorization: 'Bearer untrusted-web-value' },
+            { rid: 'asset', method: 'GET', path: '/_next/static/chunks/app.js', headers: { Authorization: 'Bearer untrusted-web-value' } },
+            { rid: 'api', method: 'GET', path: '/api/panel/repos' },
+            { rid: 'write', method: 'POST', path: '/mobile' },
+            { rid: 'escape', method: 'GET', path: '/_next/static/%2e%2e/api/panel/repos' },
+          ];
+          for (const request of requests) {
+            socket.send(JSON.stringify({
+              t: 'mux',
+              sid: 'web-1',
+              seq: 1,
+              payload: Buffer.from(JSON.stringify({ t: 'http-req', ...request }), 'utf8').toString('base64'),
+            }));
+          }
           return;
         }
         if (outer.t === 'mux' && typeof outer.payload === 'string') {
-          responseFrame = JSON.parse(
+          const response = JSON.parse(
             Buffer.from(outer.payload, 'base64').toString('utf8'),
           ) as Record<string, unknown>;
+          responses.set(String(response.rid), response);
         }
       });
     });
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       fetchCalls.push({ url: String(input), init });
-      return new Response(JSON.stringify({ repos: [{ localPath: '/work/repo' }] }), {
+      return new Response('<html>notice</html>', {
         status: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/html' },
       });
     }) as typeof fetch;
     const machineId = 'machine_01HREALPATH';
@@ -166,7 +169,6 @@ describe('machine relay attach real path', () => {
       machineId,
       relayUrl: relay.url,
       apiBase: 'http://127.0.0.1:47120',
-      localWebSocketUrl: `${localWebSocket.url}/ws`,
       operatorToken: () => 'local-operator-token',
       ticketProvider: async () => issued,
       fetchImpl,
@@ -175,7 +177,7 @@ describe('machine relay attach real path', () => {
     });
 
     connector.start();
-    await waitFor(() => responseFrame !== null);
+    await waitFor(() => responses.size === 5);
 
     expect(relay.connections).toHaveLength(1);
     expect(relay.connections[0]).toMatchObject({
@@ -191,17 +193,22 @@ describe('machine relay attach real path', () => {
       aud: 'o8-relay',
     });
 
-    expect(fetchCalls).toHaveLength(1);
-    expect(fetchCalls[0]?.url).toBe('http://127.0.0.1:47120/api/panel/repos');
-    const headers = new Headers(fetchCalls[0]?.init?.headers);
-    expect(headers.get('authorization')).toBe('Bearer local-operator-token');
-    expect(headers.get('x-o8-client-addr')).toBe('o8-relay-forward');
-    expect(headers.get('x-o8-relay-forward')).toBe('1');
-    expect(responseFrame).toMatchObject({
-      t: 'http-res',
-      rid: 'request-1',
-      status: 200,
-    });
+    expect(fetchCalls.map((call) => call.url)).toEqual([
+      'http://127.0.0.1:47120/mobile',
+      'http://127.0.0.1:47120/_next/static/chunks/app.js',
+    ]);
+    for (const call of fetchCalls) {
+      const headers = new Headers(call.init?.headers);
+      expect(headers.get('authorization')).toBeNull();
+      expect(headers.get('x-o8-client-addr')).toBe('o8-relay-forward');
+      expect(headers.get('x-o8-relay-forward')).toBe('1');
+      expect(headers.get('x-o8-relay-surface')).toBe('web-machine');
+    }
+    expect(responses.get('page')).toMatchObject({ t: 'http-res', status: 200 });
+    expect(responses.get('asset')).toMatchObject({ t: 'http-res', status: 200 });
+    for (const rid of ['api', 'write', 'escape']) {
+      expect(responses.get(rid)).toMatchObject({ t: 'http-res', status: 403, error: 'web_machine_route_forbidden' });
+    }
 
     connector.stop('test-complete');
   });
@@ -340,42 +347,37 @@ describe('machine relay attach real path', () => {
     connector.stop('test-complete');
   });
 
-  it('bridges each web-machine stream to the local realtime socket and tears it down', async () => {
-    let localReceived = '';
-    let relayedReply = '';
-    let localClosed = false;
-    const localWebSocket = await startRelay((socket) => {
-      socket.on('message', (raw) => {
-        localReceived = raw.toString();
-        socket.send(JSON.stringify({ channel: 'pong', seq: 7 }));
-      });
-      socket.on('close', () => {
-        localClosed = true;
-      });
-    });
+  it('opens no local realtime socket for a web-machine stream and drops its realtime frames', async () => {
+    const localWebSocket = await startRelay();
+    let ready = false;
+    let relayed = 0;
     const relay = await startRelay((socket) => {
       socket.send(JSON.stringify({ t: 'mux-open', sid: 'web-realtime' }));
       socket.on('message', (raw) => {
         const outer = parseFrame(raw);
         if (outer.t === 'mux-ready') {
+          ready = true;
           socket.send(JSON.stringify({
             t: 'mux',
             sid: 'web-realtime',
             seq: 1,
             payload: Buffer.from(JSON.stringify({ type: 'ping' }), 'utf8').toString('base64'),
           }));
+          // An ordered stream open after the frame proves it was processed.
+          socket.send(JSON.stringify({ t: 'mux-open', sid: 'barrier' }));
           return;
         }
-        if (outer.t === 'mux' && typeof outer.payload === 'string') {
-          relayedReply = Buffer.from(outer.payload, 'base64').toString('utf8');
-          socket.send(JSON.stringify({ t: 'mux-close', sid: 'web-realtime' }));
-        }
+        if (outer.t === 'mux') relayed++;
       });
     });
+    let barrier = false;
+    relay.server.on('connection', (socket) => socket.on('message', (raw) => {
+      const outer = parseFrame(raw);
+      if (outer.t === 'mux-ready' && outer.sid === 'barrier') barrier = true;
+    }));
     const connector = new MachineRelayConnector({
       machineId: 'machine_realtime',
       relayUrl: relay.url,
-      localWebSocketUrl: `${localWebSocket.url}/ws`,
       operatorToken: () => 'local-operator-token',
       ticketProvider: async () => ticket('machine_realtime'),
       reconnectBaseMs: 20,
@@ -383,26 +385,15 @@ describe('machine relay attach real path', () => {
     });
 
     connector.start();
-    await waitFor(() => localReceived.length > 0 && relayedReply.length > 0 && localClosed);
+    await waitFor(() => ready && barrier);
 
-    expect(localWebSocket.connections).toEqual([{
-      path: '/ws?token=local-operator-token',
-      authorization: undefined,
-      machineId: undefined,
-    }]);
-    expect(localReceived).toBe(JSON.stringify({ type: 'ping' }));
-    expect(relayedReply).toBe(JSON.stringify({ channel: 'pong', seq: 7 }));
+    expect(localWebSocket.connections).toEqual([]);
+    expect(relayed).toBe(0);
 
     connector.stop('test-complete');
   });
 
   it('rotates the relay ticket before expiry without waiting for a socket drop', async () => {
-    let localBridgeCloses = 0;
-    const localWebSocket = await startRelay((socket) => {
-      socket.on('close', () => {
-        localBridgeCloses++;
-      });
-    });
     const relay = await startRelay((socket) => {
       socket.send(JSON.stringify({ t: 'devices', count: 0 }));
       socket.send(JSON.stringify({ t: 'mux-open', sid: 'refresh-stream' }));
@@ -411,7 +402,6 @@ describe('machine relay attach real path', () => {
     const connector = new MachineRelayConnector({
       machineId: 'machine_refresh',
       relayUrl: relay.url,
-      localWebSocketUrl: `${localWebSocket.url}/ws`,
       operatorToken: () => 'local-operator-token',
       ticketProvider: async () => ticket('machine_refresh', ++issued),
       refreshIntervalMs: 40,
@@ -425,8 +415,6 @@ describe('machine relay attach real path', () => {
 
     expect(issued).toBeGreaterThanOrEqual(2);
     expect(relay.connections[0]?.authorization).not.toBe(relay.connections[1]?.authorization);
-    expect(localWebSocket.connections).toHaveLength(1);
-    expect(localBridgeCloses).toBe(0);
 
     connector.stop('test-complete');
   });
@@ -435,7 +423,6 @@ describe('machine relay attach real path', () => {
     const authenticatedSockets: WebSocket[] = [];
     let rotationRejected = false;
     let muxReady = false;
-    const localWebSocket = await startRelay();
     const relay = await startRelay((socket, index) => {
       if (index === 0) {
         authenticatedSockets.push(socket);
@@ -452,7 +439,6 @@ describe('machine relay attach real path', () => {
     const connector = new MachineRelayConnector({
       machineId: 'machine_rotation_failure',
       relayUrl: relay.url,
-      localWebSocketUrl: `${localWebSocket.url}/ws`,
       operatorToken: () => 'local-operator-token',
       ticketProvider: async () => ticket('machine_rotation_failure', ++issued),
       refreshIntervalMs: 40,
@@ -470,7 +456,6 @@ describe('machine relay attach real path', () => {
 
     expect(relay.connections).toHaveLength(2);
     expect(activeSocket?.readyState).toBe(WebSocket.OPEN);
-    expect(localWebSocket.connections).toHaveLength(1);
 
     connector.stop('test-complete');
   });

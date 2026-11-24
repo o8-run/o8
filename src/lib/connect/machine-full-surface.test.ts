@@ -340,7 +340,6 @@ describe('web-machine full-surface real path', () => {
       machineId: MACHINE_ID,
       relayUrl: relayServer.url.replace(/^http/, 'ws'),
       apiBase: local.url,
-      localWebSocketUrl: local.wsUrl,
       operatorToken: () => LOCAL_OPERATOR_TOKEN,
       ticketProvider: async () => fixtureTicket(),
       reconnectBaseMs: 20,
@@ -412,21 +411,24 @@ describe('web-machine full-surface real path', () => {
     expect(range.headers.get('content-range')).toMatch(/^bytes 0-1023\//);
     expect((await range.arrayBuffer()).byteLength).toBe(1024);
 
+    // API routes are outside the web-machine allowlist and never reach the Mac.
     const credentialExport = await surfaceApp.request(
       `/web/${MACHINE_ID}/surface/api/panel/ws-info`,
       { headers: { cookie } },
     );
-    expect(credentialExport.status).toBe(502);
+    expect(credentialExport.status).toBe(403);
     expect(
       Buffer.from(await credentialExport.arrayBuffer())
         .includes(Buffer.from(LOCAL_OPERATOR_TOKEN)),
     ).toBe(false);
+    expect(local.requests.map((request) => request.path)).not.toContain('/api/panel/ws-info');
 
+    // The browser socket attaches, but no local realtime socket is opened.
     const browser = await openBrowserSurfaceClient(relayServer.url, cookie);
-    await waitFor(() => local.socketPaths.length >= 5);
     browser.socket.send(JSON.stringify({ type: 'ping', source: 'browser-bridge' }));
-    await waitFor(() => records(browser.messages).some((frame) => frame.channel === 'pong'));
-    expect(browser.messages.join('')).not.toContain(LOCAL_OPERATOR_TOKEN);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(records(browser.messages).some((frame) => frame.channel === 'pong')).toBe(false);
+    expect(local.socketPaths).toEqual([]);
 
     connector.stop('fixture-machine-drop');
     expect(await browser.closed).toEqual({
@@ -443,7 +445,6 @@ describe('web-machine full-surface real path', () => {
       machineId: MACHINE_ID,
       relayUrl: relayServer.url.replace(/^http/, 'ws'),
       apiBase: local.url,
-      localWebSocketUrl: local.wsUrl,
       operatorToken: () => LOCAL_OPERATOR_TOKEN,
       ticketProvider: async () => fixtureTicket(),
       reconnectBaseMs: 20,
@@ -454,7 +455,6 @@ describe('web-machine full-surface real path', () => {
     await waitFor(() => relay.stats().machines === 1);
 
     const web = await openWebClient(relayServer.url);
-    await waitFor(() => local.socketPaths.length === 1);
 
     const page = await requestThroughWeb(web, '/mobile', 'page');
     const asset = await requestThroughWeb(
@@ -468,7 +468,6 @@ describe('web-machine full-surface real path', () => {
       'credential-export',
     );
     sendWeb(web, { type: 'ping', source: 'browser' });
-    await waitFor(() => records(web.messages).some((frame) => frame.channel === 'pong'));
 
     expect(page.status).toBe(200);
     expect(page.headers['content-type']).toBe('text/html; charset=utf-8');
@@ -481,48 +480,26 @@ describe('web-machine full-surface real path', () => {
     expect(asset.body.byteLength).toBeGreaterThan(300 * 1024);
     expect(asset.body.includes(Buffer.from(LOCAL_OPERATOR_TOKEN))).toBe(false);
     expect(credentialExport).toMatchObject({
-      status: 502,
-      error: 'local_credential_exposure_blocked',
+      status: 403,
+      error: 'web_machine_route_forbidden',
       body: Buffer.alloc(0),
     });
     expect(web.sent.join('')).not.toContain(LOCAL_OPERATOR_TOKEN);
     expect(web.messages.join('')).not.toContain(LOCAL_OPERATOR_TOKEN);
+    // Pages and assets are replayed with no local credential; nothing else is.
     expect(local.requests).toEqual([
-      {
-        path: '/mobile',
-        authorization: `Bearer ${LOCAL_OPERATOR_TOKEN}`,
-        webMachine: true,
-      },
-      {
-        path: '/_next/static/chunks/mobile.js',
-        authorization: `Bearer ${LOCAL_OPERATOR_TOKEN}`,
-        webMachine: true,
-      },
-      {
-        path: '/api/panel/ws-info',
-        authorization: `Bearer ${LOCAL_OPERATOR_TOKEN}`,
-        webMachine: true,
-      },
+      { path: '/mobile', authorization: '', webMachine: true },
+      { path: '/_next/static/chunks/mobile.js', authorization: '', webMachine: true },
     ]);
-    expect(local.socketPaths).toEqual([`/ws?token=${LOCAL_OPERATOR_TOKEN}`]);
+    expect(records(web.messages).some((frame) => frame.channel === 'pong')).toBe(false);
+    expect(local.socketPaths).toEqual([]);
 
-    sendWeb(web, { type: 'request-credential-leak' });
-    const credentialLeakClose = await web.closed;
-    expect(credentialLeakClose).toEqual({
-      code: 4403,
-      reason: 'local_credential_exposure_blocked',
-    });
-    await waitFor(() => local.bridgeCloses === 1);
-    expect(web.messages.join('')).not.toContain(LOCAL_OPERATOR_TOKEN);
-
-    const secondWeb = await openWebClient(relayServer.url);
-    await waitFor(() => local.socketPaths.length === 2);
     connector.stop('fixture-machine-drop');
-    const machineDrop = await secondWeb.closed;
-    await waitFor(() => local.bridgeCloses === 2);
+    const machineDrop = await web.closed;
+    expect(local.bridgeCloses).toBe(0);
     expect(machineDrop).toEqual({ code: 1012, reason: 'machine_disconnected' });
     expect(
-      records(secondWeb.messages).some((frame) => (
+      records(web.messages).some((frame) => (
         frame.t === 'presence' && frame.machine === 'down'
       )),
     ).toBe(true);

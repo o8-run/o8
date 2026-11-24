@@ -19,6 +19,24 @@ export function headersIndicateWebMachineRelay(
     && get(O8_RELAY_SURFACE_HEADER) === O8_WEB_MACHINE_SURFACE;
 }
 
+/**
+ * The only requests a relayed web-machine stream may replay: reads of the
+ * desktop-app notice pages and the static files they load. The browser console
+ * is gone, so no API route, write or realtime traffic is reachable this way.
+ */
+const WEB_MACHINE_PAGES = new Set(['/', '/mobile', '/dashboard', '/icon.png', '/favicon.ico']);
+
+export function webMachineRouteAllowed(method: unknown, path: unknown): boolean {
+  // Same default as the replay itself: a frame without a method is a GET.
+  const verb = typeof method === 'string' ? method.toUpperCase() : method === undefined ? 'GET' : '';
+  if (verb !== 'GET' && verb !== 'HEAD') return false;
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return false;
+  if (path.includes('\\') || path.includes('..') || /%2e|%2f|%5c/i.test(path)) return false;
+  const pathname = path.split(/[?#]/, 1)[0]!;
+  const page = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  return WEB_MACHINE_PAGES.has(page) || pathname.startsWith('/_next/static/');
+}
+
 export interface WebMachineBrowserTransport {
   fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   openWebSocket: (path: '/ws') => WebSocket;

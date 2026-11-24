@@ -93,8 +93,8 @@ Two relay paths share the same tunnel protocol
   The web-machine surface marks those page loads
   (`src/lib/connect/web-machine-surface.ts`; read in `src/components/shell-layout.tsx`,
   `ApiBearerBootstrap`, the theme pre-paint stamp and
-  `src/lib/mobile/ws-token-client.ts`). The same transport carries plugin
-  relay grants (`src/lib/connect/plugin-relay.ts`).
+  `src/lib/mobile/ws-token-client.ts`). Plugin streams over this
+  transport are refused until the account service signs plugin grants.
 
 With the pages gone, a remote browser session reaches only the notice and the
 voice pages. Removing the browser-session part of machine attach, and the
