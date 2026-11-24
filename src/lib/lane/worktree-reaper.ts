@@ -24,6 +24,9 @@ import { resolveGitBinary } from '@/lib/git/binary';
 import { execFile } from '@/lib/providers/child-process';
 import { existsWhenReachable, missingWhenReachable } from '@/lib/fs/protected-folders';
 import { promisify } from 'node:util';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { fileStamp, gitDirectories } from '@/lib/git/ref-stamp';
 import { appendEvent, archiveLane, getLane, updateLane } from '@/lib/lane/registry';
 import { withAutomaticWorkspaceReconciliation, workspaceAllowsAutomaticReconciliation } from '@/lib/workspace/automatic-reconciliation-guard';
 import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
@@ -232,17 +235,48 @@ function repoSlugFromRemoteUrl(remoteUrl: string): string | null {
   return match?.[1] ?? null;
 }
 
+/**
+ * Every config file that can change what `git remote get-url origin` prints.
+ * Null when the checkout's git directory cannot be read; then git runs.
+ */
+function remoteConfigStamp(repoPath: string): string | null {
+  const directories = gitDirectories(repoPath);
+  if (!directories) return null;
+  const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+  return [
+    join(directories.commonDir, 'config'), join(directories.gitDir, 'config.worktree'),
+    join(homedir(), '.gitconfig'), join(xdg, 'git', 'config'),
+  ].map(fileStamp).join('|');
+}
+
+// Each pass reconciles every reviewing lane, and each one asked git for its
+// repository's origin. The answer only changes with a config file, so an
+// unchanged repository costs no process here.
+const repoFullNames = new Map<string, { stamp: string; name: string | null }>();
+
 async function resolveRepoFullName(repoPath: string): Promise<string | null> {
+  const stamp = remoteConfigStamp(repoPath);
+  const cached = repoFullNames.get(repoPath);
+  if (stamp !== null && cached?.stamp === stamp) return cached.name;
+  let name: string | null = null;
   try {
     const { stdout } = await execFileAsync(
       resolveGitBinary(),
       ['remote', 'get-url', 'origin'],
       { windowsHide: true, cwd: repoPath, timeout: 5_000 },
     );
-    return repoSlugFromRemoteUrl(stdout);
+    name = repoSlugFromRemoteUrl(stdout);
   } catch {
+    // A failed lookup is retried on the next pass, not remembered.
+    repoFullNames.delete(repoPath);
     return null;
   }
+  if (stamp === null) repoFullNames.delete(repoPath);
+  else {
+    repoFullNames.set(repoPath, { stamp, name });
+    if (repoFullNames.size > 500) repoFullNames.delete(repoFullNames.keys().next().value!);
+  }
+  return name;
 }
 
 async function archiveMergedPullRequestLane(

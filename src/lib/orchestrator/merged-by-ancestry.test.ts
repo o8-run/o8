@@ -527,6 +527,11 @@ describe('merged-by-ancestry reconciliation', () => {
         writeFileSync(log, '');
         return count;
       },
+      takeWithTotal(subcommand: string): { count: number; total: number } {
+        const lines = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+        writeFileSync(log, '');
+        return { count: lines.filter((line) => line === subcommand).length, total: lines.length };
+      },
       restore() {
         process.env.PATH = priorPath;
       },
@@ -652,6 +657,63 @@ describe('merged-by-ancestry reconciliation', () => {
       expect(gitCalls.take('fetch')).toBe(1);
     } finally {
       gitCalls.restore();
+      if (previous === undefined) delete process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+      else process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = previous;
+    }
+  }, 30_000);
+
+  it('backs off fetches that leave the base unchanged and counts another process fetching it as fresh', async () => {
+    const { clone, seed } = makeRepo('o8-ancestry-fetch-backoff');
+    writeFileSync(join(clone, 'lane.txt'), 'lane\n');
+    commitAll(clone, 'lane work');
+    seedLaneOnly(clone);
+    const previous = process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
+    process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = '300000';
+    let now = Date.parse('2026-11-24T12:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const gitCalls = logGitCalls();
+    let total = 0;
+    const sweepFetches = async () => {
+      await expect(sweepPacketsMergedByAncestry()).resolves.toMatchObject({ scanned: 1, merged: 0 });
+      const calls = gitCalls.takeWithTotal('fetch');
+      total = calls.total;
+      return calls.count;
+    };
+    try {
+      expect(await sweepFetches()).toBe(1);
+      now += 300_001;
+      expect(await sweepFetches()).toBe(1);
+      // That fetch moved nothing, so the next wait is two intervals.
+      now += 300_001;
+      expect(await sweepFetches()).toBe(0);
+      now += 300_000;
+      expect(await sweepFetches()).toBe(1);
+      // Four intervals now; an unchanged repository costs no git process in between,
+      // and a new commit on the lane's own branch is re-checked without a fetch.
+      now += 900_000;
+      expect(await sweepFetches()).toBe(0);
+      expect(total).toBe(0);
+      writeFileSync(join(clone, 'more.txt'), 'more\n');
+      commitAll(clone, 'more lane work');
+      gitCalls.takeAll();
+      now += 30_000;
+      expect(await sweepFetches()).toBe(0);
+      expect(total).toBeGreaterThan(0);
+
+      // Another process fetches a moved base: the sweep uses it and does not fetch again.
+      writeFileSync(join(seed, 'main-late.txt'), 'late\n');
+      commitAll(seed, 'main late');
+      git(seed, ['push', 'origin', 'main']);
+      git(clone, ['fetch', '--quiet', 'origin', 'main:refs/remotes/origin/main']);
+      gitCalls.takeAll();
+      now += 30_000;
+      expect(await sweepFetches()).toBe(0);
+      // The wait starts over at one interval.
+      now += 300_001;
+      expect(await sweepFetches()).toBe(1);
+    } finally {
+      gitCalls.restore();
+      clock.mockRestore();
       if (previous === undefined) delete process.env.O8_ANCESTRY_FETCH_INTERVAL_MS;
       else process.env.O8_ANCESTRY_FETCH_INTERVAL_MS = previous;
     }

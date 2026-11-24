@@ -419,6 +419,45 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(event).toBeUndefined();
   });
 
+  it('asks git for the origin of an unchanged repository only once across passes', async () => {
+    // Earlier cases may leave lanes in review; this pass must reach this lane each tick.
+    getSqlite().prepare("UPDATE lanes SET status = 'archived' WHERE status = 'reviewing'").run();
+    const repoPath = makeRepo();
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/pr-open-unchanged',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-pr-open-unchanged',
+    });
+    markReviewing(lane.id, 303);
+    mirrorPullRequest({ number: 303, headRefName: lane.branch, state: 'open', closedAt: null, mergedAt: null });
+    const { ChildProcess } = await import('node:child_process');
+    const prototype = ChildProcess.prototype as unknown as { spawn: (options: { args?: string[]; cwd?: string }) => unknown };
+    const spawn = prototype.spawn;
+    let lookups = 0;
+    prototype.spawn = function counted(this: unknown, options) {
+      if (options?.args?.includes('get-url') && options.cwd === repoPath) lookups += 1;
+      return spawn.call(this, options);
+    };
+    try {
+      await runWorktreeReaperTick();
+      expect(lookups).toBe(1);
+      await runWorktreeReaperTick();
+      await runWorktreeReaperTick();
+      expect(lookups).toBe(1);
+      // A changed remote is read again on the next pass.
+      git(repoPath, ['remote', 'set-url', 'origin', `https://github.com/${REPO_FULL_NAME}-moved.git`]);
+      await runWorktreeReaperTick();
+      expect(lookups).toBe(2);
+    } finally {
+      prototype.spawn = spawn;
+    }
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    // Leave no reviewing lane behind to take the next tests' active slot.
+    getSqlite().prepare("UPDATE lanes SET status = 'archived' WHERE id = ?").run(lane.id);
+  });
+
   it('archives legacy reviewing lanes by merged PR head branch when prNumber is missing', async () => {
     const repoPath = makeRepo();
     const lane = createLane({
