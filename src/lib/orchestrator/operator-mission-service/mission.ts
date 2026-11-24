@@ -35,7 +35,7 @@ import { assertQualitySearchMissionCompatibility, resolveTaskContractRequired } 
 import { withMissionHandoffBarrier } from '@/lib/orchestrator/lifecycle-mutation-lock';
 import { assertExecutionCarrierCompatible, isExecutionCarrierId } from '@/lib/runtimes/shared/execution-carrier';
 import { releaseAbandonedMissionLifecycleHold } from '@/lib/orchestrator/mission-lifecycle-hold';
-import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
+import { readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { prepareMissionBranches } from './branch-cleanup';
 import {
   cancelSupersededMissionPackets,
@@ -206,16 +206,12 @@ export async function createMission(input: CreateMissionInput) {
     const inlineLabel = hasInlineIssues ? referenceLabels[index] : undefined;
     const packetSummary = buildPacketSummary(issue, input.constraints, repoPath, inlineLabel);
 
-    // #615 — Snapshot learned-rules + issue body for the details popover.
-    const packetType = issue.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
+    // #615 — Snapshot repository rules + issue body for the details popover.
     let learnedRules: string[] = [];
     try {
       const seen = new Set<string>();
-      learnedRules = [
-        ...readRepoScopedRules(repoPath).map((ruleText) => ({ ruleText, source: 'file' as const })),
-        ...getTopRulesForPacket({ repoPath, packetType, limit: 5 }),
-      ].flatMap((rule) => {
-        const text = rule.ruleText.trim();
+      learnedRules = readRepoScopedRules(repoPath).flatMap((ruleText) => {
+        const text = ruleText.trim();
         const normalized = text.toLowerCase();
         if (!text || seen.has(normalized)) return [];
         seen.add(normalized);
