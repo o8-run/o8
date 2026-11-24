@@ -905,7 +905,6 @@
     "shared:entry:src/lib/devices/owner-route.ts": 3897,
     "shared:entry:src/lib/devices/route.ts": 7149,
     "shared:entry:src/lib/dispatch/decomposition-pipeline.ts": 18270,
-    "shared:entry:src/lib/dispatch/rules-promotion.ts": 4789,
     "shared:entry:src/lib/gemini/owned.ts": 5081,
     "shared:entry:src/lib/github-broker/publication.ts": 3415,
     "shared:entry:src/lib/github-broker/store.ts": 2669,

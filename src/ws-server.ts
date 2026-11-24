@@ -8615,23 +8615,6 @@ async function runStartupMaintenance() {
     }
   }, 30_000, { busy: hasOutstandingReview }).unref();
 
-  recurring('rules-promotion', async () => {
-    try {
-      const { runRulesPromotionCycle } = await import('@/lib/dispatch/rules-promotion') as {
-        runRulesPromotionCycle: (options?: { now?: Date }) => Promise<{
-          promoted: number;
-          demoted: number;
-        }>;
-      };
-      const result = await runRulesPromotionCycle();
-      console.log(`[rules-promotion] promoted=${result.promoted} demoted=${result.demoted}`);
-    } catch (error) {
-      console.warn(
-        `[rules-promotion] cycle failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }, 10 * 60 * 1000).unref();
-
   if (shuttingDown) return;
   startReviewWatchers();
   startLedgerReporter(getDataDir());

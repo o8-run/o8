@@ -12,7 +12,7 @@ import { resolvePacketAlignment } from '@/lib/orchestrator/alignment-access';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
-import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
+import { readRepoScopedRules } from '@/lib/dispatch/rules-store';
 import { readPacketAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
@@ -186,10 +186,7 @@ function buildAttemptLearningSections(learnings: AttemptLearning[]): string[] {
     });
 }
 
-function buildLearnedRuleSection(
-  packet: OrchestratorPacket,
-  packetType: string,
-): string | null {
+function buildLearnedRuleSection(packet: OrchestratorPacket): string | null {
   const repoPath = packet.workspaceTargetPath?.trim();
   if (!repoPath) {
     return null;
@@ -197,15 +194,8 @@ function buildLearnedRuleSection(
 
   try {
     const seen = new Set<string>();
-    const rules = [
-      ...readRepoScopedRules(repoPath).map((ruleText) => ({ ruleText, source: 'file' as const })),
-      ...getTopRulesForPacket({
-        repoPath,
-        packetType,
-        limit: 5,
-      }),
-    ].flatMap((rule) => {
-      const ruleText = truncateText(rule.ruleText, 200, { normalizeWhitespace: true });
+    const rules = readRepoScopedRules(repoPath).flatMap((rule) => {
+      const ruleText = truncateText(rule, 200, { normalizeWhitespace: true });
       const normalizedRuleText = ruleText.toLowerCase();
       if (!ruleText || seen.has(normalizedRuleText)) {
         return [];
@@ -354,8 +344,7 @@ async function assemblePacketPrompt(
   const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id, projectId);
   const fileSizeSections = checkFileSizeThresholds(packet);
   const preservationSections = buildPreservationEnvelope(packet);
-  const packetType = packet.title.trim().split(/\s+/)[0]?.toLowerCase() || 'feat';
-  const learnedRuleSection = buildLearnedRuleSection(packet, packetType);
+  const learnedRuleSection = buildLearnedRuleSection(packet);
   // #535 — Read-before-write scaffolding. When the delegate route or
   // scheduler populated `packet.readBudget`, render it into the prompt so
   // weaker models see the required reads + plan gate up-front. Legacy
@@ -466,7 +455,7 @@ async function assemblePacketPrompt(
     console.log(`[dispatch] Injected preservation envelope for packet ${packet.id} (${preservationSections.length - 2} files)`);
   }
   if (learnedRuleSection) {
-    console.log(`[learned-rules] Injected learned guardrails for packet ${packet.id} (${packetType})`);
+    console.log(`[learned-rules] Injected repository dispatch rules for packet ${packet.id}`);
   }
   if (readBudgetSections.length > 0) {
     console.log(`[read-budget] Injected read-before-write scaffolding for packet ${packet.id} (${packet.readBudget?.requiredReads.length ?? 0} required reads, minToolCalls=${packet.readBudget?.minToolCalls ?? 0})`);
