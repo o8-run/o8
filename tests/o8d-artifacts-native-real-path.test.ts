@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { beforeAll, afterAll, expect, it, vi } from 'vitest';
+import { beforeAll, afterAll, expect, it } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
 
 let server: Awaited<ReturnType<typeof startParityReference>>;
@@ -35,8 +35,6 @@ async function refuses(method: string, path: string) {
   }
 }
 
-vi.mock('@/lib/harness/route', () => { throw new Error('Next loaded the stateful harness owner'); });
-
 it.each(['/api/task-artifacts'])('keeps %s operator-only', async path => {
   for (const method of ['GET', 'POST']) await refuses(method, path);
 });
@@ -52,41 +50,4 @@ it('persists task artifacts through the operator transport', async () => {
   const listing = await call('GET', `/api/task-artifacts?threadId=thoughts-fixture&repoPath=${encodeURIComponent(repo)}`);
   expect(listing.status).toBe(200);
   expect((await listing.json()).result.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({ artifact: expect.objectContaining({ id: artifact.id }) })]));
-
-});
-
-it('stores harness measurements in SQLite and reads them back with Next stopped', async () => {
-  await refuses('POST', '/api/harness');
-  const measured = await call('POST', '/api/harness', server.token, {
-    action: 'harness_measure', repoPath: repo, componentKey: 'fixture-component', modelId: 'fixture-model',
-    baselineScore: 0.4, enabledScore: 0.7, sampleCount: 10, evidence: { fixture: true },
-  });
-  expect(measured.status).toBe(200);
-  const body = await measured.json();
-  expect(body.ok).toBe(true);
-  const status = await call('POST', '/api/harness', server.token, {
-    action: 'harness_status', repoPath: repo, componentKey: 'fixture-component', modelId: 'fixture-model',
-  });
-  expect(status.status).toBe(200);
-  expect((await status.json()).result.measurements).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: body.result.measurement.id, baselineScore: 0.4, enabledScore: 0.7 }),
-  ]));
-  const saved = { ...process.env };
-  try {
-    process.env.O8_NEXT_O8D = '1';
-    process.env.O8_WS_PORT = new URL(origin).port;
-    const { NextRequest } = await import('next/server');
-    const next = await import('@/app/api/harness/route');
-    const forwarded = await next.POST(new NextRequest('http://127.0.0.1/api/harness', {
-      method: 'POST', headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'harness_status', repoPath: repo, componentKey: 'fixture-component', modelId: 'fixture-model' }),
-    }));
-    expect(forwarded.status).toBe(200);
-    expect((await forwarded.json()).result.measurements).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: body.result.measurement.id }),
-    ]));
-  } finally {
-    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
-    Object.assign(process.env, saved);
-  }
 });

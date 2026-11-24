@@ -94,9 +94,7 @@ Prose and author claims do not supply structured evidence. These are reviewer-re
 receipts, not independently attested execution or a measured correctness guarantee.
 
 The reviewer prompt asks for real-entry execution on user-facing changes or a
-specific not-run reason. The self-contained `POST /api/harness` `evaluate_diff` /
-`o8_evaluate_diff` evaluator cannot run a commit and always reports a read-only
-verdict, including when the model claims execution. CLI packet review accepts
+specific not-run reason. CLI packet review accepts
 `--run-evidence <JSON-file>` or `--not-run <reason>` and reports the mode in human
 and JSON output. Review-state (including the native window's data), mission status,
 and MCP outputs carry the same fields. The run label is
@@ -370,7 +368,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/panel/repos` | Add / touch / update a registered repo. |
 | DELETE | `/api/panel/repos` | Remove a registered repo (with runtime cleanup). |
 | POST | `/api/panel/repos/init` | Initialize a new git repo at the given path. |
-| POST | `/api/panel/repos/scaffold` | Scaffold a repo from a kind (next, tauri, etc.). |
 | GET | `/api/panel/search?q=...` | Cmd+K command palette server-side fan-out (#661). |
 | GET | `/api/panel/serve-image?path=...` | Serve image file from allowed roots (`$HOME` or `/tmp`). |
 | GET | `/api/panel/skeleton?workspace=...&search=...` | Workspace skeleton map + rendered text, or symbol search. |

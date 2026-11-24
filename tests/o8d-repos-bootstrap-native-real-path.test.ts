@@ -47,7 +47,7 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
 
     // Operator only over the native transport, even with forged loopback markers.
     const forged = { 'x-o8-client-addr': '127.0.0.1', 'x-o8d-peer': '127.0.0.1' };
-    for (const path of ['/api/panel/repos/init', '/api/panel/repos/scaffold']) {
+    for (const path of ['/api/panel/repos/init']) {
       const body = { path: join(targets, 'refused'), repoPath: join(targets, 'refused'), kind: 'node' };
       expect([path, (await send('POST', path, forged, body)).status]).toEqual([path, 401]);
       for (const token of [device, worker]) {
@@ -61,8 +61,7 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
       WS_TOKEN: server.token, CORTEX_REALTIME_INTERNAL_ORIGIN: origin });
     delete process.env.O8_DATA_DIR;
     const init = await import('@/app/api/panel/repos/init/route');
-    const scaffold = await import('@/app/api/panel/repos/scaffold/route');
-    const handlers = { '/api/panel/repos/init': init.POST, '/api/panel/repos/scaffold': scaffold.POST } as const;
+    const handlers = { '/api/panel/repos/init': init.POST } as const;
     const compare = async (path: keyof typeof handlers, nativeBody: unknown, tsBody: unknown = nativeBody) => {
       const native = await send('POST', path, operator, nativeBody);
       const ts = await handlers[path](new NextRequest(`http://127.0.0.1${path}`, { method: 'POST',
@@ -74,13 +73,10 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
     // Refusals match and create nothing.
     for (const [path, body] of [
       ['/api/panel/repos/init', {}], ['/api/panel/repos/init', { path: '   ' }],
-      ['/api/panel/repos/scaffold', {}], ['/api/panel/repos/scaffold', { repoPath: join(targets, 'no-kind') }],
-      ['/api/panel/repos/scaffold', { repoPath: join(targets, 'bad-kind'), kind: 'cobol' }],
     ] as const) {
       const [native, ts] = await compare(path, body);
       expect([path, native]).toEqual([path, ts]);
     }
-    expect([existsSync(join(targets, 'no-kind')), existsSync(join(targets, 'bad-kind'))]).toEqual([false, false]);
 
     // A new repository, then the same folder again, then a folder inside it.
     const nativeRepo = join(targets, 'native-init');
@@ -96,28 +92,10 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
     expect(nestedNative).toEqual(nestedTs);
     expect(existsSync(join(nativeRepo, 'nested'))).toBe(false);
 
-    // A scaffold writes and commits its files once; the second run skips them all.
-    const nativeSite = join(targets, 'native-site');
-    const tsSite = join(targets, 'ts-site');
-    polled.push(tsSite);
-    let written: string[] = [];
-    for (const pass of [1, 2]) {
-      const [native, ts] = await compare('/api/panel/repos/scaffold', { repoPath: nativeSite, kind: 'static-html', name: 'Fixture Site' },
-        { repoPath: tsSite, kind: 'static-html', name: 'Fixture Site' });
-      expect(shape(native, nativeSite)).toEqual(shape(ts, tsSite));
-      if (pass === 1) {
-        written = native.filesWritten ?? [];
-        expect([native.scaffolded, native.committed, written.length > 0]).toEqual([true, true, true]);
-      } else {
-        expect([native.scaffolded, native.filesWritten, native.skippedFiles]).toEqual([false, [], written]);
-      }
-    }
-    expect(subjects(nativeSite)).toEqual(subjects(tsSite));
-
-    // Both native writes registered the repository in the shared registry.
+    // The native write registered the repository in the shared registry.
     const listed = await send('GET', '/api/panel/repos', operator);
     const paths = ((await listed.json()) as { repos: Array<{ localPath: string }> }).repos.map((repo) => repo.localPath);
-    expect(paths).toEqual(expect.arrayContaining([nativeRepo, nativeSite]));
+    expect(paths).toEqual(expect.arrayContaining([nativeRepo]));
   } finally {
     const { stopChangePolling } = await import('@/lib/skeleton/autoscan');
     for (const repo of polled) stopChangePolling(repo);
