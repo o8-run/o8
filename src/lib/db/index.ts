@@ -12,7 +12,7 @@ import { addColumnTolerant, tableColumnExists } from '@/lib/db/schema-columns';
  */
 
 import Database from 'better-sqlite3';
-import { configureSqlite } from '@/lib/db/startup-pragmas';
+import { configureSqlite, setSqliteResting } from '@/lib/db/startup-pragmas';
 import { initializeProjectMergeModes } from '@/lib/lane/project-merge-mode-migration';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -485,6 +485,11 @@ function migrateProjectsLedgerJsonIfNeeded(sqlite: Database.Database): void {
 export function getSqlite(): Database.Database {
   if (!_sqlite) getDb();
   return _sqlite!;
+}
+
+/** Shrink or restore the open connection's page cache as the server rests or wakes. */
+export function setDbResting(resting: boolean): void {
+  if (_sqlite) setSqliteResting(_sqlite, resting);
 }
 
 /**
