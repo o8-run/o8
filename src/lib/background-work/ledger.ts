@@ -9,7 +9,7 @@
  * With the flag unset the helpers are plain `setInterval` and a direct call,
  * and no hooks are installed.
  */
-import { AsyncLocalStorage, createHook } from 'node:async_hooks';
+import { AsyncLocalStorage, createHook, executionAsyncResource } from 'node:async_hooks';
 import { ChildProcess } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
@@ -71,20 +71,74 @@ function switchTo(next: Run | null): void {
   activeSince = now;
 }
 
+/*
+ * A watcher, server, socket or timer that a run creates outlives the run. Its
+ * async context is the run's, so without this every later callback (a file
+ * event, a socket read, an interval tick) would be charged to that loop, even
+ * while the idle gate pauses it. Such a resource is charged to its own entry,
+ * "<loop> › <kind>", and so is any work its callbacks start. A loop run that
+ * one of its callbacks starts is still charged to that loop.
+ */
+const LONG_LIVED_KINDS: Record<string, string> = {
+  FSEVENTWRAP: 'fs watcher', STATWATCHER: 'fs watcher', TCPWRAP: 'socket', PIPEWRAP: 'socket',
+  TCPSERVERWRAP: 'server', PIPESERVERWRAP: 'server', UDPWRAP: 'socket', SIGNALWRAP: 'signal', TTYWRAP: 'tty',
+};
+/** A timer at least this long is deferred work, not a step of the run that set it. */
+const LONG_TIMER_MS = 1_000;
+const rehomed = new WeakMap<object, Run>();
+/** The re-homed callback running now, and the loop context it was created in. */
+let rehomedNow: { run: Run; creator: Run | undefined } | null = null;
+let spawning = false;
+
+function longLivedKind(type: string, resource: unknown): string | null {
+  if (type === 'Timeout') {
+    const timer = resource as { _repeat?: unknown; _idleTimeout?: number };
+    if (timer._repeat) return 'interval';
+    return (timer._idleTimeout ?? 0) >= LONG_TIMER_MS ? 'timer' : null;
+  }
+  // A child process's stdio pipes carry the run's own output.
+  if (spawning && type === 'PIPEWRAP') return null;
+  return LONG_LIVED_KINDS[type] ?? null;
+}
+
 function install(): void {
   if (installed) return;
   installed = true;
   createHook({
-    before() { switchTo(context.getStore() ?? null); },
-    after() { switchTo(null); },
+    init(_asyncId, type, _triggerAsyncId, resource) {
+      const store = context.getStore();
+      if (rehomedNow && store === rehomedNow.creator) {
+        // Work a re-homed callback starts stays with it.
+        rehomed.set(resource, rehomedNow.run);
+        return;
+      }
+      if (!store) return;
+      const kind = longLivedKind(type, resource);
+      if (kind) rehomed.set(resource, { entry: entryFor(`${store.entry.name} › ${kind}`), mainMs: 0 });
+    },
+    before() {
+      const resource = executionAsyncResource();
+      const run = rehomed.get(resource);
+      if (run) {
+        rehomedNow = { run, creator: context.getStore() };
+        switchTo(run);
+        return;
+      }
+      rehomedNow = null;
+      switchTo(context.getStore() ?? null);
+    },
+    after() { rehomedNow = null; switchTo(null); },
   }).enable();
   // Every child process (spawn, exec, execFile) starts through this method.
   // Synchronous spawns do not, but they block the main thread, which is charged.
   const prototype = ChildProcess.prototype as unknown as { spawn: (this: ChildProcess, options: unknown) => unknown };
   const spawn = prototype.spawn;
   prototype.spawn = function ledgerSpawn(this: ChildProcess, options: unknown) {
-    const run = context.getStore();
-    const result = spawn.call(this, options);
+    // Charged to whoever is running now, which a re-homed callback replaces.
+    const run = active ?? context.getStore();
+    spawning = true;
+    let result: unknown;
+    try { result = spawn.call(this, options); } finally { spawning = false; }
     if (run) {
       const command = basename(String((options as { file?: string } | undefined)?.file ?? 'unknown'));
       run.entry.children += 1;
