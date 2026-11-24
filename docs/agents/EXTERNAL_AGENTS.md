@@ -44,6 +44,31 @@ returned mission and packet identifiers; do not infer identifiers from titles.
 Do not dispatch again after a timeout until status establishes what happened.
 For supported mutations, keep the same idempotency key after an uncertain response.
 
+## One task from a shell
+
+With the app running and `o8 doctor` reporting a connection, one command
+creates a mission for a task in a repository and starts its worker:
+
+```sh
+o8 mission create --title "Fix the failing date test" --body "$(cat task.md)" --repo /path/to/repo --dispatch
+```
+
+The JSON answer carries the mission id at `.mission.missionId`. The command
+exits non-zero, after printing the mission, when the dispatch did not start.
+`o8 mission wait` returns on any state change, so a script that needs the
+worker to finish waits until a packet reaches a terminal state
+(`awaiting_review`, `released`, `failed`, `archived` or `blocked`):
+
+```sh
+id=$(o8 mission create --title "Fix the failing date test" --body "$(cat task.md)" --repo /path/to/repo --dispatch | jq -r .mission.missionId)
+until o8 mission wait --mission "$id" --timeout 30m | jq -e .terminalPacketId >/dev/null; do :; done
+o8 mission status --mission "$id"
+```
+
+Without `--repo` the current directory is the repository. `--runtime`,
+`--model` and `--effort` select the worker; `o8 mission create --help` lists
+every flag.
+
 ## Inspect, steer, and review
 
 ```text
