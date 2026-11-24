@@ -551,3 +551,75 @@ fn projects_preserve_session_focus_and_allow_inbox_navigation(cx: &mut TestAppCo
         "cycling shell surfaces must leave Projects"
     );
 }
+
+/// A folder opened from outside the app (Finder, `open -a`, the launcher's
+/// arguments) is registered, its project becomes active, the shell selects it
+/// and a chat in it takes keyboard focus in its composer.
+#[gpui::test]
+fn projects_folder_opened_from_outside_becomes_active_with_composer_focus(
+    cx: &mut TestAppContext,
+) {
+    // The fixture lets project-one register and start a new chat.
+    let fixture = Fixture::start_mode(
+        true,
+        "--shell --composer --sidebar --settings --sidebar-two-repo-create",
+    );
+    let (shell, mut visual) = open_past_setup(
+        fixture.client.clone(),
+        fixture.root.join("opened-folder.json"),
+        State::default(),
+        cx,
+    );
+    let cx = &mut visual;
+    settle(cx);
+    let folder = fs::canonicalize(&fixture.folders[0]).unwrap();
+    let list = shell.read_with(cx, |s, _| s.surfaces.sidebar.view.clone().unwrap());
+    list.update(cx, |list, cx| {
+        list.open_folder(folder.to_string_lossy().into_owned(), cx)
+    });
+    let until = Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        shell.update_in(cx, |s, w, cx| s.tick(true, w, cx));
+        settle(cx);
+        let selected = shell.read_with(cx, |s, _| s.state.selected.clone());
+        let composer = shell.read_with(cx, |s, _| match s.active().map(|tab| s.key(&tab)) {
+            Some(key) => match s.content.get(&key) {
+                Some(Content::Session(view)) => Some(view.clone()),
+                _ => None,
+            },
+            None => None,
+        });
+        if selected.as_deref().map(std::path::Path::new) == Some(folder.as_path())
+            && let Some(composer) = composer
+            && composer.update_in(cx, |s, w, cx| s.shell_selection(w, cx).1)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "the opened folder must be selected with its chat composer focused; selected {selected:?}, toasts {:?}, tabs {:?}, active {:?}, list {:?}",
+            shell.read_with(cx, |_, cx| crate::shell::toasts::texts(cx)),
+            shell.read_with(cx, |s, _| s.current().map(|w| (w.tabs.clone(), w.composer))),
+            shell.read_with(cx, |s, _| s.active()),
+            list.read_with(cx, |l, _| (l.selected.clone(), l.sessions.iter().filter(|s| s.id.starts_with("thoughts-next-")).map(|s| (s.id.clone(), s.repo_path.clone())).collect::<Vec<_>>())),
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let repos: Value = fixture.client.get("/api/panel/repos", &[]).unwrap();
+    let path = folder.to_string_lossy();
+    assert!(
+        repos["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["localPath"] == path.as_ref()),
+        "the opened folder must be registered"
+    );
+    let ledger: crate::projects_model::Ledger =
+        serde_json::from_value(fixture.client.get("/api/panel/projects", &[]).unwrap()).unwrap();
+    assert_eq!(
+        crate::projects_model::folder_project(&ledger, &path).map(|(_, active)| active),
+        Some(true),
+        "the project holding the opened folder must be the active one"
+    );
+}

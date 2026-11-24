@@ -1,4 +1,5 @@
 //! Bounded queue survives server and window startup; no document content enters IPC.
+//! Opened folders share it and open as projects in the window.
 // One copy of the path rules and the wire format, shared with the native window.
 // It lives in the native window's sources so that crate still builds when its
 // source folder is copied on its own.
@@ -42,10 +43,13 @@ pub fn take(data: &Path) -> Vec<PathBuf> {
         .unwrap()
         .drain(..)
         .filter_map(|path| {
-            validation::open(&path, data)
-                .ok()
-                .map(|(path, _)| path)
-                .filter(|p| p.to_str().is_some())
+            // A folder opens as a project; a file opens in the viewer.
+            if path.is_dir() {
+                validation::folder(&path, data).ok()
+            } else {
+                validation::open(&path, data).ok().map(|(path, _)| path)
+            }
+            .filter(|p| p.to_str().is_some())
         })
         .collect()
 }
@@ -118,6 +122,27 @@ mod tests {
         );
         assert!(take(&root.join("data")).is_empty());
         drop(instance);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_opened_folder_reaches_the_window_and_a_private_one_does_not() {
+        let root = PathBuf::from("/tmp").join(format!("o8-open-folder-{}", std::process::id()));
+        use std::os::unix::fs::PermissionsExt;
+        // Explicit modes: a test running beside this one may change the umask.
+        for name in ["", "data", "repo", ".ssh"] {
+            let dir = root.join(name);
+            let _ = std::fs::create_dir(&dir);
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let _ = take(&root.join("data"));
+        for name in ["repo", ".ssh", "data"] {
+            enqueue(root.join(name));
+        }
+        assert_eq!(
+            take(&root.join("data")),
+            vec![std::fs::canonicalize(root.join("repo")).unwrap()]
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -46,6 +46,9 @@ pub(super) struct Runtime {
     /// startX and startWidth), so the drag threshold never shifts the edge.
     pub press: std::rc::Rc<std::cell::Cell<Option<(f32, f32)>>>,
     workspace_ledger: Option<Ledger>,
+    /// The chat a folder opened from outside started; its composer takes
+    /// focus once it is the active tab.
+    pub(crate) focus_composer_for: Option<String>,
     bootstrapped: bool,
     navigation: Option<Navigation>,
     pub(crate) generation: std::rc::Rc<std::cell::Cell<u64>>,
@@ -417,13 +420,17 @@ fn initialize(shell: &mut Shell, window: &mut Window, cx: &mut Context<Shell>) {
                     shell.surfaces.sidebar.workspace_ledger = ledger.clone();
                     shell.install_sessions(session::with_server_ids(sessions), true, cx);
                 }
+                ThreadEvent::OpenedFolder(path, ledger) => {
+                    adopt_ledger(shell, ledger);
+                    shell.switch(path.clone(), window, cx);
+                    // New chat reuses this folder's empty chat; its composer
+                    // takes focus once the chat is the active tab.
+                    shell.surfaces.sidebar.focus_composer_for =
+                        shell.start_thread_in(path.clone(), true, cx);
+                    window.activate_window();
+                }
                 ThreadEvent::Workspace(path, ledger) => {
-                    shell
-                        .workspaces
-                        .extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
-                    shell.workspaces.sort();
-                    shell.workspaces.dedup();
-                    shell.surfaces.sidebar.workspace_ledger = Some(ledger.clone());
+                    adopt_ledger(shell, ledger);
                     if let Some(path) = path {
                         shell.switch(path.clone(), window, cx);
                     } else {
@@ -761,4 +768,14 @@ pub(super) fn navigation(s: &mut Shell, cx: &mut Context<Shell>) {
         let generation = &s.surfaces.sidebar.generation;
         generation.set(generation.get().wrapping_add(1));
     }
+}
+
+/// Every repository the ledger lists becomes a workspace the shell can select.
+fn adopt_ledger(shell: &mut Shell, ledger: &Ledger) {
+    shell
+        .workspaces
+        .extend(ledger.projects.iter().flat_map(|p| p.repo_paths.clone()));
+    shell.workspaces.sort();
+    shell.workspaces.dedup();
+    shell.surfaces.sidebar.workspace_ledger = Some(ledger.clone());
 }

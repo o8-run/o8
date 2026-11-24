@@ -139,3 +139,19 @@ Operator defaults persist globally within their profile. Read before changing
 them, and restore the original values after a temporary change.
 See the [agent reference](../../AGENT_REFERENCE.md#operator-call-recipes) for
 additional command families and [agent setup](../operations/agent-setup.md) for connection setup.
+
+## Open a project in the desktop app
+
+Open a repository folder with the app to make it the active project:
+
+```sh
+open -a o8 /path/to/repo
+```
+
+The app registers the folder if it is new, adding it to the active project
+as Add repository does, makes the project that holds it active, opens the
+folder in the normal window and focuses a new chat's composer. An empty chat
+already open in that folder is reused. The same works while o8 is closed, and
+by passing the folder to the app's executable:
+`/Applications/o8.app/Contents/MacOS/o8 /path/to/repo`. The app's data folder
+and credential folders such as `.ssh` are refused.

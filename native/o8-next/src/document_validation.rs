@@ -97,9 +97,63 @@ pub fn open(path: &Path, data: &Path) -> io::Result<(PathBuf, File)> {
     Ok((path, file))
 }
 
+/// A folder to open as a project: an existing directory, outside the app's
+/// data directory and the credential locations `permitted` refuses.
+pub fn folder(path: &Path, data: &Path) -> io::Result<PathBuf> {
+    let data = fs::canonicalize(data)?;
+    if !permitted(path, &data) {
+        return Err(io::ErrorKind::PermissionDenied.into());
+    }
+    let path = fs::canonicalize(path)?;
+    if !permitted(&path, &data) || !fs::metadata(&path)?.is_dir() {
+        return Err(io::ErrorKind::PermissionDenied.into());
+    }
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn folder_validation() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("open-folders-{}", std::process::id()));
+        // Each level gets its mode explicitly: a test running beside this one
+        // may change the process umask.
+        for name in [
+            "",
+            "data",
+            "data/inside",
+            "repo",
+            ".ssh",
+            ".ssh/keys",
+            "repo/.git",
+        ] {
+            let dir = root.join(name);
+            let _ = fs::create_dir(&dir);
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        fs::write(root.join("guide.md"), "# Guide").unwrap();
+        let data = root.join("data");
+        assert_eq!(
+            folder(&root.join("repo"), &data).unwrap(),
+            fs::canonicalize(root.join("repo")).unwrap()
+        );
+        for name in [
+            "data",
+            "data/inside",
+            ".ssh",
+            ".ssh/keys",
+            "repo/.git",
+            "guide.md",
+            "missing",
+        ] {
+            assert!(folder(&root.join(name), &data).is_err(), "{name}");
+        }
+        std::os::unix::fs::symlink(root.join(".ssh"), root.join("alias")).unwrap();
+        assert!(folder(&root.join("alias"), &data).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn document_validation() {
         let root = std::env::temp_dir().join(format!("open-documents-{}", std::process::id()));

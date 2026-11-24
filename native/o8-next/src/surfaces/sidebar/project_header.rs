@@ -107,15 +107,37 @@ impl ThreadList {
                         this.header = header;
                         this.header_menu = None;
                         this.notice.clear();
-                        cx.emit(Event::Workspace(path, this.header.ledger.clone()));
+                        let ledger = this.header.ledger.clone();
+                        match (std::mem::take(&mut this.folder_open), path) {
+                            (true, Some(path)) => cx.emit(Event::OpenedFolder(path, ledger)),
+                            (_, path) => cx.emit(Event::Workspace(path, ledger)),
+                        }
                     }
-                    Err(error) => this.notice = error,
+                    Err(error) => {
+                        this.folder_open = false;
+                        this.notice = error;
+                    }
+                }
+                if let Some(next) = this.pending_folder.take() {
+                    this.open_folder(next, cx);
                 }
                 cx.notify();
             });
         })
         .detach();
         cx.notify();
+    }
+    /// A folder opened from outside the app (Finder, `open -a`, or the app's
+    /// command-line arguments). It joins the active project as Add repository
+    /// does, the project holding it becomes active, and the shell opens it.
+    pub(crate) fn open_folder(&mut self, path: String, cx: &mut Context<Self>) {
+        if self.header_busy {
+            self.pending_folder = Some(path);
+            return;
+        }
+        self.folder_open = true;
+        let project = self.header_project();
+        self.header_select(Action::OpenFolder(path, project), cx);
     }
     /// The project a new repository joins: the active one, unless it is the
     /// default or a single-repository placeholder.
