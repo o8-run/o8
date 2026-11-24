@@ -165,9 +165,19 @@ export function noteClientMessage(text: string, now = Date.now()): void {
   noteActivity(now, 'socket message');
 }
 
+/**
+ * Reads that say only which server is answering: the launcher checks the
+ * identity route while it starts or shows a window, and the window reads it
+ * once per connection. Neither is something the user did.
+ */
+function isIdentityProbe(method: string | undefined, path: string | undefined): boolean {
+  return (method === 'GET' || method === 'HEAD') && (path ?? '').split('?')[0] === '/api/setup/identity';
+}
+
 /** Classify one HTTP request: the server's own requests and reads the user did not cause do not count. */
 export function noteRequest(headers: Record<string, string | string[] | undefined>, method: string | undefined, path?: string): void {
   if (headers['x-o8-background'] === '1') { count(stats.ignored, 'server self-request'); return; }
+  if (isIdentityProbe(method, path)) { count(stats.ignored, 'identity probe'); return; }
   const foreground = headers['x-o8-foreground'];
   const header = Array.isArray(foreground) ? foreground[0] : foreground;
   if ((method === 'GET' || method === 'HEAD') && header === '0') { count(stats.ignored, 'background window read'); return; }
