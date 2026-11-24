@@ -28,7 +28,11 @@ process.stdout.write(JSON.stringify({ jobs: state.mode === 'empty' ? [] : [{
   let lists = 0;
   let computer = 0;
   let computerForeground: string | null = null;
-  return { priority: 10, routes: {
+  const changes: unknown[] = [];
+  return { priority: 10,
+    // Only the job change carries a body here.
+    admit: ({ url, method, body }) => (!body || (method === 'POST' && url.pathname === '/api/automations/computer') ? 200 : 400),
+    routes: {
     'GET /api/automations': local.GET,
     'GET /api/automations/connected': async request => {
       lists++;
@@ -41,19 +45,26 @@ process.stdout.write(JSON.stringify({ jobs: state.mode === 'empty' ? [] : [{
       return Response.json({ ok: true, hiddenMacosJobs: 3, hiddenOpenApps: 1, collectedAt: Date.now(),
         loginItems: { readable: false, note: 'fixture' }, jobs: [
           { id: 'user:com.example.syncer', label: 'com.example.syncer', scope: 'user', program: '/opt/tools/bin/syncer',
-            plist: null, triggers: ['keep alive'], runsPerDay: 86400, loaded: true, running: true, pid: 812, runs: 3,
-            lastExit: null, disabled: false, maker: { kind: 'user', name: '/opt/tools/bin' } },
+            plist: '/fixture/com.example.syncer.plist', triggers: ['keep alive'], runsPerDay: 86400, loaded: true, running: true,
+            pid: 812, runs: 3, lastExit: null, disabled: false, maker: { kind: 'user', name: '/opt/tools/bin' },
+            actions: ['stop', 'disable'], readOnlyReason: null,
+            undoEntryId: changes.length === 1 ? '00000000-0000-4000-8000-000000000001' : null },
           { id: 'cron:0:backup', label: 'backup', scope: 'cron', program: '/usr/local/bin/backup', plist: null,
             triggers: ['cron 0 2 * * *'], runsPerDay: 1, loaded: null, running: false, pid: null, runs: null,
-            lastExit: null, disabled: false, maker: { kind: 'user', name: 'crontab' } },
+            lastExit: null, disabled: false, maker: { kind: 'user', name: 'crontab' },
+            actions: ['disable'], readOnlyReason: null, undoEntryId: null },
         ] });
+    },
+    'POST /api/automations/computer': async request => {
+      changes.push(await request.json());
+      return Response.json({ ok: true });
     },
     'GET /api/scheduled-fixture': async request => {
       const mode = request.nextUrl.searchParams.get('mode');
       if (mode && ['ok', 'fail', 'empty'].includes(mode)) {
         writeFileSync(join(root, 'scheduled-source.json'), JSON.stringify({ mode }));
       }
-      return Response.json({ lists, computer, computerForeground });
+      return Response.json({ lists, computer, computerForeground, changes });
     },
   } };
 }

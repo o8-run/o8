@@ -1,7 +1,9 @@
 //! Everything scheduled on this Mac: launchd agents and daemons and the
 //! crontab, as `GET /api/automations/computer` reads them. Read when the page
 //! opens and on Refresh, never on the 15-second tick, and sent as the app's own
-//! read so it does not wake a resting server's background work.
+//! read so it does not wake a resting server's background work. The user's own
+//! jobs can be stopped or disabled after a confirmation that names the job and
+//! what it runs, and each change offers an undo.
 use super::*;
 
 pub(super) const PATH: &str = "/api/automations/computer";
@@ -63,7 +65,9 @@ impl Scheduled {
 
     pub(super) fn computer_section(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let jobs = match &self.computer {
-            None => return Some(section_note("Reading this Mac's scheduled jobs…").into_any_element()),
+            None => {
+                return Some(section_note("Reading this Mac's scheduled jobs…").into_any_element());
+            }
             Some(Err(error)) => {
                 return Some(
                     section_note(&format!("This Mac's scheduled jobs unavailable: {error}"))
@@ -75,12 +79,19 @@ impl Scheduled {
         if jobs.is_empty() {
             return None;
         }
-        // launchd rows the connected route can run and pause keep those actions.
-        let controls: HashMap<String, Value> = self
+        // launchd rows the connected route can start keep "Run now".
+        let runnable: HashMap<String, String> = self
             .connected_jobs()
             .into_iter()
-            .filter(|job| job["agentId"] == "launchd" && job["readOnly"] != true)
-            .filter_map(|job| Some((job["source"].as_str()?.to_owned(), job)))
+            .filter(|job| {
+                job["agentId"] == "launchd" && job["readOnly"] != true && job["enabled"] == true
+            })
+            .filter_map(|job| {
+                Some((
+                    job["source"].as_str()?.to_owned(),
+                    job["id"].as_str()?.to_owned(),
+                ))
+            })
             .collect();
         let count = jobs.len();
         Some(
@@ -89,6 +100,9 @@ impl Scheduled {
                 .flex_col()
                 .gap(px(6.))
                 .child(section_header("On this Mac", count))
+                .when_some(self.computer_error.clone(), |section, error| {
+                    section.child(section_note(&error))
+                })
                 .child(
                     div()
                         .flex()
@@ -99,64 +113,182 @@ impl Scheduled {
                         .bg(theme().surface)
                         .overflow_hidden()
                         .children(jobs.iter().enumerate().map(|(n, job)| {
-                            let control = (job["scope"] == "user")
-                                .then(|| job["label"].as_str().and_then(|label| controls.get(label)))
-                                .flatten();
-                            self.computer_row(job, control, n + 1 == count, cx)
+                            let run = (job["scope"] == "user")
+                                .then(|| {
+                                    job["label"].as_str().and_then(|label| runnable.get(label))
+                                })
+                                .flatten()
+                                .cloned();
+                            self.computer_row(job, run, n + 1 == count, cx)
                         })),
                 )
                 .into_any_element(),
         )
     }
 
+    /// Stop or disable after the row's confirmation named the job.
+    fn change_computer(
+        &mut self,
+        id: String,
+        label: String,
+        action: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        self.computer_confirm = None;
+        self.send_computer(
+            id.clone(),
+            json!({ "id": id, "action": action, "confirm": label }),
+            cx,
+        );
+    }
+
+    fn undo_computer(&mut self, id: String, entry: String, cx: &mut Context<Self>) {
+        self.send_computer(id, json!({ "undo": entry }), cx);
+    }
+
+    fn send_computer(&mut self, id: String, body: Value, cx: &mut Context<Self>) {
+        let key = format!("computer:{id}");
+        self.busy.insert(key.clone(), "change");
+        self.computer_error = None;
+        cx.notify();
+        let client = self.client.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { call(&client, "POST", PATH, Some(body)) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.busy.remove(&key);
+                if let Err(error) = result {
+                    this.computer_error = Some(error);
+                }
+                this.load_computer(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn computer_row(
         &self,
         job: &Value,
-        control: Option<&Value>,
+        run: Option<String>,
         last: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let id = job["id"].as_str().unwrap_or("").to_owned();
         let label = job["label"].as_str().unwrap_or("").to_owned();
         let (status, color) = computer_status(job);
         let about = computer_about(job);
         let facts = computer_facts(job);
         let row = format!("scheduled-computer-{label}");
-        let controls = control.map(|connected| {
-            let id = connected["id"].as_str().unwrap_or("").to_owned();
-            let enabled = connected["enabled"] == true;
-            let busy = self.busy.get(&format!("connected:{id}")).copied();
-            let (run_id, toggle_id) = (id.clone(), id.clone());
-            div()
-                .flex()
-                .gap(px(6.))
-                .when(enabled, |actions| {
-                    actions.child(
-                        action(
-                            format!("scheduled-run-{id}"),
-                            if busy == Some("run") { "Starting…" } else { "Run now" },
-                            false,
-                            busy.is_some(),
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.run_connected(run_id.clone(), cx)
-                        })),
-                    )
-                })
-                .child(
+        let busy = self.busy.contains_key(&format!("computer:{id}"))
+            || run
+                .as_ref()
+                .is_some_and(|run| self.busy.contains_key(&format!("connected:{run}")));
+        let confirming = self
+            .computer_confirm
+            .as_ref()
+            .filter(|(confirm, _)| *confirm == id)
+            .map(|(_, action)| *action);
+        let actions: Vec<&'static str> = job["actions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|action| match action.as_str() {
+                Some("stop") => Some("stop"),
+                Some("disable") => Some("disable"),
+                _ => None,
+            })
+            .collect();
+        let undo = job["undoEntryId"].as_str().map(str::to_owned);
+        let reason = job["readOnlyReason"].as_str().map(str::to_owned);
+        let mut controls = div().flex().items_center().gap(px(6.));
+        if let Some(run_id) = run.filter(|_| confirming.is_none()) {
+            controls = controls.child(
+                action(format!("scheduled-run-{run_id}"), "Run now", false, busy).on_click(
+                    cx.listener(move |this, _, _, cx| this.run_connected(run_id.clone(), cx)),
+                ),
+            );
+        }
+        if confirming.is_none() {
+            for kind in actions {
+                let (id, title) = (id.clone(), if kind == "stop" { "Stop" } else { "Disable" });
+                controls = controls.child(
                     action(
-                        format!("scheduled-connected-{id}"),
-                        if busy == Some("toggle") {
-                            "Updating…"
-                        } else if enabled {
-                            "Pause"
-                        } else {
-                            "Resume"
-                        },
+                        format!("scheduled-computer-{kind}-{label}"),
+                        title,
                         false,
-                        busy.is_some(),
+                        busy,
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_connected(toggle_id.clone(), !enabled, cx)
+                        this.computer_confirm = Some((id.clone(), kind));
+                        cx.notify();
+                    })),
+                );
+            }
+            if let Some(entry) = undo {
+                let id = id.clone();
+                controls = controls.child(
+                    action(
+                        format!("scheduled-computer-undo-{label}"),
+                        "Undo",
+                        false,
+                        busy,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.undo_computer(id.clone(), entry.clone(), cx)
+                    })),
+                );
+            }
+            if let Some(reason) = reason {
+                controls = controls.child(
+                    div()
+                        .max_w(px(220.))
+                        .text_size(px(10.5))
+                        .text_color(theme().text_faint)
+                        .child(reason),
+                );
+            }
+        }
+        // The confirmation names the job and what it runs, under the row.
+        let confirm = confirming.map(|kind| {
+            let (id, name) = (id.clone(), label.clone());
+            div()
+                .debug_selector(move || format!("scheduled-computer-confirm-{name}"))
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.))
+                .pl(px(21.))
+                .text_size(px(11.5))
+                .text_color(theme().text_secondary)
+                .child(confirm_text(job, kind))
+                .child(
+                    action(
+                        format!("scheduled-computer-confirm-{kind}-{label}"),
+                        if kind == "stop" { "Stop" } else { "Disable" },
+                        true,
+                        busy,
+                    )
+                    .on_click(cx.listener({
+                        let label = label.clone();
+                        move |this, _, _, cx| {
+                            this.change_computer(id.clone(), label.clone(), kind, cx)
+                        }
+                    })),
+                )
+                .child(
+                    action(
+                        format!("scheduled-computer-cancel-{label}"),
+                        "Cancel",
+                        false,
+                        false,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.computer_confirm = None;
+                        cx.notify();
                     })),
                 )
         });
@@ -179,7 +311,7 @@ impl Scheduled {
                     .flex_col()
                     .gap(px(3.))
                     .when(job["disabled"] == true, |text| text.opacity(0.6))
-                    .child(div().text_size(px(13.)).truncate().child(label))
+                    .child(div().text_size(px(13.)).truncate().child(label.clone()))
                     .child(
                         div()
                             .text_size(px(11.))
@@ -210,17 +342,39 @@ impl Scheduled {
                             .truncate()
                             .child(facts),
                     )
-                    .children(controls),
+                    .child(controls),
             )
+            .children(confirm)
             .into_any_element()
     }
+}
+
+/// "Stop com.example.syncer? It runs /opt/tools/bin/syncer. …" — the job by name and what runs.
+pub(super) fn confirm_text(job: &Value, kind: &str) -> String {
+    let label = job["label"].as_str().unwrap_or("this job");
+    let program = job["program"]
+        .as_str()
+        .map(|program| format!(" It runs {program}."))
+        .unwrap_or_default();
+    let effect = match (kind, job["scope"].as_str()) {
+        (_, Some("cron")) => "Its crontab line is commented out, not removed.",
+        ("stop", _) => {
+            "Stops it for this login; it starts again at the next login unless disabled."
+        }
+        _ => "launchd will not start it, across logins, until you undo this.",
+    };
+    let verb = if kind == "stop" { "Stop" } else { "Disable" };
+    format!("{verb} {label}?{program} {effect}")
 }
 
 /// Running, failed, off or idle, in words and color.
 pub(super) fn computer_status(job: &Value) -> (String, gpui::Rgba) {
     let exit = job["lastExit"].as_str().filter(|code| *code != "0");
     if job["running"] == true {
-        let pid = job["pid"].as_u64().map(|pid| format!(" · pid {pid}")).unwrap_or_default();
+        let pid = job["pid"]
+            .as_u64()
+            .map(|pid| format!(" · pid {pid}"))
+            .unwrap_or_default();
         return (format!("Running{pid}"), theme().accent);
     }
     if job["disabled"] == true {
