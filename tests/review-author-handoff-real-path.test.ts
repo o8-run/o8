@@ -25,6 +25,8 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', async importOriginal => {
   };
   return { ...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: () => backend };
 });
+vi.mock('@/lib/lane/packet-explainer-queue', () => ({ drainPacketExplainerQueue: vi.fn(async () => {}),
+  enqueuePacketExplainer: vi.fn(async () => {}), notifyCorrectnessReviewQueued: vi.fn(), startPacketExplainerQueueDrain: vi.fn(() => () => {}) }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: readiness }));
 vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
