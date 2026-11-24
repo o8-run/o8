@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -390,8 +390,10 @@ describe('worktree reaper PR merge reconciliation', () => {
 
     expect(getLane(lane.id)?.status).toBe('archived');
     await waitForPathGone(worktreePath);
-    expect(git(repoPath, ['show-ref', '--verify', '--quiet', 'refs/heads/preserved/packet-pkt-pr-merged-dirty'])).toBe('');
-    expect(git(repoPath, ['show', 'preserved/packet-pkt-pr-merged-dirty:dirty.txt'])).toBe('salvaged terminal work\n');
+    // The work is kept under the clone's own directory name, index-exclusion suffix included.
+    const preserved = `preserved/${basename(worktreePath)}`;
+    expect(git(repoPath, ['show-ref', '--verify', '--quiet', `refs/heads/${preserved}`])).toBe('');
+    expect(git(repoPath, ['show', `${preserved}:dirty.txt`])).toBe('salvaged terminal work\n');
   });
 
   it('leaves a reviewing lane untouched when its stamped PR is closed but unmerged', async () => {
