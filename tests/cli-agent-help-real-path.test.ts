@@ -22,8 +22,6 @@ describe('operator help through the executable entry point', () => {
     ['packet merge-preview', ['--packet', 'read-only']],
     ['packet steer', ['--message', '--packet']],
     ['packet review', ['--approve', '--expected-sha', '--coverage', 'merges']],
-    ['lease acquire', ['<resource>', '--ttl', '2h', '--wait']],
-    ['lease status', ['<resource>']],
     ['task create', ['--title', '--repo', '--project']],
     ['task block', ['<id>', '--reason', '--code']],
   ])('%s exposes the arguments needed before making a call', (command, tokens) => {
@@ -37,12 +35,8 @@ describe('operator help through the executable entry point', () => {
     for (const token of tokens) expect(output).toContain(token);
   });
 
-  it('documents the separate lease stores and the bare duration unit', () => {
+  it('documents mission creation syntax', () => {
     const reference = readFileSync('AGENT_REFERENCE.md', 'utf8');
-    expect(reference).toContain('Bare --ttl values are milliseconds');
-    expect(reference).toContain('o8 lease acquire audit --ttl 2m');
-    expect(reference).toContain('o8 team lease uses a separate checkout-local store');
-    expect(reference).not.toContain('[--ttl <minutes>]');
     expect(reference).toContain('o8 mission create --title "Inspect behavior" --repo /path/to/repo');
   });
 

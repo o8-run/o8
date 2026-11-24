@@ -239,25 +239,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 | POST | `/api/lanes/apply-diff` | Create a transient worktree and `git apply` a diff blob. |
 | GET | `/api/lanes/touches?repo=...&packet=...&path=...` | Find lanes touching given paths or a packet's diff. |
 
-### `/api/leases` — Named resource coordination (gated)
-
-Operator and worker credentials can use this route. Device and anonymous callers are denied.
-The handler captures the submitted local owner PID's exact boot/start identity before recording
-ownership. Worker mutations additionally prove that the submitted owner and waiter PIDs belong to
-the process tree bound to that packet credential; worker labels and ledger actors come from the
-authenticated principal, not the request body. Workers cannot mutate the governance-reserved
-`repo-tree:`, `test-suite:`, or `apfs-mounts:` namespaces. Acquire creates a private claim that is
-never returned by status/list; release and heartbeat require both the exact process identity and
-that claim. Claim files inside the o8 data directory are readable by the same operating-system
-user; worker-to-worker isolation comes from the server-verified process binding, not secrecy of
-the claim token. An overdue lease remains held until release or confirmed process death; an unknown
-identity fails closed.
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/leases?resource=...` | Read one holder and its FIFO waiter queue. Omit `resource` to list active resources. |
-| POST | `/api/leases` | Acquire, release, or heartbeat a named resource using an explicit action body. |
-
 ### `/api/mobile/*` — Mobile surface for the native o8-mobile app (partial)
 
 Mobile clients present an enrolled device bearer. `src/middleware.ts` grants
