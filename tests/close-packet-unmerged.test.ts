@@ -673,6 +673,88 @@ process.exit(run.status ?? 1);
     });
   });
 
+  it('with acknowledgement, closes a packet whose checkout o8 cannot retire and leaves the folder untouched', async () => {
+    const packetId = 'pkt-close-unrecoverable-worktree';
+    const branch = 'issue/close-unrecoverable-worktree';
+    const repoPath = mkdtempSync(join(dataDir, 'dirty-close-repo-'));
+    const worktreePath = mkdtempSync(join(dataDir, 'dirty-close-source-'));
+    rmSync(worktreePath, { recursive: true, force: true });
+    const git = (cwd: string, ...args: string[]) => execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+    git(repoPath, 'init', '--initial-branch=main');
+    git(repoPath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '--allow-empty', '-m', 'init');
+    git(dataDir, 'clone', repoPath, worktreePath);
+    git(worktreePath, 'checkout', '-b', branch);
+    writeFileSync(join(worktreePath, 'committed.ts'), 'export const committed = true;\n');
+    git(worktreePath, 'add', 'committed.ts');
+    git(worktreePath, '-c', 'user.email=test@o8.test', '-c', 'user.name=o8-test',
+      'commit', '-m', 'committed work');
+    git(repoPath, 'fetch', worktreePath, `${branch}:refs/heads/${branch}`);
+    git(repoPath, 'merge', '--ff-only', branch);
+    writeFileSync(join(worktreePath, 'dirty.ts'), 'export const dirty = true;\n');
+
+    const lane = createLane({
+      repoPath,
+      worktreePath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      label: 'Dirty close cleanup truth',
+      packetId,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_requested');
+    writeOrchestratorControlPlaneState({
+      ...createEmptyOrchestratorMissionState(),
+      missionId: 'mission-close-unrecoverable-worktree',
+      repoPath,
+      runtime: 'codex',
+      packets: [{
+        id: packetId,
+        referenceLabel: '#unrecoverable-close',
+        title: 'Keep dirty checkout visible',
+        summary: 'Close must fail when cleanup preserves uncommitted work.',
+        workspaceTargetPath: repoPath,
+        branchTarget: branch,
+        runtime: 'codex',
+        dependencyLabels: [],
+        dependencyPacketIds: [],
+        queueState: 'queued',
+        releaseState: 'pending',
+        status: 'awaiting_review',
+        blockedReason: null,
+        lane: {
+          tileId: lane.id,
+          tabId: lane.id,
+          repoPath,
+          worktreePath,
+          runtime: 'codex',
+          laneId: lane.id,
+          sessionKey: null,
+        },
+        review: null,
+      } as OrchestratorPacket],
+      updatedAt: new Date().toISOString(),
+    });
+
+    const response = await closeRoute.POST(operatorRequest({ packetId, disposition: 'wontfix', acknowledgeMissingWorktree: true }));
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.ok).toBe(true);
+    expect(body.result.note).toContain(`Checkout left in place at ${worktreePath} (ownership-unavailable)`);
+    // Nothing on disk was touched, including the uncommitted file.
+    expect(existsSync(join(worktreePath, 'dirty.ts'))).toBe(true);
+    expect(existsSync(join(worktreePath, 'committed.ts'))).toBe(true);
+    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLaneEvents(lane.id).some((event) => event.payload.code === 'worktree_unrecoverable_acknowledged'
+      && event.payload.cleanupReason === 'ownership-unavailable')).toBe(true);
+    expect(readOrchestratorControlPlaneState().packets[0]).toMatchObject({ status: 'archived' });
+  });
+
   it('releases the OpenCode service location before close removes the worktree', { timeout: 90_000 }, async () => {
     const packetId = 'pkt-opencode-close-release';
     const branch = 'issue/opencode-close-release';

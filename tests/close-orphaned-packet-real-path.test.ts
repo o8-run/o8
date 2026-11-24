@@ -25,7 +25,7 @@ const { resolveSpawnedProcessGroupId } = await import('@/lib/runtimes/shared/own
 const { recordLaneEvent } = await import('@/lib/lane/events');
 const { recordMission } = await import('@/lib/db/missions-store');
 const { closeDb, getSqlite } = await import('@/lib/db');
-const { createLane, getLane, setLaneStatus } = await import('@/lib/lane/registry');
+const { createLane, getLane, getLaneEvents, setLaneStatus } = await import('@/lib/lane/registry');
 const { readOrchestratorControlPlaneState, writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
@@ -148,10 +148,11 @@ async function fixture(sessionState: SessionState) {
   return { packetId, repoPath, branch, worktree, lane, head, runMarker, archivedRecordPath };
 }
 
-async function httpClose(packetId: string) {
+async function httpClose(packetId: string, acknowledgeMissingWorktree = false) {
   return fetch(`${base}/api/orchestrator/discard-packet`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ packetId, disposition: 'superseded', clientMutationId: randomUUID() }),
+    body: JSON.stringify({ packetId, disposition: 'superseded', clientMutationId: randomUUID(),
+      ...(acknowledgeMissingWorktree ? { acknowledgeMissingWorktree } : {}) }),
   });
 }
 
@@ -289,6 +290,40 @@ describe('orphaned review packet close through persisted HTTP, CLI and MCP entry
       } finally { interception.mockRestore(); }
     }, 120_000);
   }
+
+  it('closes a packet whose half-retired checkout is gone only with acknowledgement, leaving the claim untouched', async () => {
+    const source = await fixture('missing');
+    const retire = exactRetirement.retireExactManagedDirectory;
+    const interception = vi.spyOn(exactRetirement, 'retireExactManagedDirectory').mockImplementation((input) => retire({
+      ...input,
+      beforeRetirementPurge: async () => { throw new Error('Injected interruption after the checkout was renamed.'); },
+    }));
+    let claimPath: string;
+    try {
+      expect((await httpClose(source.packetId)).status).toBe(409);
+      const claim = readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)!;
+      claimPath = claim.claimPath;
+    } finally { interception.mockRestore(); }
+    // The renamed checkout is later lost too: nothing is left to retire.
+    rmSync(claimPath, { recursive: true, force: true });
+    expect(existsSync(source.worktree.path)).toBe(false);
+
+    const refused = await httpClose(source.packetId);
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.message).toMatch(/retirement|unbanked source|uncertain/i);
+    expect(getLane(source.lane.id)?.status).not.toBe('archived');
+
+    const closed = await httpClose(source.packetId, true);
+    const body = await closed.json();
+    expect(closed.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.result.worktreeCleanup).toBe('missing');
+    expect(getLane(source.lane.id)?.status).toBe('archived');
+    expect(getLaneEvents(source.lane.id).some((event) => event.payload.code === 'worktree_missing_acknowledged')).toBe(true);
+    // The retirement journal and the branch's committed work are left as they were.
+    expect(readExactWorkspaceClaim('managed-retirement', canonicalRepoRoot(source.repoPath), source.worktree.id)).not.toBeNull();
+    expect(git(source.repoPath, 'rev-parse', source.branch)).toBe(source.head);
+  }, 120_000);
 
   it('keeps clean-source refusal when a warm orphan context resumes a claim without an orphan descriptor', async () => {
     const source = await fixture('missing');

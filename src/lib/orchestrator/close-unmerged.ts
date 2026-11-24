@@ -70,6 +70,16 @@ export {
   closeUnmergedDispositionLabel,
   closeUnmergedOutcomeNote,
 };
+/**
+ * Cleanup refusals that mean o8 cannot retire the checkout at all (it is gone,
+ * half retired, or no longer provably its own). With the operator's explicit
+ * acknowledgement a close proceeds and leaves whatever is on disk untouched.
+ * Uncommitted work (`dirty`) and a live process inside still refuse.
+ */
+const UNRECOVERABLE_CLEANUP_REASONS = new Set<string>([
+  'retirement-refused', 'ownership-unavailable', 'inconclusive', 'status-failed',
+]);
+
 export type { CloseUnmergedDisposition, CloseUnmergedResult };
 
 function errorMessage(error: unknown): string {
@@ -529,7 +539,7 @@ async function closePacketUnmergedUnlocked(input: {
     const goneSessionNote = goneRunsWithoutProcess > 0
       ? ` ${goneRunsWithoutProcess} earlier worker run${goneRunsWithoutProcess === 1 ? '' : 's'} never recorded a process id, so only packet and run markers were checked for a live worker.`
       : '';
-    const outcomeNote = `${closeUnmergedOutcomeNote({
+    let outcomeNote = `${closeUnmergedOutcomeNote({
       disposition: rawDisposition,
       note,
       preservedBranch,
@@ -583,6 +593,19 @@ async function closePacketUnmergedUnlocked(input: {
         });
         const cleanup = cleanupAttempt.result;
         const intentionalMainCheckout = cleanup.reason === 'worktree-equals-repo';
+        if (!cleanup.removed && !intentionalMainCheckout && input.acknowledgeMissingWorktree
+          && worktreePath && cleanup.reason && UNRECOVERABLE_CLEANUP_REASONS.has(cleanup.reason)) {
+          // The operator acknowledged a checkout o8 cannot retire: gone, half
+          // retired, or no longer provably its own. Close without touching it.
+          const gone = !existsSync(worktreePath);
+          if (gone) missingWorktreeBindings.add(`${candidate.id}\0${worktreePath}`);
+          else outcomeNote += ` Checkout left in place at ${worktreePath} (${cleanup.reason}); remove it by hand if it is no longer needed.`;
+          recordLaneEvent(candidate.id, 'update', 'user', {
+            code: gone ? 'worktree_missing_acknowledged' : 'worktree_unrecoverable_acknowledged',
+            packetId: input.packetId, worktreePath, cleanupReason: cleanup.reason, detail: cleanup.detail ?? null,
+          });
+          continue;
+        }
         if (!cleanup.removed && !intentionalMainCheckout) {
           await markPacketLifecycleFailure(guard, 'worktree_cleanup_failed');
           return {
