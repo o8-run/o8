@@ -276,7 +276,6 @@ const LOOPBACK_READ = [
 const EXPLICIT_GATED = [
   /^\/api\/prompt-library(\/|$)/,
   /^\/api\/mcp\/?$/,
-  /^\/api\/leases\/?$/,
   /^\/api\/orchestrator\/receipts\/?$/,
   /^\/api\/broadcast\/tokens\/?$/,
   /^\/api\/broadcast\/post\/?$/,
