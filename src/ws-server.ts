@@ -2,6 +2,7 @@ import { apiFrontDoorEnabled } from './lib/ws-server/api-front-door-config';
 import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
 import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
 import { handleRelayConnectorSyncRequest } from './lib/mobile/relay-connector-sync';
+import { createLanEncryptedHttp } from './lib/mobile/lan-encrypted-http';
 import { isPathReachable } from '@/lib/fs/protected-folders';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { mobileModelError } from './lib/mobile/model-catalog';
@@ -2188,7 +2189,8 @@ function handleE2eeInit(client: ClientState, msg: Record<string, unknown>): void
   e2ee.handshake = undefined;
   e2ee.state = 'encrypted';
   // First encrypted frame — the client decrypting it confirms key agreement.
-  send(client, { channel: 'system', event: 'e2ee-ready' });
+  // `http: 1` tells the phone it may send HTTP over this socket instead of cleartext.
+  send(client, { channel: 'system', event: 'e2ee-ready', data: { http: 1 } });
   sendInitialClientState(client);
   console.log(`[mobile-e2ee] ${client.id} channel encrypted`);
 }
@@ -3652,6 +3654,14 @@ function startAttachedBrowserRefreshLoop() {
 
 const clients = new Map<string, ClientState>();
 
+// HTTP for a phone on the network rides its encrypted socket, as on the relay.
+const lanEncryptedHttp = createLanEncryptedHttp<ClientState>({
+  apiBase: () => `http://127.0.0.1:${resolvePortInfo().apiPort}`,
+  send: (client, frame) => send(client, frame),
+  isOpen: (client) => client.ws.readyState === WebSocket.OPEN && clients.has(client.id),
+  deviceIdForToken: (token) => resolveDeviceByToken(token)?.id ?? null,
+});
+
 async function handleClientMessage(client: ClientState, raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { return; }
@@ -3674,6 +3684,8 @@ async function handleClientMessage(client: ClientState, raw: string) {
     if (!plaintext) return; // bad/forged frame — drop
     try { msg = JSON.parse(plaintext); } catch { return; }
   }
+
+  if (lanEncryptedHttp.handle(client, msg)) return;
 
   // #5 E2EE — the client's handshake response (plaintext, signed).
   if (msg.type === 'e2ee-init') {
@@ -7765,6 +7777,7 @@ wss.on('connection', (ws, req) => {
     // Stop backpressure flush timer
     stopFlushTimer(client);
     if (client.e2ee?.helloTimer) clearTimeout(client.e2ee.helloTimer);
+    lanEncryptedHttp.close(client.id);
     client.backpressureQueue.length = 0;
     // Detach from all terminal sessions
     for (const sessionName of client.terminalSessions) {
