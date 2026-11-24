@@ -36,6 +36,15 @@ describe('O8_NO_PHONE_HOME', () => {
     expect(quiet.sources).toMatchObject({ updateAutoApply: 'env', telemetryOptIn: 'env', crashReportsEnabled: 'env' });
   });
 
+  it('stops usage analytics after consent was given', async () => {
+    const { updateOperatorDefaults } = await import('./defaults');
+    const { isProductTelemetryEnabled } = await import('@/lib/analytics/server');
+    await updateOperatorDefaults({ productTelemetryEnabled: true, telemetryConsentAnswered: true });
+    expect(isProductTelemetryEnabled()).toBe(true);
+    vi.stubEnv('O8_NO_PHONE_HOME', '1');
+    expect(isProductTelemetryEnabled()).toBe(false);
+  });
+
   it('changes nothing unless set to 1', async () => {
     const { getOperatorDefaults, updateOperatorDefaults } = await import('./defaults');
     await updateOperatorDefaults({ updateAutoApply: 'idle', telemetryOptIn: true, crashReportsEnabled: true });

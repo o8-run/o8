@@ -120,3 +120,26 @@ A dedicated local-only mode is planned but not yet shipped. The shared policy
 predicate already gives local-only mode precedence over product consent, so
 that future resolver can fail closed without adding another telemetry
 preference.
+
+## Turn everything off for one run
+
+Each control above has its own switch in the app's environment:
+
+| What | Variable | Off value |
+| --- | --- | --- |
+| Automatic update install | `O8_UPDATE_AUTO_APPLY` | `off` |
+| Crash-log upload | `O8_TELEMETRY_OPT_IN` | `0` |
+| Crash and error reports | `O8_CRASH_REPORTS` | `0` |
+
+`O8_NO_PHONE_HOME=1` turns all of these off at once, together with usage
+analytics and the launcher's own update check, for as long as it is set. It
+wins over the saved settings and over the variables in the table, and it
+changes nothing that is saved. The launcher still finishes an interrupted
+update install before it stops checking. Settings shows the affected values
+as set by the environment.
+
+To set it for the installed app on macOS, quit o8, run
+`launchctl setenv O8_NO_PHONE_HOME 1`, and open o8 again. Run
+`launchctl unsetenv O8_NO_PHONE_HOME` and reopen o8 to go back to the saved
+settings. A launch from a terminal can set it for that launch only:
+`O8_NO_PHONE_HOME=1 /Applications/o8.app/Contents/MacOS/o8`.
