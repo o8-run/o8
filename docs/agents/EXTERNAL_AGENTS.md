@@ -61,7 +61,7 @@ worker to finish waits until a packet reaches a terminal state
 
 ```sh
 id=$(o8 mission create --title "Fix the failing date test" --body "$(cat task.md)" --repo /path/to/repo --dispatch | jq -r .mission.missionId)
-until o8 mission wait --mission "$id" --timeout 30m | jq -e .terminalPacketId >/dev/null; do :; done
+until o8 mission wait --mission "$id" --timeout 30m | jq -e .terminalPacketId >/dev/null; do sleep 5; done
 o8 mission status --mission "$id"
 ```
 
