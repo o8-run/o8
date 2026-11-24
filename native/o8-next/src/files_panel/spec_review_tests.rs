@@ -110,7 +110,7 @@ fn spec_suggestion_apply_dismiss_and_comment_resolve(cx: &mut TestAppContext) {
     );
 }
 #[gpui::test]
-fn spec_scoped_reply_enter_escape_and_error(cx: &mut TestAppContext) {
+fn spec_reply_enter_and_escape(cx: &mut TestAppContext) {
     let f = Fixture::new();
     fs::write(path(&f), NOTES).unwrap();
     let (_, cx) = panel(&f, cx);
@@ -119,61 +119,20 @@ fn spec_scoped_reply_enter_escape_and_error(cx: &mut TestAppContext) {
     search(cx, "note-c1-input", "Only this note, please.");
     cx.simulate_keystrokes("enter");
     draw(cx);
-    until(cx, |cx| {
-        content(cx).contains("Keep this change scoped to the named anchor.")
-    });
-    let prompt = fs::read_to_string(f.root.join("provider-prompts.jsonl")).unwrap();
-    assert!(prompt.contains("Continue one o8.md margin-note thread."));
-    assert!(prompt.contains("Only this note, please."));
-    assert!(!prompt.contains("Old wording"));
+    until(cx, |cx| content(cx).contains("Only this note, please."));
+    assert!(content(cx).contains("by=\"user\""));
+    assert_eq!(fs::read_to_string(path(&f)).unwrap(), content(cx));
+    wait_requests(cx, &f, |r| r.iter().any(|r| r.contains("action=reply")));
     click(cx, "note-c1-reply");
-    search(cx, "note-c1-input", "Retain my failed reply");
-    fs::write(f.root.join("provider-error"), "1").unwrap();
-    cx.simulate_keystrokes("enter");
-    draw(cx);
-    wait_requests(cx, &f, |r| {
-        r.iter()
-            .filter(|r| r.contains("action=scoped-reply"))
-            .count()
-            == 2
-    });
-    until(cx, |cx| cx.debug_bounds("note-c1-input").is_some());
-    assert_eq!(
-        cx.update(|_, cx| cx.global::<Status>().reply.clone())
-            .as_deref(),
-        Some("Retain my failed reply")
-    );
+    search(cx, "note-c1-input", "Discard my draft reply");
     cx.simulate_keystrokes("escape");
     draw(cx);
     assert!(cx.update(|_, cx| cx.global::<Status>().reply.is_none()));
     assert!(
         !fs::read_to_string(path(&f))
             .unwrap()
-            .contains("Retain my failed reply")
+            .contains("Discard my draft reply")
     );
-}
-#[gpui::test]
-fn spec_review_adoption_and_failure(cx: &mut TestAppContext) {
-    let f = Fixture::new();
-    fs::write(path(&f), "# Review fixture\n\nThe draft line.\n").unwrap();
-    fs::write(f.root.join("provider-delay-ms"), "250").unwrap();
-    let (_, cx) = panel(&f, cx);
-    wait(cx, "spec-review");
-    click(cx, "spec-review");
-    until(cx, |cx| {
-        content(cx).contains("Check the fixture acceptance evidence.")
-    });
-    assert_eq!(fs::read_to_string(path(&f)).unwrap(), content(cx));
-    fs::write(f.root.join("provider-error"), "1").unwrap();
-    click(cx, "spec-review");
-    until(cx, |cx| {
-        cx.update(|_, cx| {
-            cx.global::<Status>()
-                .text
-                .contains("Fixture review unavailable")
-        })
-    });
-    assert!(cx.debug_bounds("spec-frame").is_some());
 }
 #[gpui::test]
 fn spec_act_reuses_correlated_receipt_and_only_then_resolves(cx: &mut TestAppContext) {

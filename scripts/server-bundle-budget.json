@@ -950,7 +950,6 @@
     "shared:entry:src/lib/mobile/orchestrator-thread-history.ts": 3583,
     "shared:entry:src/lib/next/app-window.ts": 1346,
     "shared:entry:src/lib/next/linux-window-startup.ts": 1658,
-    "shared:entry:src/lib/o8md/spec-review.ts": 7561,
     "shared:entry:src/lib/opencode/owned.ts": 5166,
     "shared:entry:src/lib/operator/brain-routing.ts": 1546,
     "shared:entry:src/lib/operator/defaults.ts": 3602,

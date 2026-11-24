@@ -11,7 +11,7 @@ export const nativeReadGeneration = randomUUID();
 const generation = nativeReadGeneration;
 const prefix = 'o8d/mcp/v1/';
 const nativeNames = new Set(['o8_status', 'get_mission_status', 'o8_task_list',
-  'o8_list_repos', 'o8_list_projects', 'o8_spec_read']);
+  'o8_list_repos', 'o8_list_projects']);
 let previousPolicy = '';
 
 // Publish authority, not a second tool catalog. The native reader still checks

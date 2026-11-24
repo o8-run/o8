@@ -454,15 +454,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/operator-handlers/repo-management.ts](../../src/lib/mcp/operator-handlers/repo-management.ts) | tool:o8_set_project_repos | Tool selection, arguments and authority | 82 | 82 | 0 |
 | [src/lib/mcp/operator-handlers/review-coverage-input.ts](../../src/lib/mcp/operator-handlers/review-coverage-input.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 108 | 108 | 0 |
 | [src/lib/mcp/operator-handlers/setup.ts](../../src/lib/mcp/operator-handlers/setup.ts) | tool:o8_setup | Tool selection, arguments and authority | 252 | 252 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 12 | 12 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_comment | Tool selection, arguments and authority | 82 | 82 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_pending_feedback | Tool selection, arguments and authority | 23 | 23 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_read | Tool selection, arguments and authority | 20 | 20 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_reply | Tool selection, arguments and authority | 45 | 45 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_resolve | Tool selection, arguments and authority | 37 | 37 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_review_index | Tool selection, arguments and authority | 31 | 31 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_suggest | Tool selection, arguments and authority | 116 | 116 | 0 |
-| [src/lib/mcp/operator-handlers/spec.ts](../../src/lib/mcp/operator-handlers/spec.ts) | tool:o8_spec_validate | Tool selection, arguments and authority | 31 | 31 | 0 |
 | [src/lib/mcp/operator-handlers/status.ts](../../src/lib/mcp/operator-handlers/status.ts) | tool:o8_history | Tool selection, arguments and authority | 108 | 108 | 0 |
 | [src/lib/mcp/operator-handlers/status.ts](../../src/lib/mcp/operator-handlers/status.ts) | tool:o8_lane_events | Tool selection, arguments and authority | 179 | 179 | 0 |
 | [src/lib/mcp/operator-handlers/status.ts](../../src/lib/mcp/operator-handlers/status.ts) | tool:o8_operator_defaults | Tool selection, arguments and authority | 1115 | 1115 | 0 |
@@ -494,9 +485,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/transcript-read-tool.ts](../../src/lib/mcp/transcript-read-tool.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 211 | 211 | 0 |
 | [src/lib/mobile/diff-comments.ts](../../src/lib/mobile/diff-comments.ts) | formatOpenDiffCommentsForPrompt | Model input and output contract | 11 | 11 | 5 |
 | [src/lib/mobile/orchestrator-handoff-history.ts](../../src/lib/mobile/orchestrator-handoff-history.ts) | createHandoffHistoryMarker:message | Continuation and retained context | 4 | 4 | 2 |
-| [src/lib/o8md/spec-review.ts](../../src/lib/o8md/spec-review.ts) | buildPrompt | Specification review | 356 | 356 | 2 |
-| [src/lib/o8md/spec-review.ts](../../src/lib/o8md/spec-review.ts) | buildSingleNotePrompt | Specification review | 70 | 70 | 3 |
-| [src/lib/o8md/spec-review.ts](../../src/lib/o8md/spec-review.ts) | inline-model-context | Specification review | 92 | 92 | 0 |
 | [src/lib/orchestrator/advisor-access.ts](../../src/lib/orchestrator/advisor-access.ts) | ADVISOR_PROMPT_SECTION | Orchestration and tool authority | 116 | 116 | 0 |
 | [src/lib/orchestrator/auto-compact.ts](../../src/lib/orchestrator/auto-compact.ts) | inline-model-context | Thread compression and digest | 97 | 97 | 10 |
 | [src/lib/orchestrator/auto-compact.ts](../../src/lib/orchestrator/auto-compact.ts) | resumePrelude | Thread compression and digest | 31 | 31 | 1 |

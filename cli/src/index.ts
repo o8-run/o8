@@ -91,7 +91,6 @@ import {
   runPacketRetry,
   runPacketSteer,
 } from './commands/packet/recover.js';
-import { runSpec } from './commands/spec.js';
 import { runTeam } from './commands/team.js';
 import {
   runTaskArchive,
@@ -557,8 +556,6 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode, args.rest);
       throw unknownSubcommandError('packet', secondary);
     }
-    case 'spec':
-      return runSpec(args.mode, secondary, args.rest);
     case 'team':
       return runTeam(args.mode, secondary, args.rest);
     default:

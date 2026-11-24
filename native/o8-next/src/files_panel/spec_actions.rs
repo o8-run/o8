@@ -1,43 +1,11 @@
-//! Existing review/mutation routes and correlated per-note delegation receipts.
+//! Note settlement routes and correlated per-note delegation receipts.
 use super::super::editor::rail::Action as NoteAction;
 use super::*;
 impl Spec {
-    pub(super) fn prewarm(&mut self, cx: &mut Context<Self>) {
-        if !self.active
-            || self.workspace.is_empty()
-            || !self.prewarmed.insert(self.workspace.clone())
-        {
-            return;
-        }
-        let client = self.client.clone();
-        let repo = self.workspace.clone();
-        cx.background_executor()
-            .spawn(async move {
-                let _ = io::json_request(
-                    &client,
-                    "POST",
-                    "/api/repo-spec",
-                    &[("action", "prewarm-review"), ("repoPath", &repo)],
-                    Some(json!({})),
-                );
-            })
-            .detach();
-    }
-    pub(super) fn review(&mut self, cx: &mut Context<Self>) {
-        self.note_action(
-            NoteAction {
-                id: String::new(),
-                kind: "review".into(),
-                message: String::new(),
-            },
-            cx,
-        );
-    }
     pub(super) fn note_action(&mut self, action: NoteAction, cx: &mut Context<Self>) {
         if self.workspace.is_empty()
             || !self.loaded_once
             || self.conflict.is_some()
-            || self.reviewing
             || self.editor.read(cx).rail.busy.is_some()
         {
             return;
@@ -45,15 +13,11 @@ impl Spec {
         self.edits += 1;
         self.persist(false, cx);
         let generation = self.generation;
-        let is_review = action.kind == "review";
-        self.reviewing = is_review;
-        if !is_review {
-            self.editor.update(cx, |e, cx| {
-                e.rail.busy = Some((action.id.clone(), action.kind.clone()));
-                e.rail.feedback.remove(&action.id);
-                cx.notify();
-            });
-        }
+        self.editor.update(cx, |e, cx| {
+            e.rail.busy = Some((action.id.clone(), action.kind.clone()));
+            e.rail.feedback.remove(&action.id);
+            cx.notify();
+        });
         self.error = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -107,7 +71,6 @@ impl Spec {
                 if generation != s.generation {
                     return;
                 }
-                s.reviewing = false;
                 s.mutating = false;
                 let mut feedback = match result {
                     Ok((body, message, snapshot)) => {
@@ -131,24 +94,19 @@ impl Spec {
                         if s.content != s.server && s.conflict.is_none() {
                             s.schedule_save(cx);
                         }
-                        if is_review {
-                            s.error = Some(error.clone());
-                        }
                         (false, error)
                     }
                 };
-                if !is_review {
-                    s.editor.update(cx, |e, cx| {
-                        e.rail.busy = None;
-                        if feedback.0 && action.kind == "reply" {
-                            e.rail.reply = None;
-                        }
-                        e.rail
-                            .feedback
-                            .insert(action.id.clone(), std::mem::take(&mut feedback));
-                        cx.notify();
-                    });
-                }
+                s.editor.update(cx, |e, cx| {
+                    e.rail.busy = None;
+                    if feedback.0 && action.kind == "reply" {
+                        e.rail.reply = None;
+                    }
+                    e.rail
+                        .feedback
+                        .insert(action.id.clone(), std::mem::take(&mut feedback));
+                    cx.notify();
+                });
                 cx.notify();
             });
         })
@@ -178,15 +136,6 @@ fn perform(
     action: &NoteAction,
 ) -> Result<(Value, String), String> {
     let (route, payload, message) = match action.kind.as_str() {
-        "review" => {
-            post(client, repo, "review", json!({"content":content}))?;
-            let (status, body) =
-                io::json_request(client, "GET", "/api/repo-spec", &[("repoPath", repo)], None)?;
-            if status >= 300 || body["ok"] != true {
-                return Err("Unable to load reviewed notes.".into());
-            }
-            return Ok((body, "Notes reviewed.".into()));
-        }
         "apply" | "dismiss" => (
             "apply-suggestion",
             json!({"targetId":action.id,"accept":action.kind=="apply","content":content}),
@@ -203,9 +152,9 @@ fn perform(
             "Thread resolved.".into(),
         ),
         "reply" => (
-            "scoped-reply",
-            json!({"parentId":action.id,"message":action.message,"content":content}),
-            "o8 replied to this note.".into(),
+            "reply",
+            json!({"parentId":action.id,"message":action.message,"author":"user","content":content}),
+            "Reply added.".into(),
         ),
         "act" => {
             let note = super::super::spec_rfm::parse(content)

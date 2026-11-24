@@ -253,15 +253,6 @@ o8 browser grab "<selector>"           # rich style/accessibility payload for on
 o8 browser wait "<selector>" [--text <s>] [--timeout <ms>]   # poll until the selector (and text) resolves
 o8 browser close                       # end this scope's engine (headless Chrome) session
 
-# o8.md review surface — the operator authors o8.md; you ANNOTATE it (never overwrite).
-o8 spec read     [--repo <path>]       # raw o8.md content
-o8 spec index    [--repo <path>]       # structured review threads + summary
-o8 spec pending  [--repo <path>]       # only the UNRESOLVED threads (what to address)
-o8 spec check    [--repo <path>]       # validate the review markup
-o8 spec comment  [--repo <path>] --body "<thought>" [--anchor "<snippet>"] [--by AI]
-o8 spec reply    [--repo <path>] --to <id> --body "<msg>" [--by AI]
-o8 spec resolve  [--repo <path>] --id <id> [--summary "<note>"]
-o8 spec suggest  [--repo <path>] --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]
 ```
 
 Claude sessions receive addressed messages through their live user-turn path. Codex receives one coalesced inbox wake, then reads every pending peer message from the durable inbox without replaying acknowledged rows. Other runtimes must run `o8 msg inbox` at turn start; o8 remembers the acknowledged position when the caller uses its session identity. If a page reports `hasMore: true`, read again until it is false. Every message remains in the durable inbox when native delivery is unavailable.

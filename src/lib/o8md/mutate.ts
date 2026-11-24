@@ -1,7 +1,7 @@
 /*
  * o8.md mutation companions — the splice operations the vendored RFM parser
  * (./rfm) does not expose as public functions. Roughdraft's editor app does
- * these in the browser; for the headless o8 path (API/CLI/MCP) we add them
+ * these in the browser; for the headless o8 path (API) we add them
  * here, in the same splice-only style as appendRoughdraftReply.
  *
  * This file is o8-authored (NOT vendored). It builds on the vendored parser's
@@ -102,21 +102,6 @@ export function appendComment(markdown: string, options: AppendCommentOptions): 
   return `${markdown}${separator}${comment}\n`;
 }
 
-export type SuggestionKind = 'add' | 'del' | 'sub';
-
-export interface InsertSuggestionOptions {
-  kind: SuggestionKind;
-  /** Literal text in the doc. Required for `del`/`sub` (the text to cut/replace);
-   *  for `add`, optional insert-after point (omit to append at end). */
-  anchor?: string;
-  /** The added text. Required for `add`; ignored for del/sub. */
-  text?: string;
-  /** The replacement text. Required for `sub`; ignored for add/del. */
-  replacement?: string;
-  /** Author label. Defaults to "AI". */
-  author?: string;
-}
-
 export interface ApplySuggestionOptions {
   targetId: string;
   /** Accept applies the proposed edit; false dismisses it and restores the
@@ -136,58 +121,6 @@ export interface ApplySuggestionOptions {
  * Throws on: marker text with a raw close delimiter, an unsafe author, a missing
  * required field for the kind, an anchor that isn't found, or a `~>` inside a
  * substitution operand (which would confuse the old/new split).
- */
-export function insertSuggestion(markdown: string, options: InsertSuggestionOptions): string {
-  const author = options.author ?? 'AI';
-  assertSafeAttributeValue(author, 'author');
-  const meta = () => serializeMetadata({ id: nextId(markdown, 's'), by: author, at: new Date().toISOString() });
-
-  const spliceAtAnchor = (anchor: string, marker: string): string => {
-    const at = markdown.indexOf(anchor);
-    if (at === -1) throw new Error(`Anchor text not found in o8.md: ${JSON.stringify(anchor)}`);
-    return `${markdown.slice(0, at)}${marker}${markdown.slice(at + anchor.length)}`;
-  };
-
-  if (options.kind === 'sub') {
-    const original = options.anchor;
-    const replacement = options.replacement;
-    if (!original) throw new Error('sub suggestion requires `anchor` (the original text to replace)');
-    if (replacement === undefined) throw new Error('sub suggestion requires `replacement` (the new text)');
-    guardMarkerText(original);
-    guardMarkerText(replacement);
-    if (original.includes('~>') || replacement.includes('~>')) {
-      throw new Error('substitution text must not contain "~>"');
-    }
-    return spliceAtAnchor(original, `{~~${original}~>${replacement}~~}${meta()}`);
-  }
-
-  if (options.kind === 'del') {
-    const anchor = options.anchor;
-    if (!anchor) throw new Error('del suggestion requires `anchor` (the text to delete)');
-    guardMarkerText(anchor);
-    return spliceAtAnchor(anchor, `{--${anchor}--}${meta()}`);
-  }
-
-  // add
-  const text = options.text;
-  if (!text) throw new Error('add suggestion requires `text` (the text to add)');
-  guardMarkerText(text);
-  const marker = `{++${text}++}${meta()}`;
-  if (options.anchor !== undefined && options.anchor !== '') {
-    const at = markdown.indexOf(options.anchor);
-    if (at === -1) throw new Error(`Anchor text not found in o8.md: ${JSON.stringify(options.anchor)}`);
-    const insertAt = at + options.anchor.length;
-    return `${markdown.slice(0, insertAt)}${marker}${markdown.slice(insertAt)}`;
-  }
-  const separator = markdown.length === 0 || markdown.endsWith('\n') ? '' : '\n';
-  return `${markdown}${separator}${marker}\n`;
-}
-
-/**
- * Resolve one existing suggestion marker into prose. This is the persisted
- * counterpart of the editor's old offset-local Accept/Dismiss splice, using
- * the real review index so callers address a stable note id instead of trusting
- * a potentially stale browser offset.
  */
 export function applySuggestion(markdown: string, options: ApplySuggestionOptions): string {
   const item = extractRoughdraftReviewIndex(markdown).items.find((candidate) => candidate.id === options.targetId);

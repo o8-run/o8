@@ -21,7 +21,6 @@ const inlineSources = new Map([
   ['src/lib/cortex/qa/contradictions.ts', 'Contradiction judgment'],
   ['src/lib/projects/suggest.ts', 'Project suggestion'],
   ['src/lib/intake/github-intake.ts', 'Issue planning'],
-  ['src/lib/o8md/spec-review.ts', 'Specification review'],
   ['src/lib/ci-repair/prompt.ts', 'Check repair'],
   ['src/lib/dispatch/decomposition-pipeline.ts', 'Task decomposition'],
   ['src/lib/judgment/questions.ts', 'Typed judgment'],

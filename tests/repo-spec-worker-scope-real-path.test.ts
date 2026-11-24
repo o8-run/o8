@@ -5,10 +5,9 @@ import { join } from 'node:path';
 import { afterAll, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 
-// The gate lets a packet worker read and annotate o8.md and add its assets. A worker reaches only
-// its own lane's repository or worktree, may only add notes (comment, reply, suggest, resolve)
-// under the default author, cannot hand in replacement content, and cannot read or write through
-// a symlinked o8.md or asset folder. The operator keeps every action on any repository.
+// The gate lets a packet worker read o8.md and add its assets. A worker reaches only its own lane's
+// repository or worktree, cannot change o8.md, and cannot read or write through a symlinked o8.md
+// or asset folder. The operator keeps every action on any repository.
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-repo-spec-worker-'));
 const OPERATOR_TOKEN = 'repo-spec-worker-operator-0123456789';
 const LEGACY_WORKER_TOKEN = 'repo-spec-worker-legacy-0123456789';
@@ -66,7 +65,7 @@ async function errorCode(response: Response): Promise<unknown> {
   return body.error?.code ?? body.code;
 }
 
-it('keeps a packet worker to notes on its own lane repository', async () => {
+it('keeps a packet worker to reading notes on its own lane repository', async () => {
   const repo = join(dataDir, 'repo');
   const worktree = join(dataDir, 'worktree');
   const outside = join(dataDir, 'another-repo');
@@ -78,7 +77,7 @@ it('keeps a packet worker to notes on its own lane repository', async () => {
   // Another repository: refused for reads, notes and assets, and nothing is written there.
   for (const response of [
     await spec(worker, outside),
-    await spec(worker, outside, 'comment', { body: 'fixture note elsewhere' }),
+    await spec(worker, outside, 'resolve', { targetId: 'fixture' }),
     await asset(worker, outside),
     await spec(worker, join(dataDir, 'missing')),
   ]) {
@@ -87,13 +86,13 @@ it('keeps a packet worker to notes on its own lane repository', async () => {
   }
   expect(existsSync(join(outside, 'o8.md'))).toBe(false);
   expect(existsSync(join(outside, 'o8-assets'))).toBe(false);
-  expect((await spec(LEGACY_WORKER_TOKEN, worktree, 'comment', { body: 'fixture legacy note' })).status).toBe(403);
+  expect((await spec(LEGACY_WORKER_TOKEN, worktree, 'resolve', { targetId: 'fixture' })).status).toBe(403);
 
-  // Its own worktree: replacement content and operator-only actions are refused.
+  // Its own worktree: every note change is the operator's.
   for (const [action, body] of [
-    ['comment', { body: 'fixture note', content: '# Replaced\n' }],
+    ['reply', { parentId: 'fixture', message: 'fixture reply', content: '# Replaced\n' }],
+    ['resolve', { targetId: 'fixture' }],
     ['apply-suggestion', { targetId: 'fixture' }],
-    ['review', {}],
   ] as const) {
     const refused = await spec(worker, worktree, action, body);
     expect(refused.status, action).toBe(403);
@@ -111,14 +110,7 @@ it('keeps a packet worker to notes on its own lane repository', async () => {
   expect(readdirSync(elsewhere)).toEqual([]);
   unlinkSync(join(worktree, 'o8-assets'));
 
-  // A note and an asset on its own worktree, and a read of its lane repository, still work. The
-  // note keeps the default author whatever the worker names.
-  const noted = await spec(worker, worktree, 'comment', { body: 'fixture worker note', author: 'fixture-operator-name' });
-  expect(noted.status).toBe(200);
-  const annotated = readFileSync(join(worktree, 'o8.md'), 'utf8');
-  expect(annotated).toContain('fixture worker note');
-  expect(annotated).toContain('Operator prose.');
-  expect(annotated).not.toContain('fixture-operator-name');
+  // An asset on its own worktree and a read of its lane repository still work.
   expect((await asset(worker, worktree)).status).toBe(200);
   expect((await spec(worker, repo)).status).toBe(200);
 
@@ -131,7 +123,7 @@ it('keeps a packet worker to notes on its own lane repository', async () => {
   expect(JSON.stringify(await (await spec(OPERATOR_TOKEN, repo)).json())).not.toContain('fixture-secret-value');
   unlinkSync(join(repo, 'o8.md'));
 
-  // The operator still annotates any repository.
-  expect((await spec(OPERATOR_TOKEN, outside, 'comment', { body: 'operator note' })).status).toBe(200);
-  expect(readFileSync(join(outside, 'o8.md'), 'utf8')).toContain('operator note');
+  // The operator still settles notes in any repository.
+  writeFileSync(join(outside, 'o8.md'), 'Ship {==this==}{>>Check it.<<}{id="c1" by="AI"}\n');
+  expect((await spec(OPERATOR_TOKEN, outside, 'resolve', { targetId: 'c1' })).status).toBe(200);
 });
