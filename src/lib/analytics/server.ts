@@ -7,14 +7,15 @@
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
 import { getOperatorDefaultsSync } from '@/lib/operator/defaults';
+import { envNoPhoneHome } from '@/lib/operator/defaults-env';
 
 import { sanitizeProductEvent, type ProductEventName, type ProductEventProps } from './events';
 import { isProductTelemetryAllowed } from './policy';
 import { noteProductSessionConsent } from './state';
 
 /**
- * #1451 local-only integration seam. That setting does not exist yet, so the
- * current runtime supplies false; once it ships its resolver belongs here.
+ * #1451 local-only integration seam. `O8_NO_PHONE_HOME=1` is the run-scoped
+ * local-only switch; a saved local-only setting would join it here.
  */
 export function isProductTelemetryEnabled(): boolean {
   const { productTelemetryEnabled, telemetryConsentAnswered } = getOperatorDefaultsSync().values;
@@ -23,7 +24,7 @@ export function isProductTelemetryEnabled(): boolean {
   if (!telemetryConsentAnswered) return false;
   return isProductTelemetryAllowed({
     productTelemetryEnabled: productTelemetryEnabled !== false,
-    localOnlyMode: false,
+    localOnlyMode: envNoPhoneHome(),
   });
 }
 

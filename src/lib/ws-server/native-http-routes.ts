@@ -220,6 +220,7 @@ export async function handleNativeHttp(req: IncomingMessage, res: ServerResponse
             'O8_LOCAL_INFERENCE_BASE_URL',
             'O8_MAX_PARALLEL_DISPATCHES',
             'O8_NATIVE_BROWSER_VIEW',
+            'O8_NO_PHONE_HOME',
             'O8_ORCHESTRATOR_BACKEND',
             'O8_ORCHESTRATOR_MODEL',
             'O8_PROMPT_CACHING',
