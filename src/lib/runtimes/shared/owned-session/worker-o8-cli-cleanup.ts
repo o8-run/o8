@@ -39,7 +39,24 @@ export async function recordWorkerO8CliStop(root: string, session: OwnedSessionR
 }
 
 /** Unknown owners remain accounted; cleanup never requires free budget. */
+/** True unless every path is proven absent; any other stat error keeps the locked path. */
+async function anyPresent(paths: string[]): Promise<boolean> {
+  for (const candidate of paths) {
+    try { await lstat(candidate); return true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return true; }
+  }
+  return false;
+}
+
 export async function cleanupWorkerO8Cli(root: string, session: OwnedSessionRecord, expectedRunId?: string, platform: NodeJS.Platform = process.platform): Promise<boolean> {
+  // Every owned-session refresh calls this. The root lock costs two
+  // cross-process leases, each on its own database connection, so skip it when
+  // there is nothing to remove. A directory created after this check is
+  // removed by the next refresh.
+  const candidates = [workerO8CliSlot(session.surfaceId), ...session.recentRuns
+    .filter((run) => /^[a-zA-Z0-9_-]+$/.test(run.id) && (!expectedRunId || expectedRunId === run.id))
+    .map((run) => path.join(workerO8CliRoot(), run.id))];
+  if (!await anyPresent(candidates)) return true;
   return withOwnedArtifactRootLock(root, async () => {
     const slot = workerO8CliSlot(session.surfaceId); let cleared = true;
     const remove = async (directory: string, legacyRunId?: string) => {
