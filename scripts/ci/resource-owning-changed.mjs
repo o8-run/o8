@@ -9,7 +9,7 @@
 // Prints one path per line. When GITHUB_OUTPUT is set, also writes
 // `count=<n>` and `files=<space-separated paths>` for later workflow steps.
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selectedTestsRequireBrowser } from '../lib/test-classification.mjs';
@@ -43,10 +43,33 @@ export function parseNameStatus(output) {
 export const WORKFLOW_MIRROR_TESTS = ['tests/ci-gates-real-path.test.ts', 'tests/verify-ci-real-path.test.ts'];
 const WORKFLOW_INPUT = /^\.github\/(?:workflows\/ci\.yml|actions\/)/;
 
+/**
+ * Suites that enumerate every registered surface, route, MCP tool or CLI command.
+ * A change almost anywhere can break them, so they run on every merge group and
+ * every local verify:ci, not only when their own files change (#6761).
+ */
+export const ENUMERATING_SUITES = [
+  'tests/api-front-door-real-path.test.ts',
+  'tests/cli-agent-help-real-path.test.ts',
+  'tests/mcp-schema-compatibility-real-path.test.ts',
+  'tests/next-surface-boundary-real-path.test.ts',
+  'tests/o8d-mcp-parity-real-path.test.ts',
+  'tests/o8d-native-route-inventory-real-path.test.ts',
+  'tests/o8d-native-route-table-real-path.test.ts',
+  'tests/o8d-next-surfaces-real-path.test.ts',
+  'tests/o8d-repos-bootstrap-native-real-path.test.ts',
+];
+
+/** Enumerating suites the manifest no longer classifies as resource-owning. */
+export function unclassifiedEnumeratingSuites(classification, exists = () => true) {
+  const owning = new Set((classification.resourceOwning ?? []).map((entry) => entry.path));
+  return ENUMERATING_SUITES.filter((path) => exists(path) && !owning.has(path));
+}
+
 /** Intersects changed paths with the manifest's resourceOwning list. */
 export function selectResourceOwning(changedPaths, classification) {
   const owning = new Set((classification.resourceOwning ?? []).map((entry) => entry.path));
-  const changed = new Set(changedPaths);
+  const changed = new Set([...changedPaths, ...ENUMERATING_SUITES]);
   if ([...changed].some((path) => WORKFLOW_INPUT.test(path))) {
     for (const test of WORKFLOW_MIRROR_TESTS) changed.add(test);
   }
@@ -71,6 +94,12 @@ function main() {
   const mergeBase = runGit(['merge-base', base, workingTree ? 'HEAD' : head]).trim();
   const diff = runGit(['diff', '--name-status', '-z', '-M', mergeBase, ...(workingTree ? [] : [head])]);
   const classification = JSON.parse(readFileSync(join(process.cwd(), 'tests/test-classification.json'), 'utf8'));
+  const missing = unclassifiedEnumeratingSuites(classification, (path) => existsSync(join(process.cwd(), path)));
+  if (missing.length > 0) {
+    // A renamed or reclassified suite would otherwise drop out of every merge group silently.
+    console.error(`[resource-owning-changed] enumerating suites are not resource-owning: ${missing.join(', ')}`);
+    process.exit(1);
+  }
   const untracked = workingTree ? runGit(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean) : [];
   const files = selectResourceOwning([...parseNameStatus(diff), ...untracked], classification);
   for (const file of files) console.log(file);

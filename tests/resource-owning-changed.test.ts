@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { WORKFLOW_MIRROR_TESTS, parseNameStatus, selectResourceOwning } from '../scripts/ci/resource-owning-changed.mjs';
+import { ENUMERATING_SUITES, WORKFLOW_MIRROR_TESTS, parseNameStatus, selectResourceOwning, unclassifiedEnumeratingSuites } from '../scripts/ci/resource-owning-changed.mjs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const classification = {
   resourceOwning: [
@@ -56,5 +57,18 @@ describe('resource-owning-changed', () => {
     expect(selectResourceOwning(parseNameStatus(nameStatus(['M', '.github/workflows/ci.yml'])), classification)).toEqual([]);
     // Other workflows and ordinary sources do not pull the mirror tests in.
     expect(selectResourceOwning(parseNameStatus(nameStatus(['M', '.github/workflows/next-parity.yml'], ['M', 'src/lib/lane/merge.ts'])), manifest)).toEqual([]);
+  });
+
+  it('always selects the suites that enumerate surfaces, routes, tools and commands (#6761)', () => {
+    // They drifted on main because only PRs that edited them ran them.
+    const manifest = { resourceOwning: [...classification.resourceOwning, ...ENUMERATING_SUITES.map((path) => ({ path }))] };
+    expect(selectResourceOwning(parseNameStatus(nameStatus(['M', 'src/lib/lane/merge.ts'])), manifest)).toEqual([...ENUMERATING_SUITES].sort());
+    expect(selectResourceOwning([], manifest)).toEqual([...ENUMERATING_SUITES].sort());
+    // The live manifest must keep every one of them resource-owning, or the selector refuses.
+    expect(unclassifiedEnumeratingSuites(JSON.parse(readFileSync('tests/test-classification.json', 'utf8')))).toEqual([]);
+    expect(unclassifiedEnumeratingSuites({ resourceOwning: [] })).toEqual(ENUMERATING_SUITES);
+    // A renamed suite would leave the selector skipping a path that no longer exists.
+    expect(ENUMERATING_SUITES.filter((path) => !existsSync(path))).toEqual([]);
+    expect(unclassifiedEnumeratingSuites({ resourceOwning: [] }, () => false)).toEqual([]);
   });
 });
