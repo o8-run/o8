@@ -13,7 +13,9 @@ export function createModelCompatibilityRecovery({ adapter, io, withSurfaceLock,
   spawnOwnedRun: OwnedRunController['spawnOwnedRun'];
 }) {
   return async (session: OwnedSessionRecord, surfaceLockHeld = false): Promise<boolean> => {
-    if (session.executionPolicy !== undefined || !adapter.modelCompatibilityFallback || session.activeRun || recoveryPacketHoldReason(session) || session.recentRuns[0]?.outcome !== 'failed') return false;
+    // The hold check reads durable packet state; ask it only for a failed run.
+    if (session.executionPolicy !== undefined || !adapter.modelCompatibilityFallback || session.activeRun
+      || session.recentRuns[0]?.outcome !== 'failed' || recoveryPacketHoldReason(session)) return false;
     const recover = async () => {
       const current = await io.findSession(session.surfaceId);
       const run = current?.recentRuns[0];
