@@ -431,10 +431,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_session_boot | Tool selection, arguments and authority | 32 | 32 | 0 |
 | [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_sprint | Tool selection, arguments and authority | 16 | 16 | 0 |
 | [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_verify | Tool selection, arguments and authority | 23 | 23 | 0 |
-| [src/lib/mcp/operator-handlers/leases.ts](../../src/lib/mcp/operator-handlers/leases.ts) | tool:o8_lease_acquire | Tool selection, arguments and authority | 35 | 35 | 0 |
-| [src/lib/mcp/operator-handlers/leases.ts](../../src/lib/mcp/operator-handlers/leases.ts) | tool:o8_lease_list | Tool selection, arguments and authority | 15 | 15 | 0 |
-| [src/lib/mcp/operator-handlers/leases.ts](../../src/lib/mcp/operator-handlers/leases.ts) | tool:o8_lease_release | Tool selection, arguments and authority | 20 | 20 | 0 |
-| [src/lib/mcp/operator-handlers/leases.ts](../../src/lib/mcp/operator-handlers/leases.ts) | tool:o8_lease_status | Tool selection, arguments and authority | 26 | 26 | 0 |
 | [src/lib/mcp/operator-handlers/mission-create-tool.ts](../../src/lib/mcp/operator-handlers/mission-create-tool.ts) | tool:create_mission | Tool selection, arguments and authority | 1209 | 1209 | 0 |
 | [src/lib/mcp/operator-handlers/mission-worker-input.ts](../../src/lib/mcp/operator-handlers/mission-worker-input.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 112 | 112 | 0 |
 | [src/lib/mcp/operator-handlers/mission.ts](../../src/lib/mcp/operator-handlers/mission.ts) | tool:dispatch_mission | Tool selection, arguments and authority | 199 | 199 | 0 |

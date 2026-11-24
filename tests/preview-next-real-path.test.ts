@@ -144,7 +144,7 @@ describe('preview security through Next response handling', () => {
           const result = { token: false, storage: false, write: false, mcp: false, socket: false };
           try { result.token = !!parent.document.querySelector('meta[name="ws-token"]').content; } catch {}
           try { result.storage = parent.localStorage.getItem('preview-canary') === 'kept'; } catch {}
-          try { result.write = (await parent.fetch('/api/leases', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({action:'acquire',resource:'preview-canary',owner:{id:'preview-fixture',label:'preview-fixture',pid:${process.pid}},claimToken:'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'}) })).ok; } catch {}
+          try { result.write = (await parent.fetch('/api/agents/presence', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({agentId:'preview-canary',repo:'/tmp/preview-canary',name:'preview-canary',runtime:'codex'}) })).ok; } catch {}
           try { result.mcp = (await parent.fetch('/api/mcp', {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})})).ok; } catch {}
           try {
             const ws = new parent.WebSocket('${socketBase.replace('http:', 'ws:')}/ws?token=' + parent.document.querySelector('meta[name="ws-token"]').content);
@@ -337,7 +337,7 @@ describe('preview security through Next response handling', () => {
     expect(await write.json()).toEqual({ error: 'Origin is not allowed' });
     expect((await fetch(asset, { method: 'POST', headers: { host: new URL(base).host } })).status).toBe(401);
     expect((await fetch(asset, { headers: { ...headers, 'x-o8-client-addr': '192.0.2.1' } })).status).toBe(401);
-    const otherApi = new URL('/api/leases', base);
+    const otherApi = new URL('/api/orchestrator/merge', base);
     otherApi.search = asset.search;
     expect((await fetch(otherApi, { headers })).status).toBe(401);
     const redirect = new URL(asset);
@@ -354,8 +354,8 @@ describe('preview security through Next response handling', () => {
       await embed(page, `${route}?url=${encodeURIComponent(`${upstream}/${path}`)}`);
       expect(await page.evaluate(() => (window as unknown as { receipt: unknown }).receipt)).toEqual({ token: false, storage: false, write: false, mcp: false, socket: false });
       expect(socketConnections).toBe(before);
-      const leases = await (await fetch(`${base}/api/leases`, { headers: { authorization: `Bearer ${token}` } })).json();
-      expect(leases.leases).toEqual([]);
+      const presence = await (await fetch(`${base}/api/agents/presence?scope=all`, { headers: { authorization: `Bearer ${token}` } })).json();
+      expect(presence.agents.some((agent: { agentId?: string }) => agent.agentId === 'preview-canary')).toBe(false);
       expect(await page.evaluate(() => localStorage.getItem('preview-canary'))).toBe('kept');
     } finally { await page.close(); }
   });

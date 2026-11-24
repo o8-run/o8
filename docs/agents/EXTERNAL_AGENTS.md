@@ -105,15 +105,8 @@ Never reset a worktree merely to repair an argument error.
 | Preview merge gates | `o8 packet merge-preview --packet pkt-audit` |
 | Steer an existing session | `o8 packet steer --packet pkt-audit --message "Also check empty input"` |
 | Record approval and attempt merge, when authorized | `o8 packet review --packet pkt-audit --approve --expected-sha <full-sha> --coverage R1=src/example.ts` |
-| Acquire a server resource | `o8 lease acquire audit --ttl 2m` |
-| Inspect that resource | `o8 lease status audit` |
 | Queue a project task | `o8 task create --title "Inspect behavior" --repo /path/to/repo --project project-audit` |
 | Block a task | `o8 task block pkt-audit --reason "Waiting for dependency" --code dependency_blocked` |
-
-For server leases, bare TTL values are milliseconds; suffixes are `ms`, `s`, `m`,
-and `h`. Default TTL is 2h, allowed duration is 1s through 24h, and `--wait` queues
-in FIFO order. Release with `o8 lease release audit` from the same agent process.
-`o8 team lease` is a separate checkout-local coordination store.
 
 ## Repository notes and errors
 

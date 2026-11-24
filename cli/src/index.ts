@@ -54,7 +54,6 @@ import { runHistory } from './commands/history.js';
 import { runLead } from './commands/lead.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runArtifact } from './commands/artifact.js';
-import { runLease } from './commands/lease.js';
 import { isReceiptVerifyInvocation, runVerifyReceipt } from './commands/verify-receipt.js';
 import { runTruth } from './commands/truth.js';
 import { runMission } from './commands/mission.js';
@@ -302,10 +301,6 @@ commands:
   lane touches         active lanes touching a path or packet diff
   artifact create      attach an interactive task artifact to this packet or a thread (--title --html <file> --actions <file.json>)
   artifact status|receipts <id>  writability + last receipt, or every submission
-  lease acquire <resource> [--ttl 2h] [--wait]  acquire or queue for a named resource
-  lease release <resource>  release a resource held by this agent process
-  lease status <resource>   read the holder and FIFO queue for one resource
-  lease list           list active named resources
   worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--model m] [--effort adaptive|low|medium|high|max|xhigh|ultra] [--caller label] [--read-only])
   worker login         connect an encrypted native worker token from an operator terminal (macOS; no source checkout needed)
   mission create       stage a mission from an inline task; --dispatch launches it (--title --body [--dispatch] [--model m] [--effort adaptive|low|medium|high|max|xhigh|ultra] [--carrier native|openrouter|codex-subscription] [--caller label] [--read-only] [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
@@ -526,8 +521,6 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'run-heavy':
       return runHeavy(args.rest);
-    case 'lease':
-      return runLease(args.mode, secondary, args.rest);
     case 'mission':
       return runMission(args.mode, secondary, args.rest);
     case 'worker': {

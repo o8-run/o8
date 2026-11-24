@@ -83,14 +83,6 @@
       ]
     },
     {
-      "path": "src/app/api/leases/route.test.ts",
-      "reasons": [
-        "apfs-tool",
-        "child-process",
-        "process-signal"
-      ]
-    },
-    {
       "path": "src/app/api/mobile/sync/route.test.ts",
       "reasons": [
         "child-process"
@@ -5684,13 +5676,6 @@
       ]
     },
     {
-      "path": "tests/o8d-leases-native-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/o8d-mcp-parity-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -7767,15 +7752,6 @@
         "child-process",
         "executable-fixture",
         "git-cli",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/resource-lease-cli-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "network-listener",
         "process-signal",
         "real-path"
       ]

@@ -48,9 +48,7 @@ readiness uses the same process's published readiness observations.
 
 `o8_list_repos` reads the registry and filesystem existence. `o8_list_projects`
 combines JSON metadata with SQLite membership, ordering, active selection, and
-virtual repository projects. `o8_lease_list` and `o8_lease_status` read holders and waiters after
-proving their current platform process identities; uncertain/dead participants and
-holderless queues return to the TypeScript reconciler.
+virtual repository projects.
 
 `o8_spec_read` reads an existing canonical repository's `o8.md` directly and
 computes the same SHA-256 content hash. A missing file returns the API's template
@@ -210,7 +208,6 @@ TypeScript fallback.
 | `o8_task_list` | 188.06 / 244.09 | 202.28 / 239.94 | 389.77 / 514.12 | 475.73 / 531.37 | 110 | 110 |
 | `o8_list_repos` | 3.96 / 6.38 | 1.79 / 3.42 | 5.28 / 106.50 | 1.92 / 3.84 | 0 | 0 |
 | `o8_list_projects` | 3.25 / 5.53 | 1.35 / 1.93 | 4.65 / 106.08 | 1.68 / 2.34 | 0 | 0 |
-| `o8_lease_list` | 14.10 / 21.00 | 4.07 / 6.80 | 15.46 / 119.02 | 4.29 / 6.21 | 0 | 0 |
 
 Fallback counts cover all 110 candidate requests per tool, including warmups.
 The CPU-loaded cohort completed 1,160 synchronous blocks, with 116,029 ms of

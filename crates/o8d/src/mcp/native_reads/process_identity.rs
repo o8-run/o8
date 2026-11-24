@@ -19,12 +19,7 @@ pub(super) fn observe(pid: u64, expected: &Value) -> ReadResult<Identity> {
     Ok(current)
 }
 
-// Lease participants retain the existing metadata-lock identity contract.
-// Publisher authority additionally pins and rechecks the full kernel witness.
-pub(super) fn matches(pid: u64, expected: &Value) -> ReadResult<()> {
-    observe(pid, expected).map(|_| ())
-}
-
+// Publisher authority pins and rechecks the full kernel witness.
 impl Identity {
     pub(super) fn recheck(&self) -> ReadResult<()> {
         if observe(self.pid, &self.legacy)? != *self {

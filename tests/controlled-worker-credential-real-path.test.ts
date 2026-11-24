@@ -41,7 +41,7 @@ let attachment: string;
 let prior: Record<string, string | undefined>;
 const envKeys = ['CORTEX_IDE_OWNED_CODEX_ROOT', 'O8_RESTRICTED_FIXTURE_BIN', 'O8_CRASH_SURVIVABLE_WORKERS',
   'O8_FIXTURE_SERVICE_SECRET', 'GH_TOKEN', 'NODE_OPTIONS', 'ANTHROPIC_API_KEY'];
-const paths = ['/api/panel/status', '/api/leases', '/api/worker/event', '/api/mobile/enroll', '/api/plugins/mcp'];
+const paths = ['/api/panel/status', '/api/cortex/proposals', '/api/worker/event', '/api/mobile/enroll', '/api/plugins/mcp'];
 
 beforeEach(async () => {
   ready.mockReset().mockResolvedValue(undefined);

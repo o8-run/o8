@@ -648,7 +648,6 @@
     "shared:entry:src/app/api/lanes/reap/route.ts": 3315,
     "shared:entry:src/app/api/lanes/route.ts": 22872,
     "shared:entry:src/app/api/lanes/touches/route.ts": 3842,
-    "shared:entry:src/app/api/leases/route.ts": 7366,
     "shared:entry:src/app/api/mcp/route.ts": 14397,
     "shared:entry:src/app/api/mobile/action/route.ts": 24460,
     "shared:entry:src/app/api/mobile/activity/route.ts": 8478,
