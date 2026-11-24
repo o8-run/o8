@@ -55,6 +55,8 @@ pub(crate) fn set(active: bool) -> bool {
     let back = !ACTIVE.swap(active, Ordering::Relaxed) && active;
     if back {
         crate::changes::bump();
+        // Opening a file brings the window forward; take any that wait.
+        crate::app_parent::documents_waiting();
     }
     back
 }

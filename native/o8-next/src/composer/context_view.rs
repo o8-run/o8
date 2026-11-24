@@ -49,10 +49,13 @@ impl Surface {
                     ..Default::default()
                 };
             }
+            // The clock only ages the popover's cache estimate and the hover
+            // tip; the ring does not change with time.
+            let shown = i.controls.open == Some("context") || i.controls.context.help;
             let meter = &mut i.controls.context;
             let refresh = !meter.requested || (meter.was_running && !running);
             meter.requested = true;
-            (refresh, meter.clock.is_none())
+            (refresh, shown && meter.clock.is_none())
         });
         // Record only completed transcript groups. No request is sent to keep a cache warm.
         self.context_values(cx);
@@ -118,6 +121,11 @@ impl Surface {
                 if !this
                     .update(cx, |s, cx| {
                         if editor.upgrade().is_none_or(|e| e != s.composer) {
+                            return false;
+                        }
+                        // Closed: stop. The render that shows it again restarts it.
+                        let controls = &s.composer.read(cx).controls;
+                        if controls.open != Some("context") && !controls.context.help {
                             return false;
                         }
                         cx.notify();

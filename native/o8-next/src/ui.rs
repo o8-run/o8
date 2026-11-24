@@ -216,6 +216,8 @@ pub(crate) struct Surface {
     reconcile_revision: u64,
     reconcile_wait: u32,
     reconcile_live: bool,
+    /// `changes::revision` at the last safety-net read.
+    reconcile_seen: u64,
     /// The reader rests at the end of the transcript, so it stays there.
     pub(crate) pinned: bool,
     changed_at: std::time::Instant,
@@ -321,6 +323,7 @@ impl Surface {
             reconcile_revision: 0,
             reconcile_wait: 0,
             reconcile_live: false,
+            reconcile_seen: 0,
             pinned: true,
             changed_at: std::time::Instant::now(),
             chat_width: crate::theme::chat_width(),

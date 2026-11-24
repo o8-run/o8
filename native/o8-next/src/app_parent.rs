@@ -53,6 +53,10 @@ pub fn watch() {
             let Ok(frame) = serde_json::from_slice::<Value>(&line) else {
                 continue;
             };
+            if frame["type"] == "open-files" {
+                documents_waiting();
+                continue;
+            }
             if frame["type"] != "browser-agent" {
                 continue;
             }
@@ -67,6 +71,7 @@ pub fn watch() {
                 );
             } else {
                 requests.push_back(frame);
+                crate::wake::poke();
             }
         }
     });
@@ -134,11 +139,40 @@ pub(crate) fn take_document() -> Option<std::path::PathBuf> {
 }
 #[cfg(not(unix))]
 fn watch_documents() {}
+/// Set when the launcher says opened files are waiting, or the window comes
+/// to the front.
+#[cfg(unix)]
+static WAITING: (Mutex<bool>, std::sync::Condvar) = (Mutex::new(false), std::sync::Condvar::new());
+#[cfg(unix)]
+pub(crate) fn documents_waiting() {
+    *WAITING.0.lock().unwrap() = true;
+    WAITING.1.notify_all();
+}
+#[cfg(not(unix))]
+pub(crate) fn documents_waiting() {}
 #[cfg(unix)]
 fn watch_documents() {
     let Some(data) = document_directory() else {
         return;
     };
+    // A launcher-owned window is told when files wait (`open-files` on stdin),
+    // so it takes them at start and on each notice. A server-owned window
+    // still asks every 250 ms.
+    if std::env::var("O8_NEXT_QUIT_VIA_PARENT").as_deref() == Ok("1") {
+        std::thread::spawn(move || {
+            loop {
+                if let Ok(paths) = crate::document_transport::receive(&data) {
+                    if !paths.is_empty() {
+                        DOCUMENTS.lock().unwrap().extend(paths);
+                        crate::wake::poke();
+                    }
+                }
+                let waiting = WAITING.0.lock().unwrap();
+                *WAITING.1.wait_while(waiting, |waiting| !*waiting).unwrap() = false;
+            }
+        });
+        return;
+    }
     std::thread::spawn(move || {
         loop {
             if DOCUMENTS.lock().unwrap().is_empty() {

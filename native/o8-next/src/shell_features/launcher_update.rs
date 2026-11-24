@@ -10,6 +10,8 @@ register_shell_feature!(LauncherUpdate);
 struct State {
     classic: bool,
     checked: Option<Instant>,
+    /// `changes::revision` and update notices at the last check.
+    seen: (u64, u64),
     /// The `changed: update` notices at the last server read. With no
     /// launcher, the server is read once per notice, not every check.
     server_read: Option<u64>,
@@ -95,20 +97,29 @@ fn request(_: &Path, _: &str) -> Result<Value, String> {
     Err("Updater unavailable".into())
 }
 
+/// The launcher's hourly background check changes the status with no event
+/// the window sees; it shows within this.
+const BACKSTOP: Duration = Duration::from_secs(600);
 fn poll(s: &mut Shell, cx: &mut Context<Shell>) {
     let state = s.features.get::<State>();
-    if state.reading
-        || crate::foreground::hidden()
-        || state
-            .checked
-            .is_some_and(|at| at.elapsed() < crate::foreground::cadence(Duration::from_secs(2)))
-    {
+    let noticed = crate::changes::update_notices();
+    let seen = (crate::changes::revision(), noticed);
+    // Read every 2 s while an update runs; otherwise only after a change the
+    // server reported or the window coming to the front, or the backstop.
+    let busy =
+        state.applying || matches!(state.status.as_str(), "checking" | "staging" | "installing");
+    let due = state.checked.is_none_or(|at| {
+        at.elapsed() >= crate::foreground::cadence(Duration::from_secs(2))
+            && (busy || state.seen != seen)
+            || at.elapsed() >= BACKSTOP
+    });
+    if state.reading || crate::foreground::hidden() || !due {
         return;
     }
     state.checked = Some(Instant::now());
+    state.seen = seen;
     state.reading = true;
     // The launcher socket is local and costs the server nothing.
-    let noticed = crate::changes::update_notices();
     let server = state.server_read != Some(noticed);
     let data = s.file.parent().unwrap_or(Path::new("")).to_path_buf();
     let client = s.client.clone();

@@ -7,6 +7,24 @@ use std::{
     task::Poll,
 };
 
+/// The shell's wake channel, so work arriving outside the server stream
+/// (stdin frames, opened files) runs the shell's hooks now rather than at the
+/// next maintenance tick.
+static SHELL: std::sync::OnceLock<async_channel::Sender<()>> = std::sync::OnceLock::new();
+pub(crate) fn install(sender: async_channel::Sender<()>) {
+    let _ = SHELL.set(sender);
+}
+pub(crate) fn poke() {
+    if let Some(sender) = SHELL.get() {
+        let _ = sender.try_send(());
+    }
+}
+/// The maintenance tick. With no thread running and no input in the last
+/// minute, nothing it checks changes faster than every 2 s.
+pub(crate) fn maintenance() -> std::time::Duration {
+    std::time::Duration::from_secs(if crate::changes::lively() { 1 } else { 2 })
+}
+
 pub(crate) async fn next(receiver: &Receiver<()>, timer: &mut Task<()>) -> bool {
     let received = receiver.recv();
     let mut received = std::pin::pin!(received);
