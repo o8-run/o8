@@ -31,7 +31,6 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', async importOriginal => {
  async sendTurn(_repo: string, _prompt: string, emit: (v: {type: string; text: string}) => void, options?: {permissionMode?:string}) { expect(options?.permissionMode).toBe('plan'); if(this.id==='codex' && input.primaryQuota){emit({type:'error',text:'',error:'You have hit your usage limit. Try again when it resets.'} as {type:string;text:string});return;} if (input.beforeVerdict) await input.beforeVerdict(); emit({type:'text', text:`CODEX_AUTO_REVIEW: ${JSON.stringify({approved:false,findings:[{file:'answer.txt',severity:'note',description:'Preserve the request.',status:'deferred'}],runEvidence:{status:'run',headSha:input.head,reviewerRuntime:this.id,recordedAt:new Date().toISOString(),observations:[{kind:'command',command:'fixture assertion',result:'passed',exitCode:0,excerpt:'controlled reviewer receipt'}]}})}`}); } };
  return {...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: (id:string) => id==='claude'?{...backend,id:'claude'}:backend};
 });
-vi.mock('@/lib/lane/packet-explainer-queue', () => ({ drainPacketExplainerQueue: async () => {}, enqueuePacketExplainer: async () => {}, notifyCorrectnessReviewQueued: () => {}, startPacketExplainerQueueDrain: () => () => {} }));
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ensureReviewQueueDrainStarted: vi.fn()}));
 const { POST } = await import('@/app/api/tasks/adopt-pr/route');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');

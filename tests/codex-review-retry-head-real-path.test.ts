@@ -33,12 +33,6 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', async (importOriginal) => {
   };
   return { ...actual, getActiveReviewerBackend: () => backend, getOrchestratorBackend: () => backend };
 });
-vi.mock('@/lib/lane/packet-explainer-queue', () => ({
-  drainPacketExplainerQueue: vi.fn(async () => {}),
-  enqueuePacketExplainer: vi.fn(async () => {}),
-  notifyCorrectnessReviewQueued: vi.fn(),
-  startPacketExplainerQueueDrain: vi.fn(() => () => {}),
-}));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/command-center/snapshot', () => ({ invalidateCommandCenterSnapshotCaches: vi.fn() }));
 vi.mock('@/lib/mobile/inbox', () => ({ invalidateInboxCache: vi.fn() }));

@@ -96,7 +96,7 @@ impl Field {
             | "reviewContinuation"
             | "requireApproval"
             | "updateAutoApply" => "Supervision",
-            "packetExplainerEnabled" | "buyinDocEnabled" => "Change reports",
+            "buyinDocEnabled" => "Change reports",
             "meteredPacketCostCapUsd" | "meteredPacketInputTokenCap" => "Task spending limits",
             "brainRoutingMode" | "brainCodexModel" | "brainCodexEffort" => "Engineering Brain",
             "codexAppThreads" => "Codex app",
@@ -432,13 +432,6 @@ pub const FIELDS: &[Field] = &[
         "dispatch",
         "Restart to install an update only when agents, terminals and background jobs are idle.",
         Kind::Choice(&[("off", "Off"), ("idle", "When idle")]),
-    ),
-    field(
-        "packetExplainerEnabled",
-        "Explain completed changes",
-        "dispatch",
-        "Create an extra AI report using the review provider.",
-        BOOL,
     ),
     field(
         "buyinDocEnabled",

@@ -49,8 +49,6 @@ import {
 } from '@/lib/runtimes/shared/auth-detect';
 import { assertThreecodeWorkerModelAvailable } from '@/lib/runtimes/threecode-model-catalogue';
 
-
-
 const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
 function effectiveOverride() {
   return {
@@ -573,20 +571,6 @@ export function normalizeUpdate(body: Record<string, unknown>): Partial<Operator
       throw new Error('reviewerBackend must be one of "follow", "codex", "claude".');
     }
     update.reviewerBackend = raw;
-  }
-
-  if (body.packetExplainerEnabled !== undefined) {
-    if (typeof body.packetExplainerEnabled !== 'boolean') {
-      throw new Error('packetExplainerEnabled must be boolean.');
-    }
-    update.packetExplainerEnabled = body.packetExplainerEnabled;
-  }
-
-  if (body.quizGateEnabled !== undefined) {
-    if (typeof body.quizGateEnabled !== 'boolean') {
-      throw new Error('quizGateEnabled must be boolean.');
-    }
-    update.quizGateEnabled = body.quizGateEnabled;
   }
 
   if (body.buyinDocEnabled !== undefined) {

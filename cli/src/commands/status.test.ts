@@ -132,11 +132,11 @@ describe('o8 status', () => {
               lifecycleRationale: null,
               needsAttention: true,
             }, {
-              tomlKey: 'review.quiz_gate_enabled',
+              tomlKey: 'review.buyin_doc_enabled',
               landedRelease: '0.1.681',
               darkForReleases: 35,
               lifecycle: 'deliberate-default-off',
-              lifecycleRationale: 'Optional human quiz speed bump before the merge button.',
+              lifecycleRationale: 'Optional shareable report after a merge.',
               needsAttention: false,
             }],
           },
@@ -172,7 +172,7 @@ describe('o8 status', () => {
       lifecycle: 'promotion-candidate',
     })]);
     expect(payload.shippedDarkByDesign).toEqual([expect.objectContaining({
-      tomlKey: 'review.quiz_gate_enabled',
+      tomlKey: 'review.buyin_doc_enabled',
       lifecycle: 'deliberate-default-off',
     })]);
   });
@@ -265,7 +265,7 @@ describe('o8 status', () => {
       needsAttention: false,
     }, {
       // Pre-v2 payload shape: no lifecycle, no verdict. Recomputation applies.
-      tomlKey: 'review.quiz_gate_enabled',
+      tomlKey: 'review.buyin_doc_enabled',
       landedRelease: '0.1.681',
       darkForReleases: 35,
     }];
@@ -301,6 +301,6 @@ describe('o8 status', () => {
     };
     expect(payload.counts.shippedDarkWarnings).toBe(1);
     expect(payload.shippedDarkWarnings.map((flag) => flag.tomlKey))
-      .toEqual(['review.quiz_gate_enabled']);
+      .toEqual(['review.buyin_doc_enabled']);
   });
 });

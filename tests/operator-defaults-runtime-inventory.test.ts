@@ -86,22 +86,6 @@ describe('operator-defaults dispatchable runtime inventory', () => {
     }
   });
 
-  it('defaults explainers off and persists both positions of the existing toggle', async () => {
-    const read = async () => (await operatorDefaultsRoute.GET(
-      new Request('http://127.0.0.1/api/panel/operator-defaults'),
-    )).json();
-    expect((await read()).values.packetExplainerEnabled).toBe(false);
-    for (const enabled of [true, false]) {
-      const response = await operatorDefaultsRoute.POST(new Request('http://127.0.0.1/api/panel/operator-defaults', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packetExplainerEnabled: enabled }),
-      }));
-      expect(response.status).toBe(200);
-      const persisted = await read();
-      expect(persisted.values.packetExplainerEnabled).toBe(enabled);
-      expect(persisted.values.quizGateEnabled).toBe(false);
-    }
-  });
   it('exposes runtime id, label, and structured availability through the existing read route', async () => {
     const response = await operatorDefaultsRoute.GET(new Request('http://127.0.0.1/api/panel/operator-defaults'));
     expect(response.status).toBe(200);

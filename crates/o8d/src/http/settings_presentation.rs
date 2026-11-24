@@ -56,8 +56,6 @@ fn layer(table: &Table, global: bool) -> Result<Values, Failure> {
                 ("judgment", "managed_option_visible") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("models", "cross_house_worker_fallback") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("orchestrator", "codex_app_threads") => { value.as_bool().ok_or(Failure::Invalid)?; }
-                ("review", "packet_explainer_enabled") => { value.as_bool().ok_or(Failure::Invalid)?; }
-                ("review", "quiz_gate_enabled") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("review", "buyin_doc_enabled") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("telemetry", "consent_answered") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("telemetry", "crash_log_opt_in") => { value.as_bool().ok_or(Failure::Invalid)?; }

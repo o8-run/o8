@@ -197,7 +197,7 @@ export async function runReviewerTurnWithQuotaFallback(input: {
   threadId: string;
   /** Backend session pool identity; audit events keep the attempt-specific threadId. */
   sessionThreadId?: string;
-  surface: 'auto-review' | 'merge-gate-review' | 'packet-explainer' | 'buyin-doc';
+  surface: 'auto-review' | 'merge-gate-review' | 'buyin-doc';
   prompt: string | ((backend: OrchestratorBackendId) => string);
   /** HEAD this turn's prompt and diff describe. */
   expectedHeadSha?: string | null;

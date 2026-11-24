@@ -64,10 +64,8 @@ import {
   envOrchestratorBackend,
   envOrchestratorModel,
   envOverlapGate,
-  envPacketExplainerEnabled,
   envParallelCap,
   envPromptCachingEnabled,
-  envQuizGateEnabled,
   envReviewerBackend,
   envSubscriptionProfile,
   envCrashReports,
@@ -264,20 +262,6 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   /** Which backend runs lane auto-reviews. 'follow' rides orchestratorBackend. */
   reviewerBackend: ReviewerBackendSetting;
   /**
-   * HTML packet explainer generation (#1491). **Off by default** — when enabled and a packet
-   * reaches review, a self-contained explainer + quiz is generated
-   * fire-and-forget and stored as a report artifact. Non-blocking; failure
-   * degrades the review surface to the raw diff. Env: `O8_EXPLAINER`.
-   */
-  packetExplainerEnabled: boolean;
-  /**
-   * Quiz-gated human merge (#1491). **Off by default.** When on AND the packet
-   * exceeds the changed-file threshold, the human Merge button is blocked until
-   * the explainer quiz is passed. Human-UI only — the MCP/orchestrator approve
-   * path stays ungated. Env: `O8_QUIZ_GATE`.
-   */
-  quizGateEnabled: boolean;
-  /**
    * Auto buy-in doc on merge (#1492). **Off by default.** When on, a successful
    * packet merge generates a single self-contained, shareable HTML "buy-in doc"
    * (demo-first, plain-language what/why, deviations, verification, objections
@@ -391,9 +375,6 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   orchestratorBackend: 'auto',
   // 'follow' → reviews ride the orchestrator backend (pre-split behavior).
   reviewerBackend: 'follow',
-  // Explainer generation ON (non-blocking); quiz gate OFF (opt-in speed bump).
-  packetExplainerEnabled: false,
-  quizGateEnabled: false,
   // Buy-in doc generation OFF by default — opt-in narrative for external sharing.
   buyinDocEnabled: false,
   // Targeting tiers default to Codex and differ by effort.
@@ -538,12 +519,6 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isReviewerBackendSetting(stored.reviewerBackend)) {
     result.reviewerBackend = stored.reviewerBackend;
   }
-  if (typeof stored.packetExplainerEnabled === 'boolean') {
-    result.packetExplainerEnabled = stored.packetExplainerEnabled;
-  }
-  if (typeof stored.quizGateEnabled === 'boolean') {
-    result.quizGateEnabled = stored.quizGateEnabled;
-  }
   if (typeof stored.buyinDocEnabled === 'boolean') {
     result.buyinDocEnabled = stored.buyinDocEnabled;
   }
@@ -622,8 +597,6 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const workspaceManifestPolicy = resolveWorkspaceManifestPolicySettings(fileValues);
   const envOrchBackend = envOrchestratorBackend();
   const envRevBackend = envReviewerBackend();
-  const envExplainer = envPacketExplainerEnabled();
-  const envQuizGate = envQuizGateEnabled();
   const envBuyinDoc = envBuyinDocEnabled();
   const envApplyUpdates = envUpdateAutoApply();
   const envCollideAgg = envCollideAggregator();
@@ -718,8 +691,6 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
       ?? envRevBackend
       ?? fileValues.reviewerBackend
       ?? OPERATOR_DEFAULTS_FALLBACK.reviewerBackend,
-    packetExplainerEnabled: envExplainer ?? fileValues.packetExplainerEnabled ?? OPERATOR_DEFAULTS_FALLBACK.packetExplainerEnabled,
-    quizGateEnabled: envQuizGate ?? fileValues.quizGateEnabled ?? OPERATOR_DEFAULTS_FALLBACK.quizGateEnabled,
     buyinDocEnabled: envBuyinDoc ?? fileValues.buyinDocEnabled ?? OPERATOR_DEFAULTS_FALLBACK.buyinDocEnabled,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
@@ -797,8 +768,6 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     crossHouseWorkerFallback: fileValues.crossHouseWorkerFallback !== undefined ? 'file' : 'default',
     orchestratorBackend: profileDefaults ? 'profile' : envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
     reviewerBackend: profileDefaults ? 'profile' : envRevBackend !== null ? 'env' : fileValues.reviewerBackend !== undefined ? 'file' : 'default',
-    packetExplainerEnabled: envExplainer !== null ? 'env' : fileValues.packetExplainerEnabled !== undefined ? 'file' : 'default',
-    quizGateEnabled: envQuizGate !== null ? 'env' : fileValues.quizGateEnabled !== undefined ? 'file' : 'default',
     buyinDocEnabled: envBuyinDoc !== null ? 'env' : fileValues.buyinDocEnabled !== undefined ? 'file' : 'default',
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
@@ -1040,12 +1009,6 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
     stored.reviewerBackend = update.reviewerBackend;
   }
-  if (update.packetExplainerEnabled !== undefined) {
-    stored.packetExplainerEnabled = Boolean(update.packetExplainerEnabled);
-  }
-  if (update.quizGateEnabled !== undefined) {
-    stored.quizGateEnabled = Boolean(update.quizGateEnabled);
-  }
   if (update.buyinDocEnabled !== undefined) {
     stored.buyinDocEnabled = Boolean(update.buyinDocEnabled);
   }
@@ -1250,16 +1213,6 @@ export function resolveThreecodeWorkerModelSync(): string | null {
 /** Which backend runs lane auto-reviews ('follow' → ride the orchestrator). */
 export function resolveReviewerBackendSync(): ReviewerBackendSetting {
   return getOperatorDefaultsSync().values.reviewerBackend;
-}
-
-/** Whether packet explainer generation is enabled (#1491, default off). */
-export function resolvePacketExplainerEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.packetExplainerEnabled;
-}
-
-/** Whether the quiz-gated human merge is enabled (#1491, default off). */
-export function resolveQuizGateEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.quizGateEnabled;
 }
 
 /** Whether the auto buy-in doc on merge is enabled (#1492, default off). */

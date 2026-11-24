@@ -45,7 +45,6 @@ export function isBrainRoutingMode(value: unknown): value is BrainRoutingMode {
   return value === 'auto' || value === 'subscription';
 }
 
-
 /**
  * "Workers use the Brain" (2026-06-11). Whether dispatched worker agents get
  * Engineering Brain access (`o8 ask`) injected into their packet prompt.
@@ -128,7 +127,6 @@ export function sanitizeBranchPrefix(raw: unknown): string | null {
     .slice(0, 40);
   return cleaned || null;
 }
-
 
 // ── Env overrides ──
 
@@ -312,20 +310,6 @@ export function envOrchestratorBackend(): OrchestratorBackendSetting | null {
 export function envReviewerBackend(): ReviewerBackendSetting | null {
   const raw = process.env.O8_REVIEWER_BACKEND?.trim();
   if (raw && isReviewerBackendSetting(raw)) return raw;
-  return null;
-}
-
-export function envPacketExplainerEnabled(): boolean | null {
-  const raw = process.env.O8_EXPLAINER;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-export function envQuizGateEnabled(): boolean | null {
-  const raw = process.env.O8_QUIZ_GATE;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
   return null;
 }
 

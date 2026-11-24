@@ -39,12 +39,6 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', () => ({
 vi.mock('@/lib/lane/review-route', () => ({
   resolveReviewRoute: () => ({ backend: reviewer.backend }),
 }));
-vi.mock('@/lib/lane/packet-explainer-queue', () => ({
-  drainPacketExplainerQueue: vi.fn(async () => {}),
-  enqueuePacketExplainer: vi.fn(async () => {}),
-  notifyCorrectnessReviewQueued: vi.fn(),
-  startPacketExplainerQueueDrain: vi.fn(() => () => {}),
-}));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/mcp/o8-webview-client', () => ({
   O8WebviewClient: class {

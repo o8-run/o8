@@ -273,7 +273,6 @@
     "shared:common:src/lib/lane/orphaned-lane.ts": 1862,
     "shared:common:src/lib/lane/owned-session-liveness.ts": 4410,
     "shared:common:src/lib/lane/packet-creation-base.ts": 28897,
-    "shared:common:src/lib/lane/packet-explainer-ownership.ts": 24758,
     "shared:common:src/lib/lane/packet-stop-hold.ts": 7887,
     "shared:common:src/lib/lane/pr-first-delivery.ts": 1487,
     "shared:common:src/lib/lane/pre-run-cancellation.ts": 3247,

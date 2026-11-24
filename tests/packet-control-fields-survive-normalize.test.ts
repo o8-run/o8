@@ -235,14 +235,6 @@ function fullPacketFixture() {
     taskContractSource: 'explicit',
     problemDossierId: null,
     problemRemedyId: null,
-    explainer: {
-      status: 'ready',
-      artifactId: 'art-explainer-1',
-      quiz: null,
-      changedFileCount: 3,
-      generatedAt: '2026-01-01T00:09:00.000Z',
-      error: null,
-    },
     buyinDoc: {
       status: 'ready',
       artifactId: 'art-buyin-1',

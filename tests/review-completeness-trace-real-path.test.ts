@@ -82,12 +82,6 @@ vi.mock('@/lib/lane/review-quota-fallback', () => ({
   }),
 }));
 
-vi.mock('@/lib/lane/packet-explainer-queue', () => ({
-  drainPacketExplainerQueue: vi.fn(async () => {}),
-  enqueuePacketExplainer: vi.fn(async () => {}),
-  notifyCorrectnessReviewQueued: vi.fn(),
-  startPacketExplainerQueueDrain: vi.fn(() => () => {}),
-}));
 
 const { drainReviewQueue } = await import('@/lib/lane/auto-review');
 const { buildBlindSecondPassPrompt } = await import('@/lib/lane/blind-second-pass-review');

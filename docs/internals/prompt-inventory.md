@@ -362,7 +362,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/lane/orchestrator-system-prompt.ts](../../src/lib/lane/orchestrator-system-prompt.ts) | buildOrchestratorSystemPrompt | Orchestration and tool authority | 49 | 49 | 6 |
 | [src/lib/lane/orchestrator-system-prompt.ts](../../src/lib/lane/orchestrator-system-prompt.ts) | FALLBACK_PROMPT | Orchestration and tool authority | 70 | 70 | 0 |
 | [src/lib/lane/orchestrator.md](../../src/lib/lane/orchestrator.md) | asset | Orchestration and tool authority | 8315 | 7448 | 0 |
-| [src/lib/lane/packet-explainer.ts](../../src/lib/lane/packet-explainer.ts) | buildExplainerPrompt | Worker scope, launch and completion | 196 | 196 | 4 |
 | [src/lib/lane/review-risk.ts](../../src/lib/lane/review-risk.ts) | buildAdversarialReviewProtocol | Independent review and evidence | 95 | 87 | 0 |
 | [src/lib/llm/context.ts](../../src/lib/llm/context.ts) | buildSystemPrompt | Model input and output contract | 287 | 287 | 10 |
 | [src/lib/llm/context.ts](../../src/lib/llm/context.ts) | buildUnscopedSystemPrompt | Model input and output contract | 198 | 198 | 0 |

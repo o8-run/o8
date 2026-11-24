@@ -21,7 +21,6 @@ This is a partial port of the desktop Settings surface. Ported rows share the ex
 | Dispatch: Automatically review completed work | Automatically review completed work (`reviewContinuation`) | Ported |
 | Dispatch: Merge approval | Merge approval (`requireApproval`) | Ported |
 | Dispatch: Install app updates automatically | Install app updates automatically (`updateAutoApply`) | Ported |
-| Dispatch: Explain completed changes | Explain completed changes (`packetExplainerEnabled`) | Ported |
 | Dispatch: Create a summary after merge | Create a summary after merge (`buyinDocEnabled`) | Ported |
 | Dispatch: Spending limit per task | Spending limit per task (`meteredPacketCostCapUsd`) | Ported |
 | Dispatch: Backup input-token limit | Backup input-token limit (`meteredPacketInputTokenCap`) | Ported |
