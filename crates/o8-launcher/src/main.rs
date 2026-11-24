@@ -944,7 +944,7 @@ fn serve(
     }
     let restart_stop = stopped.clone();
     let node_parked = Arc::new(AtomicBool::new(false));
-    let restart = o8_launch_core::restart_job_drain::guard(
+    let restart = o8_launch_core::restart_job_drain::guard_parkable(
         config.data_dir.clone(),
         config.api_port,
         node_parked.clone(),

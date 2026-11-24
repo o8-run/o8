@@ -65,9 +65,17 @@ fn inspect(data_dir: &Path, api_port: u16, id: &str, force: bool) -> Result<(), 
     Ok(())
 }
 
-/// `parked` is true while the launcher has Node parked: Node then holds no
-/// cloud lease or running work, so both drain steps have nothing to do.
 pub fn guard(
+    data_dir: PathBuf,
+    api_port: u16,
+    cleanup: impl Fn() + Send + Sync + 'static,
+) -> o8_restart_safety::RestartSafety {
+    guard_parkable(data_dir, api_port, Default::default(), cleanup)
+}
+
+/// As `guard`. `parked` is true while the launcher has Node parked: Node then
+/// holds no cloud lease or running work, so both drain steps have nothing to do.
+pub fn guard_parkable(
     data_dir: PathBuf,
     api_port: u16,
     parked: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -164,7 +172,7 @@ mod tests {
         });
         let calls = Arc::new(AtomicUsize::new(0));
         let recorded = calls.clone();
-        let state = guard(root.clone(), port, Default::default(), move || {
+        let state = guard(root.clone(), port, move || {
             assert_eq!(received.load(Ordering::SeqCst), 1);
             recorded.fetch_add(1, Ordering::SeqCst);
         });
@@ -187,7 +195,6 @@ mod tests {
         let state = guard(
             root.clone(),
             listener.local_addr().unwrap().port(),
-            Default::default(),
             move || {
                 recorded.fetch_add(1, Ordering::SeqCst);
             },
@@ -214,7 +221,7 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let recorded = calls.clone();
-        let state = guard(
+        let state = guard_parkable(
             root.clone(),
             listener.local_addr().unwrap().port(),
             Arc::new(std::sync::atomic::AtomicBool::new(true)),
