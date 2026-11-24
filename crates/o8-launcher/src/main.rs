@@ -65,6 +65,10 @@ struct Config {
     window_socket: PathBuf,
     #[serde(skip)]
     window_key: String,
+    /// O8_PARK_NODE=1: Node may be parked at rest and started on demand.
+    /// Only with the launcher-owned window; otherwise Node holds its lifeline.
+    #[serde(skip)]
+    park_node: bool,
 }
 impl Config {
     /// The server that answers the public API port.
@@ -93,6 +97,8 @@ struct Server {
     /// Set after a crash: the next spawn waits for the restart delay while the
     /// main loop keeps pumping events.
     retry_at: Option<Instant>,
+    /// Stopped on request, not crashed: no restart until `start-node`.
+    parked: bool,
 }
 impl Server {
     fn stop(&mut self, deadline: Instant) -> Result<(), String> {
@@ -243,6 +249,9 @@ fn spawn(
                 .env("O8D_PRODUCER_UPSTREAM_PORT", config.ws_port.to_string())
                 .env("O8_WS_O8D", "1");
         }
+        if config.park_node {
+            command.env("O8_PARK_NODE", "1");
+        }
         if config.owns_window() {
             command
                 .env("O8_NEXT_WINDOW_CONTROL", &config.window_socket)
@@ -345,6 +354,7 @@ fn spawn(
         port,
         stopped: false,
         retry_at: None,
+        parked: false,
     };
     let result = (|| {
         let receipt = Receipt {
@@ -371,6 +381,59 @@ fn spawn(
         return Err(error.into());
     }
     Ok(server)
+}
+/// Parks Node on its own request: a clean stop that is not a crash, so it uses
+/// no restart budget and logs no restart attempt. It stays down until
+/// `start-node`.
+fn park(config: &Config, server: &mut Server, parked: &AtomicBool) -> Result<(), String> {
+    server.parked = true;
+    server.retry_at = None;
+    parked.store(true, Ordering::SeqCst);
+    let stopped = server.stop(Instant::now() + SHUTDOWN_BOUND);
+    if let Ok(mut log) = OpenOptions::new()
+        .append(true)
+        .open(config.data_dir.join("logs").join("ws-server.log"))
+    {
+        let _ = writeln!(
+            log,
+            "[o8-sidecar-supervisor] {}",
+            if stopped.is_ok() {
+                "parked"
+            } else {
+                "park stop incomplete"
+            }
+        );
+    }
+    if stopped.is_err() {
+        // Not proven stopped: recover through the ordinary restart path.
+        server.parked = false;
+        parked.store(false, Ordering::SeqCst);
+        schedule_restart(config, server)?;
+    }
+    Ok(())
+}
+/// Starts a parked Node on the loop's next pass, through the same spawn as a
+/// restart, without charging the restart budget.
+fn unpark(server: &mut Server, parked: &AtomicBool) -> &'static str {
+    if server.parked {
+        server.parked = false;
+        parked.store(false, Ordering::SeqCst);
+        server.retry_at = Some(Instant::now());
+        "starting"
+    } else if server.retry_at.is_some() {
+        "starting"
+    } else {
+        "running"
+    }
+}
+fn node_state(server: &Server) -> &'static str {
+    if server.parked {
+        "parked"
+    } else if server.retry_at.is_some() {
+        "starting"
+    } else {
+        "running"
+    }
 }
 /// Records a failure against the restart budget and sets the next attempt time.
 fn schedule_restart(config: &Config, server: &mut Server) -> Result<(), String> {
@@ -880,9 +943,11 @@ fn serve(
         }
     }
     let restart_stop = stopped.clone();
+    let node_parked = Arc::new(AtomicBool::new(false));
     let restart = o8_launch_core::restart_job_drain::guard(
         config.data_dir.clone(),
         config.api_port,
+        node_parked.clone(),
         move || {
             restart_stop.store(true, Ordering::SeqCst);
             native::wake();
@@ -916,7 +981,7 @@ fn serve(
                 Some(instance) => instance.receive().map_err(|_| "Instance control stopped")?,
                 None => break,
             };
-            if let Some((request, peer)) = received {
+            if let Some((request, mut peer)) = received {
                 let result = match request {
                     Request::UpdateCheck => match updates.check() {
                         Some(answer) => Ok(answer),
@@ -953,6 +1018,38 @@ fn serve(
                     Request::Restart { reservation } => restart
                         .before_restart(Some(&reservation))
                         .map(|_| serde_json::json!({"ok": true, "admitted": true})),
+                    Request::ParkNode | Request::StartNode | Request::NodeStatus => {
+                        let mut guard = lock(servers);
+                        let node = guard
+                            .as_mut()
+                            .and_then(|servers| servers.ws.as_mut())
+                            .filter(|_| config.park_node);
+                        match (request, node) {
+                            (_, None) => {
+                                Ok(serde_json::json!({"ok": false, "error": "Parking is off"}))
+                            }
+                            (Request::NodeStatus, Some(node)) => {
+                                Ok(serde_json::json!({"ok": true, "state": node_state(node)}))
+                            }
+                            (Request::StartNode, Some(node)) => Ok(
+                                serde_json::json!({"ok": true, "state": unpark(node, &node_parked)}),
+                            ),
+                            (_, Some(node)) if node.parked || node.stopped => {
+                                Ok(serde_json::json!({"ok": false, "error": "Node is not running"}))
+                            }
+                            (_, Some(node)) => {
+                                // Answer first: Node is waiting on this reply as it stops.
+                                if let Some(mut peer) = peer.take() {
+                                    let _ = writeln!(
+                                        peer,
+                                        "{}",
+                                        serde_json::json!({"ok": true, "state": "parking"})
+                                    );
+                                }
+                                park(config, node, &node_parked).map(|_| serde_json::Value::Null)
+                            }
+                        }
+                    }
                 };
                 let response = result.unwrap_or_else(
                 |_| serde_json::json!({"ok": false, "error": "Restart is deferred or unavailable"}),
@@ -1247,6 +1344,13 @@ fn main() {
     }
     if std::env::var("O8_NEXT_OFF").as_deref() == Ok("1") {
         config.next_off = true;
+    }
+    if std::env::var("O8_PARK_NODE").as_deref() == Ok("1") {
+        if config.owns_window() {
+            config.park_node = true;
+        } else {
+            o8_launcher::note!("O8_PARK_NODE needs the front door with Next off; Node stays up");
+        }
     }
     if config.next_off && !config.api_front_door {
         o8_launcher::note!("O8_NEXT_OFF needs the API front door; starting Next");
