@@ -25,7 +25,6 @@ For operators who want to understand the product and run governed agent work wit
 | [First-run receipt (2026-09-12)](user/first-run-receipt-2026-09-12.md) | Timed source setup through the first merged packet, including every stall and workaround. |
 | [Runtime dogfood receipt](user/runtime-dogfood-receipt-2026-08-10.md) | One bounded operational run of a non-frontier runtime, with cost and review outcome. |
 | [Canonical workflow](user/canonical-workflow.md) | The expected path from a task request through reviewed integration. |
-| [Self-tuning harness](user/self-tuning-harness.md) | How grounded features, execution contracts, lift measurements, skeptical review, CI, and portable bundles fit together. |
 | [Orchestration playbook](user/orchestration-playbook.md) | How to brief, monitor, review, recover, and close agent work well. |
 | [Persistent lead handoff](user/persistent-leads.md) | How an external liaison starts, continues, waits on, and stops one durable o8 lead. |
 | [Agent handoffs](user/agent-handoffs.md) | Find an agent by codename, send a bounded exchange, reply, and stop. |

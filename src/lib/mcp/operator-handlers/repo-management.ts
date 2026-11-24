@@ -198,37 +198,6 @@ export const REPO_MGMT_TOOLS: McpTool[] = [
       required: ['projectId'],
     },
   },
-  {
-    name: 'o8_scaffold',
-    description:
-      'USE THIS WHEN the user says "scaffold a nextjs app here", "set up a fresh Python project", or "help me start a hello-world web project". Creates/initializes the repo, writes a starter project, commits it, and registers it in o8. Example: o8_scaffold({repoPath: "~/Projects/hello-world", kind: "static-html"})',
-    inputSchema: {
-      // No top-level anyOf — see comment on o8_register_repo. Handler's
-      // requiredPath() enforces either-or for path/repoPath. `kind` is the
-      // only schema-required field.
-      type: 'object',
-      properties: {
-        repoPath: {
-          type: 'string',
-          description: 'Absolute path, or ~/ path, where the repo should be scaffolded. Either repoPath or path is required.',
-        },
-        path: {
-          type: 'string',
-          description: 'Alias for repoPath. Either repoPath or path is required.',
-        },
-        kind: {
-          type: 'string',
-          enum: ['nextjs', 'next', 'node', 'static-html', 'static-web', 'python'],
-          description: 'Scaffold kind. static-web is accepted as an alias for static-html.',
-        },
-        name: {
-          type: 'string',
-          description: 'Optional project/package name.',
-        },
-      },
-      required: ['kind'],
-    },
-  },
 ];
 
 function requiredPath(args: Record<string, unknown>, primary: 'path' | 'repoPath') {
@@ -567,35 +536,5 @@ export async function handleDeleteProject(args: Record<string, unknown>): Promis
     });
   } catch (error) {
     return textResult(`Failed to delete project: ${errorText(error)}`, true);
-  }
-}
-
-export async function handleScaffold(args: Record<string, unknown>): Promise<McpToolResult> {
-  try {
-    const repoPath = requiredPath(args, 'repoPath');
-    const kind = requiredString(args, 'kind');
-    const data = await apiFetch('/api/panel/repos/scaffold', {
-      method: 'POST',
-      body: JSON.stringify({
-        repoPath,
-        kind,
-        name: optionalString(args, 'name') || undefined,
-      }),
-    }) as Record<string, unknown>;
-    if (typeof data.error === 'string') {
-      return textResult(data.error, true);
-    }
-    const repo = repoFromResponse(data);
-    return jsonResult({
-      scaffolded: data.scaffolded === true,
-      repoId: repo.repoId,
-      repoPath: repo.repoPath,
-      projectId: typeof data.projectId === 'string' ? data.projectId : null,
-      kind: data.kind,
-      filesWritten: Array.isArray(data.filesWritten) ? data.filesWritten : [],
-      committed: data.committed === true,
-    });
-  } catch (error) {
-    return textResult(`Failed to scaffold repo: ${errorText(error)}`, true);
   }
 }

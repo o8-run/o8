@@ -330,7 +330,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/dispatch/edge-case-surfacer.ts](../../src/lib/dispatch/edge-case-surfacer.ts) | renderEdgeCaseSections | Worker scope, launch and completion | 71 | 71 | 4 |
 | [src/lib/dispatch/prompts/decompose.md](../../src/lib/dispatch/prompts/decompose.md) | asset | Worker scope, launch and completion | 898 | 917 | 0 |
 | [src/lib/dispatch/read-budget.ts](../../src/lib/dispatch/read-budget.ts) | renderReadBudgetSections | Worker scope, launch and completion | 142 | 142 | 3 |
-| [src/lib/harness/evaluator.ts](../../src/lib/harness/evaluator.ts) | buildPrompt | Model input and output contract | 354 | 354 | 2 |
 | [src/lib/intake/github-intake.ts](../../src/lib/intake/github-intake.ts) | buildPlanningPrompt | Issue planning | 220 | 220 | 6 |
 | [src/lib/intake/github-intake.ts](../../src/lib/intake/github-intake.ts) | inline-model-context | Issue planning | 14 | 14 | 2 |
 | [src/lib/judgment/questions.ts](../../src/lib/judgment/questions.ts) | DIFF_QUESTIONS:message | Typed judgment | 30 | 30 | 0 |
@@ -415,22 +414,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/operator-handlers/cortex.ts](../../src/lib/mcp/operator-handlers/cortex.ts) | tool:cortex_propose_observation | Tool selection, arguments and authority | 85 | 85 | 0 |
 | [src/lib/mcp/operator-handlers/digest.ts](../../src/lib/mcp/operator-handlers/digest.ts) | tool:digest | Tool selection, arguments and authority | 140 | 140 | 0 |
 | [src/lib/mcp/operator-handlers/digest.ts](../../src/lib/mcp/operator-handlers/digest.ts) | tool:fetch_raw | Tool selection, arguments and authority | 136 | 136 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 22 | 22 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_capabilities | Tool selection, arguments and authority | 27 | 27 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_evaluate_diff | Tool selection, arguments and authority | 35 | 35 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_feature_add | Tool selection, arguments and authority | 18 | 18 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_feature_list | Tool selection, arguments and authority | 25 | 25 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_feature_next | Tool selection, arguments and authority | 16 | 16 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_feature_verify | Tool selection, arguments and authority | 33 | 33 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_ground_task | Tool selection, arguments and authority | 26 | 26 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_harness_bundle | Tool selection, arguments and authority | 19 | 19 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_harness_lift_status | Tool selection, arguments and authority | 24 | 24 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_harness_measure | Tool selection, arguments and authority | 33 | 33 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_harness_transition | Tool selection, arguments and authority | 31 | 31 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_negotiate_contract | Tool selection, arguments and authority | 30 | 30 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_session_boot | Tool selection, arguments and authority | 32 | 32 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_sprint | Tool selection, arguments and authority | 16 | 16 | 0 |
-| [src/lib/mcp/operator-handlers/harness.ts](../../src/lib/mcp/operator-handlers/harness.ts) | tool:o8_verify | Tool selection, arguments and authority | 23 | 23 | 0 |
 | [src/lib/mcp/operator-handlers/mission-create-tool.ts](../../src/lib/mcp/operator-handlers/mission-create-tool.ts) | tool:create_mission | Tool selection, arguments and authority | 1209 | 1209 | 0 |
 | [src/lib/mcp/operator-handlers/mission-worker-input.ts](../../src/lib/mcp/operator-handlers/mission-worker-input.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 112 | 112 | 0 |
 | [src/lib/mcp/operator-handlers/mission.ts](../../src/lib/mcp/operator-handlers/mission.ts) | tool:dispatch_mission | Tool selection, arguments and authority | 199 | 199 | 0 |

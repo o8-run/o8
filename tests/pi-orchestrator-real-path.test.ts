@@ -192,7 +192,7 @@ describe('Pi orchestrator (#3258)', () => {
     }
     for (const command of ['operator/create_mission', 'operator/dispatch_mission', 'operator/get_mission_status',
       'operator/o8_packet_diff', 'operator/submit_review', 'operator/o8_merge_preview', 'operator/approve_and_merge',
-      'operator/o8_verify', 'operator/cortex_ask', 'cortex/cortex_ask', 'cortex/cortex_read_packets', 'cortex/cortex_fleet_status']) {
+      'operator/o8_status', 'operator/cortex_ask', 'cortex/cortex_ask', 'cortex/cortex_read_packets', 'cortex/cortex_fleet_status']) {
       expect(expected.has(command)).toBe(true);
     }
     // Pi's production path: operator over /api/mcp, cortex from the same tool-spine entry.

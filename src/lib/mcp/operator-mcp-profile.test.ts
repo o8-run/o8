@@ -38,40 +38,6 @@ describe('operator MCP process profiles', () => {
     expect(operatorToolsForProfile('misspelled-dogfood')).toEqual([]);
   });
 
-  it('publishes the complete strict harness surface only in the full profile', () => {
-    const harnessNames = [
-      'o8_feature_list',
-      'o8_feature_next',
-      'o8_feature_add',
-      'o8_feature_verify',
-      'o8_ground_task',
-      'o8_session_boot',
-      'o8_negotiate_contract',
-      'o8_sprint',
-      'o8_verify',
-      'o8_harness_lift_status',
-      'o8_harness_measure',
-      'o8_harness_transition',
-      'o8_capabilities',
-      'o8_evaluate_diff',
-      'o8_harness_bundle',
-    ];
-    const fullTools = operatorToolsForProfile('full');
-    const fullNames = fullTools.map((tool) => tool.name);
-    const restrictedNames = operatorToolsForProfile('visualizations').map((tool) => tool.name);
-
-    for (const name of harnessNames) {
-      expect(fullNames).toContain(name);
-      expect(restrictedNames).not.toContain(name);
-      expect(fullTools.find((tool) => tool.name === name)?.inputSchema).toMatchObject({
-        type: 'object',
-        additionalProperties: false,
-        properties: expect.any(Object),
-        required: expect.any(Array),
-      });
-    }
-  });
-
   it('publishes strict Broadcast tools only in the full profile', () => {
     const fullTools = operatorToolsForProfile('full');
     const restrictedNames = operatorToolsForProfile('visualizations').map((tool) => tool.name);

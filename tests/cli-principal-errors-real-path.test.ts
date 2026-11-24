@@ -78,9 +78,9 @@ describe('CLI HTTP -> real middleware/scoped route with persisted packet princip
     expect(result).toMatchObject({ status: 200, data: { packetId: ownPacket, laneId: ownLane.id } });
   });
 
-  it.each(['/api/orchestrator/status', '/api/harness'])('explains worker capability refusal for %s without credential repair', async path => {
+  it.each(['/api/orchestrator/status', '/api/orchestrator/merge'])('explains worker capability refusal for %s without credential repair', async path => {
     const before = scopeCalls;
-    const error = await refusal(path, config, { method: path === '/api/harness' ? 'POST' : 'GET' });
+    const error = await refusal(path, config, { method: path === '/api/orchestrator/merge' ? 'POST' : 'GET' });
     expect(error).toMatchObject({ code: 'forbidden', exit: EXIT.UNAUTHORIZED });
     expect(error.message).toContain('Worker token is not authorized for this endpoint.');
     expect(error.hint).toContain('assigned packet');

@@ -36,25 +36,13 @@ import { runConnect } from './commands/connect.js';
 import { runDoctor } from './commands/doctor.js';
 import { runTriage } from './commands/triage.js';
 import { runCortexObserve } from './commands/cortex.js';
-import { runCi } from './commands/ci.js';
-import {
-  runBoot,
-  runCapabilities,
-  runContract,
-  runEvaluateDiff,
-  runFeature,
-  runGround,
-  runHarness,
-  runSprint,
-  runVerify,
-} from './commands/harness.js';
 import { runInbox } from './commands/inbox.js';
 import { runConversationPrs } from './commands/conversation-prs.js';
 import { runHistory } from './commands/history.js';
 import { runLead } from './commands/lead.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runArtifact } from './commands/artifact.js';
-import { isReceiptVerifyInvocation, runVerifyReceipt } from './commands/verify-receipt.js';
+import { runVerifyReceipt } from './commands/verify-receipt.js';
 import { runTruth } from './commands/truth.js';
 import { runMission } from './commands/mission.js';
 import { runMcp } from './commands/mcp.js';
@@ -272,18 +260,8 @@ commands:
   serve agent uninstall  unload and remove the per-user headless service
   serve agent status   report whether the per-user headless service is loaded
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
-  feature list|next|add|verify  durable repo-scoped feature ledger
-  ground "<task>"      persist a real-path impact map before execution
-  boot [--task "..."]  session boot envelope: git, instructions, ledger, contract, grounding
-  contract ...         propose and accept generator/evaluator contracts
-  sprint ...           start or tick a one-feature-at-a-time sprint
   verify <receipt.json> verify a signed packet receipt locally (--key, --repo, --show-key)
   truth merged|packet|approvals  query signed receipt-backed project history
-  harness verify <feature-id> record computational evidence and optionally tick a sprint
-  harness ...          model-keyed lift, lifecycle, and HarnessBundle operations
-  capabilities         discover harness artifacts and recommended call order
-  evaluate-diff        independent skeptic review of a supplied or git diff
-  ci [--config path]   run the versioned o8/ci/v1 local check contract
   app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
   update check          request a fresh native update check without installing
   update [apply] [--dry-run] [--runtimes a,b] [--machines] [--check] [--force]  update installed runtime CLIs, then the app
@@ -462,30 +440,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       // The question lands in `secondary` (first positional) when quoted, or
       // spreads across secondary + rest when unquoted — hand both to the parser.
       return runAsk(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
-    case 'feature':
-      return runFeature(args.mode, secondary, args.rest);
-    case 'ground':
-      return runGround(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
-    case 'boot':
-      return runBoot(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
-    case 'contract':
-      return runContract(args.mode, secondary, args.rest);
-    case 'sprint':
-      return runSprint(args.mode, secondary, args.rest);
     case 'verify':
-      return isReceiptVerifyInvocation(singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest))
-        ? runVerifyReceipt(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest))
-        : runVerify(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
+      return runVerifyReceipt(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'truth':
       return runTruth(args.mode, secondary, args.rest);
-    case 'harness':
-      return runHarness(args.mode, secondary, args.rest);
-    case 'capabilities':
-      return runCapabilities(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
-    case 'evaluate-diff':
-      return runEvaluateDiff(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
-    case 'ci':
-      return runCi(args.mode, singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'app':
       return runApp(args.mode, secondary, args.rest);
     case 'update': {
