@@ -15,6 +15,7 @@ import { writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { admitRun, idleGateStats, type LoopClass } from './idle-gate';
+import { parkReport } from './park-report';
 
 export interface LedgerEntry {
   name: string;
@@ -267,6 +268,7 @@ export function startLedgerReporter(
         registered: registeredLoopNames(),
         loops: snapshot,
         gate: idleGateStats(),
+        park: parkReport(),
       }, null, 2));
     } catch {
       // Diagnostics only; a write failure never affects the server.

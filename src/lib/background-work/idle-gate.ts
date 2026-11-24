@@ -232,6 +232,11 @@ export function resetIdleGate(): void {
   statsAt = Date.now();
 }
 
+/** Whether the gate is resting now (loops paused): false when the gate is off or not started. */
+export function idleGateResting(): boolean {
+  return idleGateEnabled() && signals !== null && resting;
+}
+
 export function pausedLoopNames(): string[] {
   return [...paused].sort();
 }
