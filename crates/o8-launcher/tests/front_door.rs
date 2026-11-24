@@ -420,3 +420,105 @@ fn without_the_switch_node_refuses_to_park() {
     assert!(!gone(f.starts("ws-starts")[0]));
     f.stop();
 }
+
+/// The real o8d from this checkout. CI builds it, with all features, in the
+/// step before these tests. O8D_TEST_BINARY or CARGO_TARGET_DIR point
+/// elsewhere.
+fn real_o8d() -> std::path::PathBuf {
+    let path = std::env::var_os("O8D_TEST_BINARY")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("CARGO_TARGET_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../o8d/target")
+                })
+                .join("debug/o8d")
+        });
+    assert!(
+        path.is_file(),
+        "build o8d first: cargo build --manifest-path crates/o8d/Cargo.toml --features experimental-session-reads --bin o8d ({})",
+        path.display()
+    );
+    path
+}
+
+/// One HTTP/1.1 GET with extra header lines; returns the status and body.
+fn get(port: u16, path: &str, headers: &str) -> (u16, String) {
+    use std::io::{Read, Write};
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{headers}Connection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut reply = String::new();
+    let _ = stream.read_to_string(&mut reply);
+    let status = reply
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0);
+    let body = reply
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_owned())
+        .unwrap_or_default();
+    (status, body)
+}
+
+/// Through the real launcher and o8d: Node rests, parks and exits; the app's
+/// own background read leaves it parked; a request the user made starts Node
+/// and is answered by it, with no restart budget used.
+#[test]
+fn a_request_to_a_parked_node_starts_it_and_is_answered() {
+    let mut f = Fixture::new();
+    let o8d = real_o8d();
+    let mut extra = PARKING.to_vec();
+    extra.push(("O8D_BINARY", o8d.to_str().unwrap()));
+    f.start_with(&extra);
+    f.ready();
+    let api = f.port("api-port");
+    // A route o8d does not own reaches the fixture Node once it attaches.
+    until(|| get(api, "/api/fixture-node", "").0 == 200);
+    let node = f.starts("ws-starts")[0];
+    assert_eq!(
+        control(&f, serde_json::json!({"op":"park-node"}))["state"],
+        "parking"
+    );
+    until(|| gone(node));
+    until(|| node_state(&f) == "parked");
+
+    // Background traffic keeps today's answer and does not wake Node.
+    let (status, _) = get(api, "/api/fixture-node", "x-o8-foreground: 0\r\n");
+    assert_eq!(status, 503);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(node_state(&f), "parked");
+    assert_eq!(f.starts("ws-starts").len(), 1);
+
+    let started = std::time::Instant::now();
+    let (status, body) = get(api, "/api/fixture-node", "");
+    let elapsed = started.elapsed();
+    eprintln!(
+        "a parked Node answered a request in {} ms",
+        elapsed.as_millis()
+    );
+    assert_eq!(
+        status,
+        200,
+        "{body}\no8d: {}\nws: {}\nlauncher: {}",
+        f.log("logs/o8d.log"),
+        f.log("logs/ws-server.log"),
+        f.log("launcher-stderr")
+    );
+    assert!(body.contains("bootId"), "{body}");
+    assert!(elapsed < Duration::from_secs(10));
+    assert_eq!(f.starts("ws-starts").len(), 2);
+    assert_eq!(node_state(&f), "running");
+    let log = fs::read_to_string(f.root.join("logs/ws-server.log")).unwrap_or_default();
+    assert_eq!(log.matches("[o8-sidecar-supervisor] parked").count(), 1);
+    assert!(!log.contains("restart attempt"), "a wake is not a restart");
+    f.stop();
+}
