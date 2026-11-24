@@ -215,5 +215,33 @@ pub(super) fn projects(reader: &NativeReads, db: &Connection) -> ReadResult<Valu
         )?
         .to_owned();
     }
+    let dogfood = reader.directory.join(".dogfood-pr-only").exists();
+    for project in &mut projects {
+        let id = project["id"].as_str().unwrap_or("default").to_owned();
+        project["mergePolicy"] = merge_policy(db, &id, dogfood);
+    }
     Ok(json!({"activeProjectId":active,"projects":projects}))
+}
+
+/// `currentLaneMergePolicy` in src/lib/lane/dogfood-guard.ts, read from the same rows.
+fn merge_policy(db: &Connection, project: &str, dogfood: bool) -> Value {
+    if dogfood {
+        return json!({"mode":"pr_only","note":"PR-only dogfood mode is active — merge to main is blocked. Open a PR; a human merges."});
+    }
+    let value = |key: &str| -> Result<Option<String>, ()> {
+        db.query_row("SELECT value FROM app_state WHERE key = ?1", [key], |row| row.get(0))
+            .optional()
+            .map_err(|_| ())
+    };
+    let (Ok(row), Ok(carried)) = (
+        value(&format!("project-merge-mode:{project}")),
+        value("migration:project-merge-mode:carry-over-v1"),
+    ) else {
+        return json!({"mode":"pr_only","note":"Merge policy is unavailable. Branch retained; direct integration is blocked until project settings can be read."});
+    };
+    if row.as_deref() == Some("direct") || (row.is_none() && carried.is_none()) {
+        let note = if carried.is_some() { Value::Null } else { json!("Merge-policy carry-over is pending; preserving the existing mode until restart.") };
+        return json!({"mode":"direct","note":note});
+    }
+    json!({"mode":"pr_only","note":"PR-first project policy. Direct integration requires an explicit operator opt-in in project settings."})
 }

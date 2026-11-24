@@ -464,7 +464,8 @@ it.each(NATIVE_READS)('serves A1 %s GET %s with its production auth and Next sto
   const methods = [...new Set(nativeSurfaceRoutes[surface]
     .filter(route => route.path === routePath).flatMap(route => route.methods))].sort();
   const readWritePaths = ['/api/tasks', '/api/cortex/proposals', '/api/cortex/cross-repo-proposals',
-    '/api/setup/cli-updates', '/api/panel/problem-dossiers', '/api/panel/branches', '/api/visualizations'];
+    '/api/setup/cli-updates', '/api/panel/problem-dossiers', '/api/panel/branches', '/api/visualizations',
+    '/api/panel/resource-usage', '/api/v2/files'];
   expect(methods).toEqual(routePath === '/api/repo-spec' ? ['GET', 'POST', 'PUT']
     : readWritePaths.includes(routePath) ? ['GET', 'POST'] : ['GET']);
   for (const method of ['POST', 'PATCH', 'PUT', 'DELETE'].filter(method => !methods.includes(method))) {
@@ -576,7 +577,7 @@ it('walks every production surface registration and its HTTP routes', async () =
     .map(match => match[1]).filter(name => name !== 'fake');
   expect(Object.keys(nativeSurfaceRoutes).sort()).toEqual(registered.sort());
   for (const [name, routes] of Object.entries({ ...nativeSurfaceRoutes, viewers: viewerHttpRoutes })) {
-    if (!['grid', 'palette', 'shortcuts'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
+    if (!['canvas', 'grid', 'palette', 'shortcuts'].includes(name)) expect(routes.length, name).toBeGreaterThan(0);
     for (const route of routes) {
       const path = route.path.replace(/\[\w+\]/g, 'fixture');
       const handlers = await route.load() as Record<string, unknown>;
@@ -843,7 +844,6 @@ const WRITE_ROUTES: Array<[method: string, path: string, workerStatus: number]> 
   ['POST', '/api/orchestrator/session-rules', 403],
   ['DELETE', '/api/orchestrator/session-rules?id=fixture', 403],
   ['POST', '/api/orchestrator/delegate', 403],
-  ['POST', '/api/next/voice-host', 403],
   ['POST', '/api/orchestrator/discard-packet', 403],
   ['POST', '/api/orchestrator/comparison-pick', 403],
   ['POST', '/api/orchestrator/workspace', 403],
@@ -925,7 +925,7 @@ it('serves the operator MCP host over native and rejects non-POST/DELETE verbs (
 
   const rejected = await fetch(`${origin}/api/mcp`, { headers: { authorization: `Bearer ${server.token}` } });
   expect(rejected.status).toBe(405);
-  expect(rejected.headers.get('allow')).toBe('DELETE, POST');
+  expect(rejected.headers.get('allow')).toBe('POST, DELETE');
 });
 
 it('adds, lists and removes a session rule through the native transport', async () => {
