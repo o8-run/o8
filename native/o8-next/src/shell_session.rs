@@ -151,22 +151,27 @@ impl Surface {
     }
     /// The chat socket already pushes new history, so the full read is only a
     /// safety net. It costs one 100-message page, so it must not run each second.
+    /// An idle chat reads again only after the server reported a change
+    /// (`changes::revision`: any thread or lane event, a reconnect, the window
+    /// coming to the front); a running one keeps its short cadence.
     fn reconcile_due(&mut self) -> bool {
         let live = self
             .sessions
             .iter()
             .find(|s| Some(&s.id) == self.selected.as_ref())
             .is_some_and(|s| s.status == "running");
-        self.reconcile_wait += 1;
+        self.reconcile_wait = self.reconcile_wait.saturating_add(1);
         let every = if live {
             RECONCILE_LIVE_TICKS
         } else {
             RECONCILE_IDLE_TICKS
         };
-        let due = self.reconcile_wait >= every || live != self.reconcile_live;
+        let changed = self.reconcile_seen != crate::changes::revision();
+        let due = (live || changed) && self.reconcile_wait >= every || live != self.reconcile_live;
         self.reconcile_live = live;
         if due {
             self.reconcile_wait = 0;
+            self.reconcile_seen = crate::changes::revision();
         }
         due
     }

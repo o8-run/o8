@@ -167,7 +167,16 @@ fn watch_usage(client: &Client) {
                         *SNAPSHOT.lock().unwrap() = Some(snapshot);
                     }
                 }
-                std::thread::sleep(Duration::from_secs(1));
+                // Sleep until the next change (coming back to the window bumps
+                // the revision too) or until a pending read is due, not each
+                // second. With nothing pending it looks again once a minute.
+                let left = follow.idle_for(Duration::from_secs(60));
+                let limit = if left.is_zero() {
+                    Duration::from_secs(60)
+                } else {
+                    left
+                };
+                crate::changes::wait(crate::changes::revision(), limit);
             }
         });
     });

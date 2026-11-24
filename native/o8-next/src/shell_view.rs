@@ -201,6 +201,7 @@ fn launch(client: Client, file: PathBuf, state: State, offscreen: bool) {
         crate::zoom::install(false, cx);
         crate::parent_quit::install(cx);
         let (sender, receiver) = async_channel::bounded(1);
+        crate::wake::install(sender.clone());
         let client = client.with_wakeup(sender);
         // An offscreen window is never in front, unless a bench asks it to
         // stand in for a window in front (O8_NEXT_FOREGROUND=1).
@@ -227,11 +228,11 @@ pub(super) fn start_pump(
     cx: &mut App,
 ) {
     cx.spawn(async move |cx| {
-        let mut timer = cx.background_executor().timer(Duration::from_secs(1));
+        let mut timer = cx.background_executor().timer(crate::wake::maintenance());
         loop {
             let refresh = crate::wake::next(&receiver, &mut timer).await;
             if refresh {
-                timer = cx.background_executor().timer(Duration::from_secs(1));
+                timer = cx.background_executor().timer(crate::wake::maintenance());
             }
             if handle
                 .update(cx, |s, window, cx| s.tick(refresh, window, cx))

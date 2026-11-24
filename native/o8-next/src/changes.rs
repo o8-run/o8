@@ -4,16 +4,32 @@
 //! when the count moves, or on its old cadence while a thread is running. An
 //! untouched window with no agent working then makes no timed reads.
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 static REVISION: AtomicU64 = AtomicU64::new(1);
 /// `{"channel":"changed","event":"update"}` notices seen: the update status.
 static UPDATE: AtomicU64 = AtomicU64::new(0);
 static WORKING: AtomicBool = AtomicBool::new(false);
+/// Wakes threads parked in `wait` when the revision moves.
+static CHANGED: (Mutex<()>, Condvar) = (Mutex::new(()), Condvar::new());
 
 /// Something the server reported may have changed what a view shows.
 pub(crate) fn bump() {
+    // Bumped under the lock, so a waiter between its check and its wait
+    // cannot miss it.
+    let _guard = CHANGED.0.lock().unwrap_or_else(PoisonError::into_inner);
     REVISION.fetch_add(1, Ordering::Relaxed);
+    CHANGED.1.notify_all();
+}
+/// Parks a reader thread until the revision moves past `seen` or `limit`
+/// passes, instead of waking each second to look.
+pub(crate) fn wait(seen: u64, limit: Duration) {
+    let guard = CHANGED.0.lock().unwrap_or_else(PoisonError::into_inner);
+    let _ = CHANGED
+        .1
+        .wait_timeout_while(guard, limit, |_| revision() == seen)
+        .unwrap_or_else(PoisonError::into_inner);
 }
 pub(crate) fn revision() -> u64 {
     REVISION.load(Ordering::Relaxed)
@@ -59,6 +75,13 @@ impl Follow {
             (self.seen != revision || busy) && at.elapsed() >= every
         })
     }
+    /// How long until `due` could pass with no change: the cadence left after
+    /// the last read. A change can make it due sooner; see `wait`.
+    pub(crate) fn idle_for(&self, every: Duration) -> Duration {
+        self.at.map_or(Duration::ZERO, |at| {
+            crate::foreground::cadence(every).saturating_sub(at.elapsed())
+        })
+    }
     /// A read starts: a change after this point reads again.
     pub(crate) fn read(&mut self) {
         self.seen = revision();
@@ -73,6 +96,23 @@ impl Follow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_parked_reader_wakes_on_a_change_not_on_a_timer() {
+        let seen = revision();
+        let bumper = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(50));
+            bump();
+        });
+        let start = Instant::now();
+        wait(seen, Duration::from_secs(30));
+        bumper.join().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(10), "a bump ends the wait");
+        // With no change, the wait ends at its limit.
+        let start = Instant::now();
+        wait(revision(), Duration::from_millis(30));
+        assert!(start.elapsed() >= Duration::from_millis(30));
+    }
 
     #[test]
     fn an_untouched_view_reads_once_then_only_on_change_or_running_work() {
