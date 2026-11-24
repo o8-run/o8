@@ -374,6 +374,11 @@ export function resetWarmReplPool(): void {
   turnWaiters.length = 0;
 }
 
+/** Warm processes alive now, idle or in a turn. */
+export function warmReplLiveProcs(): number {
+  return liveProcCount;
+}
+
 /** Test-only queue snapshot for deterministic admission assertions. */
 export function getWarmReplPoolTestState(): { activeTurns: number; queuedTurns: number } {
   return { activeTurns, queuedTurns: turnWaiters.length };

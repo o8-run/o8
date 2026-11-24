@@ -583,6 +583,11 @@ export function startRelayConnectorIfEnabled(
   }
 }
 
+/** Whether the off-network connector was started and not stopped. */
+export function relayConnectorRunning(): boolean {
+  return activeConnector !== null;
+}
+
 export function stopRelayConnector(): void {
   try {
     activeConnector?.stop();

@@ -90,6 +90,8 @@ import { resolveListenHost } from '@/lib/panel/listen-host';
 import { HEADLESS_LAUNCH_DEADLINE_MS } from '@/lib/orchestrator/headless-tick-deadline';
 import { recurring, startLedgerReporter } from '@/lib/background-work/ledger';
 import { noteActivity, noteClientMessage, noteRequest, startIdleGate } from '@/lib/background-work/idle-gate';
+import { sharedParkChecks } from '@/lib/background-work/park-checks';
+import { startParkReport } from '@/lib/background-work/park-report';
 import { hasOutstandingReview, laneBlockingIdle } from '@/lib/lane/outstanding-review';
 import { getOrCreateWsToken, wsTokenSource } from '@/lib/ws-auth';
 import { resolvePacketWorkerToken } from '@/lib/auth/packet-worker-token';
@@ -8637,6 +8639,13 @@ async function runStartupMaintenance() {
   // no client is active; any of those wakes them at once.
   startIdleGate({
     liveSessions: () => (orchestratorInflightAborts.size > 0 ? 'orchestrator turn in flight' : null) ?? laneBlockingIdle(),
+  });
+  // With O8_PARK_NODE=1 under the launcher, ask to be stopped once nothing needs Node.
+  startParkReport({
+    ...sharedParkChecks(),
+    turn: () => (orchestratorInflightAborts.size > 0 ? 'orchestrator turn in flight' : null),
+    terminals: () => ([...terminalAttachments.values()].some((attachment) => attachment.snapshotSource !== 'tmux')
+      ? 'terminal not backed by tmux' : null),
   });
   startPollingLoops();
   startBrowserDiscoveryRealtimeLoop();
