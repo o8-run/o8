@@ -26,18 +26,34 @@ process.stdout.write(JSON.stringify({ jobs: state.mode === 'empty' ? [] : [{
   const local = await import('../../../src/app/api/automations/route');
   const connected = await import('../../../src/app/api/automations/connected/route');
   let lists = 0;
+  let computer = 0;
+  let computerForeground: string | null = null;
   return { priority: 10, routes: {
     'GET /api/automations': local.GET,
     'GET /api/automations/connected': async request => {
       lists++;
       return connected.GET(request);
     },
+    // This Mac's jobs, in the production route's shape; the fixture counts reads and their marking.
+    'GET /api/automations/computer': async request => {
+      computer++;
+      computerForeground = request.headers.get('x-o8-foreground');
+      return Response.json({ ok: true, hiddenMacosJobs: 3, hiddenOpenApps: 1, collectedAt: Date.now(),
+        loginItems: { readable: false, note: 'fixture' }, jobs: [
+          { id: 'user:com.example.syncer', label: 'com.example.syncer', scope: 'user', program: '/opt/tools/bin/syncer',
+            plist: null, triggers: ['keep alive'], runsPerDay: 86400, loaded: true, running: true, pid: 812, runs: 3,
+            lastExit: null, disabled: false, maker: { kind: 'user', name: '/opt/tools/bin' } },
+          { id: 'cron:0:backup', label: 'backup', scope: 'cron', program: '/usr/local/bin/backup', plist: null,
+            triggers: ['cron 0 2 * * *'], runsPerDay: 1, loaded: null, running: false, pid: null, runs: null,
+            lastExit: null, disabled: false, maker: { kind: 'user', name: 'crontab' } },
+        ] });
+    },
     'GET /api/scheduled-fixture': async request => {
       const mode = request.nextUrl.searchParams.get('mode');
       if (mode && ['ok', 'fail', 'empty'].includes(mode)) {
         writeFileSync(join(root, 'scheduled-source.json'), JSON.stringify({ mode }));
       }
-      return Response.json({ lists });
+      return Response.json({ lists, computer, computerForeground });
     },
   } };
 }

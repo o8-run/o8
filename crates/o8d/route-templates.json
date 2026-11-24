@@ -6,6 +6,7 @@
   "/api/automations",
   "/api/automations/[id]",
   "/api/automations/[id]/run",
+  "/api/automations/computer",
   "/api/automations/connected",
   "/api/bots",
   "/api/bots/[id]/thread",
