@@ -131,6 +131,9 @@ class Handler(BaseHTTPRequestHandler):
    window=subprocess.Popen([os.environ['O8_NEXT_BIN'],'--enable-next','--app-shell','--server','http://127.0.0.1:'+str(http_port),'--shell-state',str(root/'next-shell.json')],stdin=subprocess.PIPE)
   (root/'shows').open('a').write('show\n')
   self.send_response(200); self.end_headers(); self.wfile.write(b'{}')
+# Listen before attaching as a producer, as the real server does: o8d may
+# send a request the moment the producer attaches.
+http=HTTPServer(('127.0.0.1',http_port),Handler)
 if front and os.environ.get('O8D_PRODUCER_SOCKET'):
  import socket,threading
  def attach():
@@ -166,7 +169,6 @@ if front and os.environ.get('O8_NEXT_WINDOW_CONTROL'):
    time.sleep(0.05)
   while True: time.sleep(1)
  threading.Thread(target=browse,daemon=True).start()
-http=HTTPServer(('127.0.0.1',http_port),Handler)
 if front and not api and (root/'crash-ws').exists():
  import threading
  threading.Timer(0.5,lambda:os._exit(17)).start()
