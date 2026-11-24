@@ -23,7 +23,6 @@
   "src/app/api/worktrees/retention-usage/route.test.ts": 3,
   "src/app/api/worktrees/route-real-path.test.ts": 8,
   "src/components/desktop/onboarding/onboarding-projects.test.ts": 2,
-  "src/components/desktop/repo-focus/tabs/chats/sections.test.ts": 2,
   "src/components/desktop/workspace-terminal/worker-activity.test.ts": 2,
   "src/components/desktop/workspace-terminal/worker-handback-real-path.test.ts": 6,
   "src/lib/acp/local-connection-integration.test.ts": 3,
