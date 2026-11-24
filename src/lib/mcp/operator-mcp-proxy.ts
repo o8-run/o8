@@ -44,6 +44,21 @@ function send(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
+// Starting an agent session sends these; none of them is work the server's
+// background loops need to wake for.
+const HANDSHAKE_METHODS = new Set([
+  'initialize', 'ping', 'tools/list', 'resources/list', 'resources/templates/list', 'prompts/list',
+]);
+
+/** True when every message only opens the session or lists what it offers. */
+export function isMcpHandshake(message: unknown): boolean {
+  const messages = Array.isArray(message) ? message : [message];
+  return messages.length > 0 && messages.every((item) => {
+    const method = item && typeof item === 'object' ? (item as { method?: unknown }).method : undefined;
+    return typeof method === 'string' && (HANDSHAKE_METHODS.has(method) || method.startsWith('notifications/'));
+  });
+}
+
 async function request(message: unknown): Promise<unknown> {
   const workerOnly = process.env.O8_DEVICE_WORKER_ONLY === '1';
   const token = workerOnly ? process.env.O8_WORKER_TOKEN : readTrimmed(join(getDataDir(), 'ws-token'));
@@ -59,6 +74,7 @@ async function request(message: unknown): Promise<unknown> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(process.env.O8_OPERATOR_MCP_PROFILE ? { 'x-o8-mcp-profile': process.env.O8_OPERATOR_MCP_PROFILE } : {}),
       ...modernMcpHeaders(message),
+      ...(isMcpHandshake(message) ? { 'x-o8-background': '1' } : {}),
     },
     body: JSON.stringify(withVisualizationContext(message, { repoPath: process.env.O8_VISUALIZATION_REPO_PATH,
       threadId: process.env.O8_VISUALIZATION_THREAD_ID })),
