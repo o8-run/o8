@@ -62,4 +62,3 @@ The operator must be able to glance at the system and answer:
 
 These statuses are encoded in:
 - `src/lib/fleet/types.ts`
-- demo data in `src/lib/demo/fleet.ts`

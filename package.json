@@ -37,7 +37,6 @@
     "smoke:qa": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx tests/qa-eval/smoke.ts",
     "validate:qa-cases": "tsx scripts/validate-qa-cases.ts",
     "smoke": "node scripts/smoke.mjs",
-    "seed:demo": "node scripts/seed-demo-state.mjs",
     "worker:build": "node scripts/build-worker.mjs",
     "worker:dev": "tsx scripts/worker/index.ts",
     "research:session": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 1",
