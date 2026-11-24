@@ -9,22 +9,8 @@ afterEach(() => {
 });
 
 describe('operator MCP process profiles', () => {
-  it('exposes only visible app-driving tools to the dogfood loop', () => {
-    const names = operatorToolsForProfile('dogfood').map((tool) => tool.name);
-
-    expect(names).toContain('o8_view_wait_for');
-    expect(names).toContain('o8_view_type');
-    expect(names).toContain('o8_view_click');
-    expect(names).toContain('o8_view_console_errors');
-    expect(names.every((name) => name.startsWith('o8_view_') || name === 'o8_result_page')).toBe(true);
-    expect(names).not.toContain('o8_task_create');
-    expect(names).not.toContain('create_mission');
-    expect(names).not.toContain('dispatch_mission');
-    expect(names).not.toContain('approve_and_merge');
-  });
-
   it('blocks a hidden tool even when a client calls it without discovery', async () => {
-    process.env.O8_OPERATOR_MCP_PROFILE = 'dogfood';
+    process.env.O8_OPERATOR_MCP_PROFILE = 'visualizations';
     const response = await handleOperatorMcpMessage({
       jsonrpc: '2.0',
       id: 7,
@@ -39,7 +25,7 @@ describe('operator MCP process profiles', () => {
         content: [{ type: 'text' }],
       },
     });
-    expect(JSON.stringify(response)).toContain('Tool unavailable in operator MCP profile dogfood');
+    expect(JSON.stringify(response)).toContain('Tool unavailable in operator MCP profile visualizations');
   });
 
   it('fails closed for an unknown explicit profile while preserving the normal default', () => {
@@ -48,7 +34,7 @@ describe('operator MCP process profiles', () => {
     expect(fullNames).toContain('o8_problem_list');
     expect(fullNames).toContain('o8_problem_get');
     expect(fullNames).toContain('o8_truth_query');
-    expect(operatorToolsForProfile('dogfood').map((tool) => tool.name)).not.toContain('o8_truth_query');
+    expect(fullNames.some((name) => name.startsWith('o8_view_'))).toBe(false);
     expect(operatorToolsForProfile('misspelled-dogfood')).toEqual([]);
   });
 
@@ -72,11 +58,11 @@ describe('operator MCP process profiles', () => {
     ];
     const fullTools = operatorToolsForProfile('full');
     const fullNames = fullTools.map((tool) => tool.name);
-    const dogfoodNames = operatorToolsForProfile('dogfood').map((tool) => tool.name);
+    const restrictedNames = operatorToolsForProfile('visualizations').map((tool) => tool.name);
 
     for (const name of harnessNames) {
       expect(fullNames).toContain(name);
-      expect(dogfoodNames).not.toContain(name);
+      expect(restrictedNames).not.toContain(name);
       expect(fullTools.find((tool) => tool.name === name)?.inputSchema).toMatchObject({
         type: 'object',
         additionalProperties: false,
@@ -94,7 +80,7 @@ describe('operator MCP process profiles', () => {
       'o8_lease_list',
     ];
     const fullTools = operatorToolsForProfile('full');
-    const dogfoodNames = operatorToolsForProfile('dogfood').map((tool) => tool.name);
+    const restrictedNames = operatorToolsForProfile('visualizations').map((tool) => tool.name);
     for (const name of leaseNames) {
       expect(fullTools.find((tool) => tool.name === name)?.inputSchema).toMatchObject({
         type: 'object',
@@ -102,20 +88,20 @@ describe('operator MCP process profiles', () => {
         properties: expect.any(Object),
         required: expect.any(Array),
       });
-      expect(dogfoodNames).not.toContain(name);
+      expect(restrictedNames).not.toContain(name);
     }
   });
 
   it('publishes strict Broadcast tools only in the full profile', () => {
     const fullTools = operatorToolsForProfile('full');
-    const dogfoodNames = operatorToolsForProfile('dogfood').map((tool) => tool.name);
+    const restrictedNames = operatorToolsForProfile('visualizations').map((tool) => tool.name);
     expect(fullTools.find((tool) => tool.name === 'o8_broadcast_token')?.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
       properties: expect.any(Object),
       required: ['action'],
     });
-    expect(dogfoodNames).not.toContain('o8_broadcast_token');
+    expect(restrictedNames).not.toContain('o8_broadcast_token');
     expect(fullTools.find((tool) => tool.name === 'o8_broadcast_post')?.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
@@ -126,13 +112,13 @@ describe('operator MCP process profiles', () => {
       },
       required: ['kind'],
     });
-    expect(dogfoodNames).not.toContain('o8_broadcast_post');
+    expect(restrictedNames).not.toContain('o8_broadcast_post');
     expect(fullTools.find((tool) => tool.name === 'o8_broadcast_say')?.inputSchema).toMatchObject({
       type: 'object',
       additionalProperties: false,
       properties: { text: { maxLength: 2000 } },
       required: ['text'],
     });
-    expect(dogfoodNames).not.toContain('o8_broadcast_say');
+    expect(restrictedNames).not.toContain('o8_broadcast_say');
   });
 });

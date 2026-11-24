@@ -145,7 +145,6 @@ When changing scope during a request, discard the old response by generation
 and identity. Clear an out-of-scope detail rather than opening a similarly
 named row. A navigation receipt is successful only after the intended native
 control is mounted and selectable; a queued navigation intent is not proof.
-The classic [navigation contract][classic-navigation] provides the reference.
 
 ## Existing data contracts
 
@@ -266,7 +265,6 @@ the behavior they add.
 [classic-evidence]: ../../src/components/desktop/o8-panel/useThreadEvidence.ts
 [classic-actions]: ../../src/components/desktop/o8-panel/ThreadActions.tsx
 [classic-exchanges]: ../../src/components/desktop/O8HandoffsPane.tsx
-[classic-navigation]: ../../src/components/desktop/o8-panel/thread-navigation.ts
 [classic-repos]: ../../src/components/desktop/o8-panel/useThreadRepos.ts
 [thread-route]: ../../src/app/api/panel/threads/route.ts
 [thread-reader]: ../../src/lib/threads/project.ts

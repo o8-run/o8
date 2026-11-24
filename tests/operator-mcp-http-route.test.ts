@@ -52,7 +52,6 @@ describe('/api/mcp — real operator host reachability', () => {
       'o8_set_project_repos',
       'o8_delete_project',
       'approve_and_merge',
-      'o8_view_surface_state',
       'o8_spec_reply',
     ]));
     for (const tool of listBody.result.tools) {

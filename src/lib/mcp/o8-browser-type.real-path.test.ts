@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
-import { createO8WebviewToolHandlers } from './o8-webview-tools';
+import { createO8WebviewBrowserHandlers } from './o8-webview-browser-tools';
 
 const transport = vi.hoisted(() => ({ evalJs: vi.fn() }));
 vi.mock('./o8-webview-client', () => ({ O8WebviewClient: class { evalJs = transport.evalJs; } }));
@@ -16,7 +16,7 @@ const { POST } = await import('@/app/api/browser/agent/route');
 let root: Root | null = null;
 let page: Document;
 let events: Array<{ type: string; value: string }>;
-const handler = createO8WebviewToolHandlers(() => { throw new Error('Browser typing uses its HTTP entry point'); }).o8_browser_type;
+const handler = createO8WebviewBrowserHandlers().o8_browser_type;
 
 function ControlledField({ multiline }: { multiline: boolean }) {
   const [value, setValue] = useState('original value');

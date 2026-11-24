@@ -22,7 +22,6 @@ escaped source characters and format slots make them conservative source estimat
 | [scripts/bench/coding-prompts.ts](../../scripts/bench/coding-prompts.ts) | JUDGE_PROMPT | Model input and output contract | 306 | 306 | 1 |
 | [scripts/bench/judge-coding-end-to-end.ts](../../scripts/bench/judge-coding-end-to-end.ts) | prompt | Model input and output contract | 39 | 39 | 5 |
 | [scripts/bench/run-coding-end-to-end.ts](../../scripts/bench/run-coding-end-to-end.ts) | prompt | Model input and output contract | 2 | 2 | 2 |
-| [scripts/dogfood/prompt.md](../../scripts/dogfood/prompt.md) | asset | Model input and output contract | 1164 | 1184 | 0 |
 | [scripts/eval-o8-model.mjs](../../scripts/eval-o8-model.mjs) | messages:message | Model input and output contract | 1 | 1 | 2 |
 | [scripts/eval-o8-model.mjs](../../scripts/eval-o8-model.mjs) | O8_PRODUCTION_HIGH_PROMPT | Model input and output contract | 502 | 502 | 0 |
 | [scripts/eval-o8-model.mjs](../../scripts/eval-o8-model.mjs) | ROUND2_TUNED_V2_PROMPT | Model input and output contract | 813 | 813 | 0 |
@@ -309,29 +308,16 @@ escaped source characters and format slots make them conservative source estimat
 | [src-tauri/src/screen_localization.rs](../../src-tauri/src/screen_localization.rs) | catalog_prompt | Model input and output contract | 97 | 97 | 0 |
 | [src-tauri/src/stt/polish/prompt.rs](../../src-tauri/src/stt/polish/prompt.rs) | build_prompt | Model input and output contract | 2024 | 2024 | 0 |
 | [src/app/api/canvas/intent/route.ts](../../src/app/api/canvas/intent/route.ts) | { POST: spawnPrompt } | Model input and output contract | 11 | 11 | 0 |
-| [src/app/api/mobile/enhance/route.ts](../../src/app/api/mobile/enhance/route.ts) | SYSTEM_PROMPT | Model input and output contract | 171 | 171 | 0 |
 | [src/app/api/mobile/ripple/resolve/route.ts](../../src/app/api/mobile/ripple/resolve/route.ts) | prompt:message | Model input and output contract | 209 | 209 | 0 |
 | [src/app/api/orchestrator/delegate/route.ts](../../src/app/api/orchestrator/delegate/route.ts) | governedLaunchPrompt | Worker scope, launch and completion | 25 | 25 | 2 |
-| [src/app/api/orchestrator/visual-inspection/route.ts](../../src/app/api/orchestrator/visual-inspection/route.ts) | questions:message | Orchestration and tool authority | 129 | 129 | 0 |
 | [src/app/api/panel/issues/enhance/route.ts](../../src/app/api/panel/issues/enhance/route.ts) | systemPrompt | Model input and output contract | 258 | 258 | 2 |
 | [src/app/api/panel/o8-mission-summary/route.ts](../../src/app/api/panel/o8-mission-summary/route.ts) | messages:message | Model input and output contract | 118 | 118 | 0 |
-| [src/app/api/panel/o8-scratch-chat/route.ts](../../src/app/api/panel/o8-scratch-chat/route.ts) | stream:message | Model input and output contract | 41 | 41 | 1 |
 | [src/app/api/v2/proxy/cli/route.ts](../../src/app/api/v2/proxy/cli/route.ts) | buildPrompt | Model input and output contract | 13 | 13 | 3 |
 | [src/app/api/v2/proxy/llm/route.ts](../../src/app/api/v2/proxy/llm/route.ts) | systemPrompt | Model input and output contract | 35 | 35 | 0 |
 | [src/app/dashboard/page.tsx](../../src/app/dashboard/page.tsx) | mobilePromptBody | Model input and output contract | 44 | 44 | 1 |
 | [src/app/dashboard/page.tsx](../../src/app/dashboard/page.tsx) | prompt | Model input and output contract | 327 | 327 | 10 |
-| [src/app/preview/canvas-glass/use-canvas-quick-actions.tsx](../../src/app/preview/canvas-glass/use-canvas-quick-actions.tsx) | CLEAR_THREAD_PROMPT | Independent review and evidence | 18 | 18 | 0 |
-| [src/components/desktop/agent-panel/useAgentPanelState.ts](../../src/components/desktop/agent-panel/useAgentPanelState.ts) | prompt | Model input and output contract | 95 | 95 | 8 |
-| [src/components/desktop/dictation/SymonCapabilitiesPanel.tsx](../../src/components/desktop/dictation/SymonCapabilitiesPanel.tsx) | runPrompt | Model input and output contract | 16 | 16 | 0 |
-| [src/components/desktop/FileViewer.tsx](../../src/components/desktop/FileViewer.tsx) | systemPrompt | Model input and output contract | 64 | 64 | 0 |
 | [src/components/desktop/llm-chat/shared.ts](../../src/components/desktop/llm-chat/shared.ts) | SUGGESTED_PROMPTS | Model input and output contract | 96 | 96 | 0 |
 | [src/components/desktop/llm-chat/streaming.ts](../../src/components/desktop/llm-chat/streaming.ts) | response:message | Model input and output contract | 62 | 62 | 0 |
-| [src/components/desktop/o8-panel/devices/DeviceAgentControls.tsx](../../src/components/desktop/o8-panel/devices/DeviceAgentControls.tsx) | instructions | Model input and output contract | 174 | 174 | 2 |
-| [src/components/desktop/o8-panel/O8SpecEditor.tsx](../../src/components/desktop/o8-panel/O8SpecEditor.tsx) | prompt | Model input and output contract | 100 | 100 | 2 |
-| [src/components/desktop/thoughts/ThoughtsChatPanel.tsx](../../src/components/desktop/thoughts/ThoughtsChatPanel.tsx) | prompt | Model input and output contract | 19 | 19 | 1 |
-| [src/components/desktop/workspace-terminal/ChatGPTPlanChatView.tsx](../../src/components/desktop/workspace-terminal/ChatGPTPlanChatView.tsx) | prompts | Model input and output contract | 66 | 66 | 0 |
-| [src/components/desktop/workspace-terminal/constants.ts](../../src/components/desktop/workspace-terminal/constants.ts) | CLI_SUGGESTED_PROMPTS | Model input and output contract | 95 | 95 | 0 |
-| [src/components/desktop/workspace-terminal/SubagentDemoPanel.tsx](../../src/components/desktop/workspace-terminal/SubagentDemoPanel.tsx) | firstPrompt | Model input and output contract | 25 | 25 | 0 |
 | [src/lib/broadcast/commentary-prompt.ts](../../src/lib/broadcast/commentary-prompt.ts) | buildBroadcastCommentaryPrompt | Model input and output contract | 280 | 280 | 0 |
 | [src/lib/chat/compaction.ts](../../src/lib/chat/compaction.ts) | compactionMessage:message | Chat compression | 11 | 11 | 1 |
 | [src/lib/chat/compaction.ts](../../src/lib/chat/compaction.ts) | compactionPrompt | Chat compression | 220 | 220 | 1 |
@@ -339,7 +325,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/chat/gateway-client.ts](../../src/lib/chat/gateway-client.ts) | toModelMessages:message | Model input and output contract | 25 | 25 | 0 |
 | [src/lib/ci-repair/prompt.ts](../../src/lib/ci-repair/prompt.ts) | instructions | Check repair | 84 | 84 | 3 |
 | [src/lib/ci-repair/prompt.ts](../../src/lib/ci-repair/prompt.ts) | prompt | Check repair | 0 | 0 | 3 |
-| [src/lib/connectors/chatgpt/profile.ts](../../src/lib/connectors/chatgpt/profile.ts) | buildLLMEnrichmentPrompt | Model input and output contract | 164 | 164 | 10 |
 | [src/lib/cortex/qa/classifier.ts](../../src/lib/cortex/qa/classifier.ts) | CLASSIFIER_PROMPT | Retrieval, classification and grounding | 133 | 133 | 0 |
 | [src/lib/cortex/qa/classifier.ts](../../src/lib/cortex/qa/classifier.ts) | prompt | Retrieval, classification and grounding | 6 | 6 | 4 |
 | [src/lib/cortex/qa/compose-connected.ts](../../src/lib/cortex/qa/compose-connected.ts) | prompt | Retrieval, classification and grounding | 1 | 1 | 2 |
@@ -415,37 +400,12 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/cortex-worker-tools.ts](../../src/lib/mcp/cortex-worker-tools.ts) | tool:cortex_shared_team_status | Tool selection, arguments and authority | 72 | 72 | 0 |
 | [src/lib/mcp/cortex-worker-tools.ts](../../src/lib/mcp/cortex-worker-tools.ts) | tool:cortex_wait_workers | Tool selection, arguments and authority | 153 | 153 | 0 |
 | [src/lib/mcp/cortex-worker-tools.ts](../../src/lib/mcp/cortex-worker-tools.ts) | tool:cortex_worker_catalog | Tool selection, arguments and authority | 83 | 83 | 0 |
-| [src/lib/mcp/o8-composer-image-tools.ts](../../src/lib/mcp/o8-composer-image-tools.ts) | tool-schema-descriptions | Tool selection, arguments and authority | 49 | 49 | 0 |
-| [src/lib/mcp/o8-composer-image-tools.ts](../../src/lib/mcp/o8-composer-image-tools.ts) | tool:o8_view_attach_image | Tool selection, arguments and authority | 162 | 162 | 0 |
-| [src/lib/mcp/o8-composer-image-tools.ts](../../src/lib/mcp/o8-composer-image-tools.ts) | tool:o8_view_image_attachment_status | Tool selection, arguments and authority | 70 | 70 | 0 |
-| [src/lib/mcp/o8-composer-image-tools.ts](../../src/lib/mcp/o8-composer-image-tools.ts) | tool:o8_view_inspect_composer | Tool selection, arguments and authority | 48 | 48 | 0 |
-| [src/lib/mcp/o8-directory-dialog-tools.ts](../../src/lib/mcp/o8-directory-dialog-tools.ts) | tool:o8_view_inspect_directory_dialog | Tool selection, arguments and authority | 57 | 57 | 0 |
-| [src/lib/mcp/o8-directory-dialog-tools.ts](../../src/lib/mcp/o8-directory-dialog-tools.ts) | tool:o8_view_resolve_directory_dialog | Tool selection, arguments and authority | 142 | 142 | 0 |
-| [src/lib/mcp/o8-saved-image-tools.ts](../../src/lib/mcp/o8-saved-image-tools.ts) | tool:o8_view_hard_reload | Tool selection, arguments and authority | 108 | 108 | 0 |
-| [src/lib/mcp/o8-saved-image-tools.ts](../../src/lib/mcp/o8-saved-image-tools.ts) | tool:o8_view_saved_image | Tool selection, arguments and authority | 87 | 87 | 0 |
-| [src/lib/mcp/o8-thread-navigation-tools.ts](../../src/lib/mcp/o8-thread-navigation-tools.ts) | tool:o8_view_open_thread | Tool selection, arguments and authority | 187 | 187 | 0 |
 | [src/lib/mcp/o8-webview-browser-tools.ts](../../src/lib/mcp/o8-webview-browser-tools.ts) | tool:o8_browser_click | Tool selection, arguments and authority | 92 | 92 | 0 |
 | [src/lib/mcp/o8-webview-browser-tools.ts](../../src/lib/mcp/o8-webview-browser-tools.ts) | tool:o8_browser_grab | Tool selection, arguments and authority | 164 | 164 | 0 |
 | [src/lib/mcp/o8-webview-browser-tools.ts](../../src/lib/mcp/o8-webview-browser-tools.ts) | tool:o8_browser_read | Tool selection, arguments and authority | 170 | 170 | 0 |
 | [src/lib/mcp/o8-webview-browser-tools.ts](../../src/lib/mcp/o8-webview-browser-tools.ts) | tool:o8_browser_rect | Tool selection, arguments and authority | 96 | 96 | 0 |
 | [src/lib/mcp/o8-webview-browser-tools.ts](../../src/lib/mcp/o8-webview-browser-tools.ts) | tool:o8_browser_type | Tool selection, arguments and authority | 115 | 115 | 0 |
 | [src/lib/mcp/o8-webview-browser-tools.ts](../../src/lib/mcp/o8-webview-browser-tools.ts) | tool:o8_browser_wait | Tool selection, arguments and authority | 102 | 102 | 0 |
-| [src/lib/mcp/o8-webview-composites.ts](../../src/lib/mcp/o8-webview-composites.ts) | tool:o8_view_new_orchestrator_session | Tool selection, arguments and authority | 104 | 104 | 0 |
-| [src/lib/mcp/o8-webview-composites.ts](../../src/lib/mcp/o8-webview-composites.ts) | tool:o8_view_pick_menu_option | Tool selection, arguments and authority | 72 | 72 | 0 |
-| [src/lib/mcp/o8-webview-composites.ts](../../src/lib/mcp/o8-webview-composites.ts) | tool:o8_view_surface_state | Tool selection, arguments and authority | 51 | 51 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_click | Tool selection, arguments and authority | 226 | 226 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_eval | Tool selection, arguments and authority | 173 | 173 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_manage_window | Tool selection, arguments and authority | 81 | 81 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_navigate | Tool selection, arguments and authority | 93 | 93 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_open_browser | Tool selection, arguments and authority | 147 | 147 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_press_key | Tool selection, arguments and authority | 103 | 103 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_read | Tool selection, arguments and authority | 63 | 63 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_screenshot | Tool selection, arguments and authority | 68 | 68 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_scroll | Tool selection, arguments and authority | 93 | 93 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_snapshot | Tool selection, arguments and authority | 62 | 62 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_type | Tool selection, arguments and authority | 61 | 61 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_wait_for | Tool selection, arguments and authority | 108 | 108 | 0 |
-| [src/lib/mcp/o8-webview-tool-catalog.ts](../../src/lib/mcp/o8-webview-tool-catalog.ts) | tool:o8_view_windows | Tool selection, arguments and authority | 108 | 108 | 0 |
 | [src/lib/mcp/operator-handlers/agents.ts](../../src/lib/mcp/operator-handlers/agents.ts) | tool:o8_msg_agents | Tool selection, arguments and authority | 23 | 23 | 0 |
 | [src/lib/mcp/operator-handlers/agents.ts](../../src/lib/mcp/operator-handlers/agents.ts) | tool:o8_msg_inbox | Tool selection, arguments and authority | 31 | 31 | 0 |
 | [src/lib/mcp/operator-handlers/agents.ts](../../src/lib/mcp/operator-handlers/agents.ts) | tool:o8_msg_send | Tool selection, arguments and authority | 85 | 85 | 0 |
@@ -590,7 +550,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/orchestrator/project-verification-prompt.ts](../../src/lib/orchestrator/project-verification-prompt.ts) | buildProjectVerificationPrompt | Orchestration and tool authority | 212 | 212 | 0 |
 | [src/lib/orchestrator/project-verification-prompt.ts](../../src/lib/orchestrator/project-verification-prompt.ts) | projectGuidance | Orchestration and tool authority | 302 | 302 | 0 |
 | [src/lib/orchestrator/quality-search.ts](../../src/lib/orchestrator/quality-search.ts) | buildQualitySearchRolePrompt | Orchestration and tool authority | 186 | 186 | 0 |
-| [src/lib/orchestrator/quick-actions.ts](../../src/lib/orchestrator/quick-actions.ts) | QUICK_ACTIONS:message | Orchestration and tool authority | 110 | 110 | 0 |
 | [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildPacketCompletionInstructions | Independent review and evidence | 0 | 136 | 0 |
 | [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildPacketSelfReviewInstructions | Independent review and evidence | 573 | 516 | 3 |
 | [src/lib/orchestrator/self-review.ts](../../src/lib/orchestrator/self-review.ts) | buildReadOnlyPacketSelfReviewInstructions | Independent review and evidence | 226 | 226 | 2 |
@@ -621,15 +580,9 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/review/architecture-attention.ts](../../src/lib/review/architecture-attention.ts) | questionsFor:message | Architecture review ordering | 89 | 89 | 2 |
 | [src/lib/runtime/project-launch-brief.ts](../../src/lib/runtime/project-launch-brief.ts) | buildLaunchPromptWithProjectBrief | Model input and output contract | 16 | 16 | 0 |
 | [src/lib/settings/credential-safe-url.ts](../../src/lib/settings/credential-safe-url.ts) | AUTHENTICATED_ENDPOINT_GUIDANCE | Model input and output contract | 17 | 17 | 0 |
-| [src/lib/slash-commands/focus.ts](../../src/lib/slash-commands/focus.ts) | preludeSections | Model input and output contract | 12 | 12 | 1 |
-| [src/lib/slash-commands/handoff.ts](../../src/lib/slash-commands/handoff.ts) | resumePrelude | Continuation and retained context | 38 | 38 | 0 |
-| [src/lib/slash-commands/orchestrate.ts](../../src/lib/slash-commands/orchestrate.ts) | buildSlashOrchestrationPrompt | Model input and output contract | 488 | 488 | 5 |
-| [src/lib/slash-commands/shared.ts](../../src/lib/slash-commands/shared.ts) | buildRecallPrelude | Model input and output contract | 35 | 35 | 3 |
 | [src/lib/supervisor/heal-bot.ts](../../src/lib/supervisor/heal-bot.ts) | buildHealPrompt | Model input and output contract | 77 | 77 | 11 |
 | [src/lib/supervisor/heal-bot.ts](../../src/lib/supervisor/heal-bot.ts) | fullPrompt | Model input and output contract | 1 | 1 | 2 |
 | [src/lib/supervisor/heal-bot.ts](../../src/lib/supervisor/heal-bot.ts) | HEAL_BOT_SYSTEM_PROMPT | Model input and output contract | 76 | 76 | 0 |
 | [src/lib/targeting/rationale.ts](../../src/lib/targeting/rationale.ts) | buildBatchPrompt | Model input and output contract | 142 | 142 | 8 |
 | [src/lib/tasks/actions.ts](../../src/lib/tasks/actions.ts) | buildDispatchPrompt | Worker scope, launch and completion | 62 | 62 | 6 |
 | [src/lib/visualizations/orchestrator-prompt.ts](../../src/lib/visualizations/orchestrator-prompt.ts) | withVisualizationInstructions | Orchestration and tool authority | 332 | 332 | 1 |
-| [src/lib/voice/managed-live/byok-request.ts](../../src/lib/voice/managed-live/byok-request.ts) | instructions | Model input and output contract | 264 | 264 | 0 |
-| [src/lib/voice/managed-live/byok-request.ts](../../src/lib/voice/managed-live/byok-request.ts) | response:message | Model input and output contract | 7 | 7 | 2 |

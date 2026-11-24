@@ -13,7 +13,7 @@ const extraBuilders = new Set(['appendFeedback', 'renderReadBudgetSections', 're
 const nativeBuilders = new Set(['catalog_block', 'escalate_block', 'tool_lookup_message', 'lookup_budget_spent_message', 'conversation_context', 'text_tool_result_message']);
 const assets = new Set([
   'src/lib/lane/orchestrator.md', 'src/lib/prompts/v1/symon-native-system.txt',
-  'src/lib/dispatch/prompts/decompose.md', 'scripts/dogfood/prompt.md', '.claude/agents/reviewer.md',
+  'src/lib/dispatch/prompts/decompose.md', '.claude/agents/reviewer.md',
 ]);
 // Inline model messages whose enclosing function does not have a prompt name.
 const inlineSources = new Map([

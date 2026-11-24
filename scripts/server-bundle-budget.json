@@ -169,7 +169,6 @@
     "shared:common:src/lib/codex/service-tier-catalogue.ts": 4684,
     "shared:common:src/lib/codex/session-transforms.ts": 26901,
     "shared:common:src/lib/command-center/snapshot.ts": 29230,
-    "shared:common:src/lib/composer/image-attachment.ts": 39686,
     "shared:common:src/lib/connect/attach-settings.ts": 1433,
     "shared:common:src/lib/connect/machine-registry.ts": 4500,
     "shared:common:src/lib/connect/web-machine-surface.ts": 585,

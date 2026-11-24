@@ -594,12 +594,6 @@
       ]
     },
     {
-      "path": "src/lib/mcp/o8-directory-dialog-agent.test.ts",
-      "reasons": [
-        "network-listener"
-      ]
-    },
-    {
       "path": "src/lib/mcp/operator-handlers/mission-inline-issues.test.ts",
       "reasons": [
         "child-process",
@@ -1593,13 +1587,6 @@
       "reasons": [
         "child-process",
         "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/agent-input-socket-real-path.test.ts",
-      "reasons": [
-        "network-listener",
         "real-path"
       ]
     },
@@ -2662,13 +2649,6 @@
       ]
     },
     {
-      "path": "tests/composer-image-operator-real-path.test.ts",
-      "reasons": [
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/composer-missing-session-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3200,15 +3180,6 @@
       ]
     },
     {
-      "path": "tests/dogfood-loop-wrapper.test.ts",
-      "reasons": [
-        "child-process",
-        "executable-fixture",
-        "git-cli",
-        "process-signal"
-      ]
-    },
-    {
       "path": "tests/durable-review-uncommitted-edits-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -3676,13 +3647,6 @@
       "reasons": [
         "child-process",
         "git-cli",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/http-mcp-webview-real-path.test.ts",
-      "reasons": [
-        "network-listener",
         "real-path"
       ]
     },

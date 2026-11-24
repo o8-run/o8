@@ -13,8 +13,7 @@ import { SETUP_TOOLS, handleSetup } from '@/lib/mcp/operator-handlers/setup';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
-import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
-import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
+import { createO8WebviewBrowserHandlers, O8_WEBVIEW_BROWSER_TOOLS } from '@/lib/mcp/o8-webview-browser-tools';
 import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview, handleReject } from '@/lib/mcp/operator-handlers/approve';
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageAgents, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
@@ -205,26 +204,6 @@ function readKnownRepos(): string[] {
   }
 }
 
-let o8WebviewClient: O8WebviewClient | null = null;
-
-function getO8WebviewClient(): O8WebviewClient {
-  if (!o8WebviewClient) o8WebviewClient = new O8WebviewClient();
-  return o8WebviewClient;
-}
-
-const LOOP_OBSERVABILITY_TOOLS: McpTool[] = [
-  {
-    name: 'o8_view_console_errors',
-    description: 'Returns runtime errors captured by o8\'s Rust-side ring buffer (window.onerror, unhandledrejection, console.error). Survives a busy JS thread because the buffer is populated as errors fire, not on read. Returns { errors, count, sinceLastFetch }; sinceLastFetch resets on each call.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'o8_view_active_route',
-    description: 'Returns the main webview\'s current URL parts ({ pathname, search, hash, routerState }) by querying webview.url() on the Rust side. Use after o8_view_navigate to confirm the route landed without taking a screenshot. routerState is null for now; defer until we wire a Next.js segment reader.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-];
-
 const USER_CONTEXT_TOOLS: McpTool[] = [
   {
     name: 'o8_user_context',
@@ -232,49 +211,6 @@ const USER_CONTEXT_TOOLS: McpTool[] = [
     inputSchema: { type: 'object', properties: {} },
   },
 ];
-
-async function invokeTauriCommandFromWebview<T>(command: string): Promise<T> {
-  const code = `(() => { try {
-    if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== 'function') {
-      return JSON.stringify({ ok: false, err: 'tauri internals unavailable' });
-    }
-    return window.__TAURI_INTERNALS__.invoke(${JSON.stringify(command)})
-      .then((r) => JSON.stringify({ ok: true, data: r }))
-      .catch((e) => JSON.stringify({ ok: false, err: String(e && e.message || e) }));
-  } catch (e) { return JSON.stringify({ ok: false, err: String(e && e.message || e) }); } })()`;
-
-  const { result } = await getO8WebviewClient().evalJs(code);
-  let parsed: unknown = result;
-  try {
-    parsed = JSON.parse(result);
-  } catch {
-    throw new Error(`tauri invoke '${command}' returned non-JSON: ${String(result).slice(0, 200)}`);
-  }
-  if (typeof parsed === 'string') {
-    try { parsed = JSON.parse(parsed); } catch { /* leave as is */ }
-  }
-  const envelope = parsed as { ok: boolean; data?: unknown; err?: string };
-  if (!envelope || envelope.ok !== true) throw new Error(envelope?.err || `tauri invoke '${command}' failed`);
-  return envelope.data as T;
-}
-
-async function handleConsoleErrors(): Promise<McpToolResult> {
-  try {
-    const data = await invokeTauriCommandFromWebview('o8_view_console_errors');
-    return textResult(JSON.stringify(data));
-  } catch (error) {
-    return textResult(JSON.stringify({ ok: false, error: safeErrorText(error) }), true);
-  }
-}
-
-async function handleActiveRoute(): Promise<McpToolResult> {
-  try {
-    const data = await invokeTauriCommandFromWebview('o8_view_active_route');
-    return textResult(JSON.stringify(data));
-  } catch (error) {
-    return textResult(JSON.stringify({ ok: false, error: safeErrorText(error) }), true);
-  }
-}
 
 async function handleUserContext(): Promise<McpToolResult> {
   let username = process.env.USER || '';
@@ -309,12 +245,11 @@ const TOOLS: McpTool[] = [
   ...AGENT_MESSAGE_TOOLS,
   ...BROADCAST_TOOLS,
   ...UPDATE_TOOLS,
-  ...O8_WEBVIEW_TOOLS,
+  ...O8_WEBVIEW_BROWSER_TOOLS,
   ...DEVICE_TOOLS,
   ...CANVAS_TOOLS,
   ...TASK_ARTIFACT_TOOLS,
   ...VISUALIZATION_TOOLS,
-  ...LOOP_OBSERVABILITY_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'create_mission'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'dispatch_mission'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'get_mission_status'),
@@ -349,23 +284,9 @@ const TOOLS: McpTool[] = [
   ...MISSION_TOOLS.filter((tool) => tool.name === 'report_packet_event'),
 ];
 
-/**
- * The autonomous dogfood process is an external Claude client that needs the
- * installed app as its hands and eyes, not a second control plane. Its launcher
- * sets this process-local profile so task creation, dispatch, approvals, merge,
- * and every non-webview MCP verb are absent from both discovery and execution.
- * The default remains the complete operator surface for normal clients.
- */
-const DOGFOOD_TOOL_NAMES = new Set([
-  ...O8_WEBVIEW_TOOLS.filter((tool) => tool.name.startsWith('o8_view_')).map((tool) => tool.name),
-  'o8_view_console_errors',
-  'o8_view_active_route',
-]);
-
 export function operatorToolsForProfile(profile = process.env.O8_OPERATOR_MCP_PROFILE): McpTool[] {
   let tools: McpTool[];
   if (!profile || profile === 'full') tools = TOOLS;
-  else if (profile === 'dogfood') tools = TOOLS.filter((tool) => DOGFOOD_TOOL_NAMES.has(tool.name));
   else if (profile === 'visualizations') tools = VISUALIZATION_TOOLS;
   else if (profile === 'devices') tools = DEVICE_TOOLS;
   // An explicitly requested but unknown profile fails closed. A typo in a
@@ -441,9 +362,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_set_project_repos: handleSetProjectRepos,
   o8_delete_project: handleDeleteProject,
   o8_scaffold: handleScaffold,
-  ...createO8WebviewToolHandlers(getO8WebviewClient),
-  o8_view_console_errors: handleConsoleErrors,
-  o8_view_active_route: handleActiveRoute,
+  ...createO8WebviewBrowserHandlers(),
   o8_canvas: handleCanvas,
   o8_render: handleRender,
   o8_task_artifact: handleTaskArtifact,

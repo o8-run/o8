@@ -24,7 +24,7 @@ const root = mkdtempSync(join(tmpdir(), 'o8-http-boundary-'));
 const bearer = randomUUID();
 const nativeToken = randomUUID();
 const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\o8-http-boundary-${randomUUID()}` : join(root, 'native.sock');
-const nativeState = { boundaryCount: 0 };
+const nativeState = {};
 const sockets = new Set<Socket>();
 let child: ChildProcess;
 let noUpgradeChild: ChildProcess;
@@ -274,7 +274,7 @@ it.each([false, true])('refuses an absolute-form upgrade authority with an allow
 });
 
 const call = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
-  name: 'o8_view_eval', arguments: { code: 'globalThis.boundaryCount += 1; globalThis.boundaryCount' },
+  name: 'o8_user_context', arguments: {},
 } });
 
 it.each(['untrusted.invalid', 'sub.localhost', 'localhost.untrusted.invalid', '127.0.0.1.untrusted.invalid', 'localhost.', 'localhost:1', '[::1]:1', 'localhost:123:456', 'localhost:123@untrusted.invalid'])('refuses unapproved Host %s before any app handler', async host => {
@@ -339,11 +339,10 @@ it('refuses foreign and null-Origin writes across the discovered app paths over 
 it('retains authenticated native and same-origin browser MCP calls', async () => {
   const callers: Record<string, string>[] = [{}, { origin: `http://127.0.0.1:${port}`, 'sec-fetch-site': 'same-origin' }, { origin: 'tauri://localhost' }];
   for (const headers of callers) {
-    const before = nativeState.boundaryCount;
     const response = await request(`127.0.0.1:${port}`, '/api/mcp', { method: 'POST', headers: {
       authorization: `Bearer ${bearer}`, 'content-type': 'application/json', ...headers,
     }, body: call });
-    expect(response.status).toBe(200); expect(nativeState.boundaryCount).toBe(before + 1);
+    expect(response.status).toBe(200); expect(response.body).toContain('knownRepos');
   }
 });
 
@@ -351,12 +350,11 @@ it('preserves the relay-forward marker and keeps its page free of the bearer', a
   const response = await request(`127.0.0.1:${port}`, '/voice-host', { headers: { 'x-o8-relay-forward': '1', 'x-o8-relay-surface': 'web-machine' } });
   expect(response.status).toBe(200); expect(response.body.includes(bearer)).toBe(false);
   expect(response.body.includes('web-machine')).toBe(true);
-  const before = nativeState.boundaryCount;
   const forwarded = await request(`127.0.0.1:${port}`, '/api/mcp', { method: 'POST', headers: {
     authorization: `Bearer ${bearer}`, 'x-o8-relay-forward': '1', 'content-type': 'application/json',
     'sec-fetch-mode': 'cors', 'user-agent': 'node',
   }, body: call });
-  expect(forwarded.status).toBe(200); expect(nativeState.boundaryCount).toBe(before + 1);
+  expect(forwarded.status).toBe(200); expect(forwarded.body).toContain('knownRepos');
 });
 
 it('checks Host and browser origins in middleware even without the wrapper', async () => {

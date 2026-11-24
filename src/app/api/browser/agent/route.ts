@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveRequestPrincipalContext, workerPacketRefusal } from '@/lib/auth/principal';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
-import { browserAgentEval, nativeReturnEval } from '@/lib/mcp/o8-webview-tools';
+import { browserAgentEval, nativeReturnEval } from '@/lib/mcp/o8-browser-agent-eval';
 import { getBrowserEngine } from '@/lib/browser-engine/engine';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
