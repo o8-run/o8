@@ -9,6 +9,7 @@ import {
   persistManualAutomationFire,
 } from '@/lib/automations/fire-store';
 import { runClaimedAutomationFire } from '@/lib/automations/fire-runner';
+import { signalAutomationsChanged } from '@/lib/automations/scheduler-signal';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 
@@ -46,6 +47,8 @@ export async function runManualAutomationRequest(request: Request, ctx: { params
     fireId: fire.id,
   });
   if (!claimed) {
+    // Queued behind the concurrency cap: the scheduler claims it once a slot frees.
+    signalAutomationsChanged();
     return NextResponse.json({
       ok: true,
       fire: getAutomationFire(fire.id),

@@ -14,6 +14,7 @@ import { automations } from '@/lib/db/schema';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
 import { automationApiRecord } from '@/lib/automations/api-shape';
 import { updateAutomationRow } from '@/lib/automations/store';
+import { signalAutomationsChanged } from '@/lib/automations/scheduler-signal';
 import {
   ingestLaneAutomationSourceEvents,
   latestAutomationSourceSequence,
@@ -222,5 +223,6 @@ export async function DELETE(_request: Request, ctx: { params: Promise<{ id: str
   const existing = db.select().from(automations).where(eq(automations.id, id)).get();
   if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 });
   db.delete(automations).where(eq(automations.id, id)).run();
+  signalAutomationsChanged();
   return NextResponse.json({ ok: true });
 }

@@ -16,6 +16,7 @@ import { automations } from '@/lib/db/schema';
 import { computeNextRunAt, validateCron } from '@/lib/automations/cron';
 import { automationApiRecord } from '@/lib/automations/api-shape';
 import { listAutomationRows } from '@/lib/automations/store';
+import { signalAutomationsChanged } from '@/lib/automations/scheduler-signal';
 import {
   ingestLaneAutomationSourceEvents,
   latestAutomationSourceSequence,
@@ -211,6 +212,7 @@ export async function POST(request: Request) {
     lastRunStatus: 'idle',
     lastLaneId: null,
   }).run();
+  signalAutomationsChanged();
 
   const created = db.select().from(automations).where(eq(automations.id, id)).get();
   if (!created) return NextResponse.json({ error: 'insert failed' }, { status: 500 });

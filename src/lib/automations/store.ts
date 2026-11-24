@@ -2,6 +2,7 @@ import { desc, eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { automations } from '@/lib/db/schema';
 import { cancelAutomationFires } from './fire-store';
+import { signalAutomationsChanged } from './scheduler-signal';
 
 export function listAutomationRows() {
   const db = getDb();
@@ -15,5 +16,6 @@ export function updateAutomationRow(id: string, patch: Partial<typeof automation
   if (!db.select().from(automations).where(eq(automations.id, id)).get()) return null;
   db.update(automations).set(patch).where(eq(automations.id, id)).run();
   if (patch.enabled === false) cancelAutomationFires(id);
+  signalAutomationsChanged();
   return db.select().from(automations).where(eq(automations.id, id)).get() ?? null;
 }

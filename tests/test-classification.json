@@ -1812,6 +1812,12 @@
       ]
     },
     {
+      "path": "tests/automation-scheduler-at-rest-real-path.test.ts",
+      "reasons": [
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/automation-watch-real-path.test.ts",
       "reasons": [
         "real-path"
