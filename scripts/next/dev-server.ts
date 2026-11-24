@@ -126,7 +126,10 @@ async function main() {
         headers: { host: url.host, 'Content-Type': 'application/json', 'x-o8-client-addr': '127.0.0.1',
           ...(req.headers.authorization ? { authorization: req.headers.authorization } : {}),
           ...(typeof req.headers['x-clerk-session-token'] === 'string' ? { 'x-clerk-session-token': req.headers['x-clerk-session-token'] } : {}),
-          ...(typeof req.headers['x-tab-id'] === 'string' ? { 'x-tab-id': req.headers['x-tab-id'] } : {}) }, ...(body ? { body } : {}) });
+          ...(typeof req.headers['x-tab-id'] === 'string' ? { 'x-tab-id': req.headers['x-tab-id'] } : {}),
+          // The idle gate's markers reach handlers as they do on the real server.
+          ...(typeof req.headers['x-o8-foreground'] === 'string' ? { 'x-o8-foreground': req.headers['x-o8-foreground'] } : {}),
+          ...(typeof req.headers['x-o8-background'] === 'string' ? { 'x-o8-background': req.headers['x-o8-background'] } : {}) }, ...(body ? { body } : {}) });
       const gate = panelGateMiddleware(request);
       if (gate.status === 200) surface.before?.(input);
       const response = gate.status === 200 ? await (surface.run ? surface.run(route, request) : route(request)) : gate;
