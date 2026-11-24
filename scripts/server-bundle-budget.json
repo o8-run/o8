@@ -195,7 +195,6 @@
     "shared:common:src/lib/db/usage.ts": 2774,
     "shared:common:src/lib/db/worker-correction-fences.ts": 2398,
     "shared:common:src/lib/deepseek-harness/runtime-resolution.ts": 5073,
-    "shared:common:src/lib/desktop/fresh-orchestrator-action.ts": 63137,
     "shared:common:src/lib/desktop/native-picker.ts": 2902,
     "shared:common:src/lib/devices/controller-events.ts": 3389,
     "shared:common:src/lib/devices/controller-helper.ts": 29788,

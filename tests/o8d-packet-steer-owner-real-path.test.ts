@@ -97,18 +97,6 @@ it('runs the direct Codex fallback in WS', async () => {
   expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toMatchObject([{ fallback: true }]);
   expect(local.calls).toBe(0);
 }, 30000);
-it('routes the UI-loop caller to WS', async () => {
-  const f = await fixture('design-mode'); flag('steer-busy');
-  (await import('@/lib/orchestrator/ui-loop')).setUiLoopSettleTimeoutForTest(20);
-  const { steerWarmUiLoop } = await import('@/lib/orchestrator/ui-loop');
-  expect(await steerWarmUiLoop({ repoPath: repo, text: 'Edit the button' })).toMatchObject({ kind: 'steered' });
-  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(0);
-  flag('steer-busy', false);
-  await fetch(origin + '/api/orchestrator/headless-tick', { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });
-  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1); expect(local.calls).toBe(0);
-  const leases = (await import('@/lib/leases/resource-lease-default-store')).getResourceLeaseStore();
-  await vi.waitFor(async () => expect((await leases.status(`ui-loop:${repo}`)).holder).toBeNull(), { timeout: 10000 });
-}, 30000);
 it('routes exact-run worker correction through its WS admission', async () => {
   const f = await fixture();
   const { correctWorkers } = await import('@/lib/orchestrator/worker-corrections');

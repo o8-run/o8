@@ -1,7 +1,6 @@
 # Seed directives
 
-Bundled directive markdown files copied to `~/.o8/directives/` on first launch
-(or whenever `scripts/seed-demo-state.mjs` runs). Each file has YAML-style
+Example directive markdown files in the `~/.o8/directives/` format. Each file has YAML-style
 front matter — see `src/app/api/cortex/directives/route.ts` for the parser.
 
 Front-matter fields:

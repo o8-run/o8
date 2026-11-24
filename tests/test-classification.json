@@ -1407,12 +1407,6 @@
       ]
     },
     {
-      "path": "src/lib/worktree/remove-locked-dir.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "src/lib/worktree/retention.test.ts",
       "reasons": [
         "child-process",
@@ -8710,30 +8704,9 @@
       ]
     },
     {
-      "path": "tests/ui-loop-budgets-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/ui-loop-http-retirement-real-path.test.ts",
       "reasons": [
         "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/ui-loop-preview-real-path.test.ts",
-      "reasons": [
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/ui-loop-warm-lane-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },
