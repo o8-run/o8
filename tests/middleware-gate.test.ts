@@ -420,11 +420,6 @@ describe('panelGateMiddleware — worker capability scope', () => {
     }));
   }
 
-  it('allows workers to read and mutate the named lease surface', () => {
-    expect(workerRequest('/api/leases', 'GET').status).toBe(200);
-    expect(workerRequest('/api/leases', 'POST').status).toBe(200);
-  });
-
   it('allows only the worker observation proposal method through the global gate', () => {
     expect(workerRequest('/api/cortex/proposals', 'POST').status).toBe(200);
     expect(workerRequest('/api/cortex/proposals', 'GET').status).toBe(403);
@@ -438,8 +433,7 @@ describe('panelGateMiddleware — worker capability scope', () => {
     expect(workerRequest('/api/lanes/lane-owned/diff', 'POST').status).toBe(403);
   });
 
-  it('keeps ungranted lease methods and operator mutations closed to workers', () => {
-    expect(workerRequest('/api/leases', 'DELETE').status).toBe(403);
+  it('keeps operator mutations closed to workers', () => {
     expect(workerRequest('/api/orchestrator/merge', 'POST').status).toBe(403);
     expect(workerRequest('/api/broadcast/say', 'POST').status).toBe(403);
   });
@@ -532,7 +526,6 @@ describe('panelGateMiddleware — per-device capability scope', () => {
     '/api/panel/github-device',
     '/api/setup/mcp-servers',
     '/api/orchestrator/merge',
-    '/api/leases',
   ])('denies device credentials outside the mobile capability set: %s', (pathname) => {
     expect(deviceRequest(pathname, 'POST').status).toBe(403);
   });
@@ -930,7 +923,7 @@ describe('panelGateMiddleware preview resource grants', () => {
       else denied.searchParams.set('previewResource', changed);
       expect(panelGateMiddleware(gatedRequest(denied.href, { headers })).status).toBe(401);
     }
-    for (const target of [`http://127.0.0.1:39002/${resource}`, 'http://localhost:3001/api/leases']) {
+    for (const target of [`http://127.0.0.1:39002/${resource}`, 'http://localhost:3001/api/orchestrator/merge']) {
       const denied = new URL(url);
       denied.searchParams.set('url', target);
       expect(panelGateMiddleware(gatedRequest(denied.href, { headers })).status).toBe(401);
@@ -939,7 +932,7 @@ describe('panelGateMiddleware preview resource grants', () => {
     expect(panelGateMiddleware(gatedRequest(url.href, { method: 'POST', headers: { host: url.host } })).status).toBe(401);
     expect(panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, origin: 'https://example.invalid' } })).status).toBe(401);
     expect(panelGateMiddleware(gatedRequest(url.href, { headers: { ...headers, 'x-o8-client-addr': '192.0.2.1' } })).status).toBe(401);
-    const app = new URL('/api/leases', url);
+    const app = new URL('/api/orchestrator/merge', url);
     app.search = url.search;
     expect(panelGateMiddleware(gatedRequest(app.href, { headers })).status).toBe(401);
   });

@@ -57,7 +57,6 @@
   "/api/lanes/discard-orphaned",
   "/api/lanes/reap",
   "/api/lanes/touches",
-  "/api/leases",
   "/api/mcp",
   "/api/mobile/action",
   "/api/mobile/activity",

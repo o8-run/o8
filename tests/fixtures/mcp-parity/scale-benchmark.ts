@@ -7,7 +7,6 @@ export async function seedMcpScaleFixture(options: {
   directory: string;
   sqlite: Database.Database;
   initializeRepo: (directory: string) => Promise<void>;
-  acquireLease: (index: number) => Promise<void>;
 }) {
   const sqlite = options.sqlite;
   if (relative(realpathSync(options.directory), realpathSync(sqlite.name)) !== 'cortex-ide.db') {
@@ -98,7 +97,6 @@ export async function seedMcpScaleFixture(options: {
     return stateToFocus;
   })();
   writeOrchestratorControlPlaneState(currentMission);
-  for (let index = 0; index < 200; index += 1) await options.acquireLease(index);
 
   return {
     missions: (sqlite.prepare('SELECT COUNT(*) AS count FROM missions').get() as { count: number }).count,
@@ -106,12 +104,10 @@ export async function seedMcpScaleFixture(options: {
     lanes: (sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get() as { count: number }).count,
     repos: (await listReposFresh()).length,
     projects: projects.length,
-    leases: (sqlite.prepare('SELECT COUNT(*) AS count FROM resource_leases').get() as { count: number }).count,
     archivedMissions: 276,
     currentMissionPackets: currentMission.packets.length,
     currentMissionHasLaneBindings: true,
     activeLanes: (sqlite.prepare("SELECT COUNT(*) AS count FROM lanes WHERE status != 'completed'").get() as { count: number }).count,
-    leaseParticipants: 'distinct fixture owners sharing one live fixture process',
   };
 }
 

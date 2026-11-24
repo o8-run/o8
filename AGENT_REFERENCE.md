@@ -284,15 +284,8 @@ These recipes use explicit identifiers so worktree inference cannot select a dif
 | Preview a merge | `o8 packet merge-preview --packet pkt-audit` | Read-only; inspect blockers before approval. |
 | Steer work | `o8 packet steer --packet pkt-audit --message "Also check empty input"` | Requires an existing session. |
 | Record approval | `o8 packet review --packet pkt-audit --approve --expected-sha <full-sha> --coverage R1=src/example.ts` | Records approval and attempts a merge; use only when authorized. |
-| Acquire a resource | `o8 lease acquire audit --ttl 2m` | Default TTL 2h; add `--wait` to queue. |
-| Inspect a resource | `o8 lease status audit` | Reads the exact shared resource name. |
 | Queue a task | `o8 task create --title "Inspect behavior" --repo /path/to/repo --project project-audit` | Uses the active project when `--project` is omitted; no worker launch. |
 | Block a task | `o8 task block pkt-audit --reason "Waiting for dependency" --code dependency_blocked` | The reason is required; code is optional. |
-
-Bare --ttl values are milliseconds; prefer explicit suffixes such as `2m` or `2h`.
-The allowed lease duration is 1s through 24h. `o8 lease` uses the running server's
-resource store. o8 team lease uses a separate checkout-local store and does not accept `--ttl`.
-Release a server lease with `o8 lease release audit` from the same agent process.
 
 Errors are structured JSON with a message and, when available, a corrective hint.
 For argument errors, change the named argument and consult the command's help.

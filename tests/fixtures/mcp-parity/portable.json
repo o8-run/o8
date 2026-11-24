@@ -69,17 +69,5 @@
         "arguments": {}
       }
     }
-  },
-  {
-    "name": "o8_lease_list",
-    "body": {
-      "jsonrpc": "2.0",
-      "id": "o8_lease_list",
-      "method": "tools/call",
-      "params": {
-        "name": "o8_lease_list",
-        "arguments": {}
-      }
-    }
   }
 ]

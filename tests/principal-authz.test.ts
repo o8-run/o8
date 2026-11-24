@@ -371,7 +371,6 @@ describe('principal-authz — Broadcast spectator is read-only through the real 
       'http://localhost:3001/api/broadcast/tokens',
       'http://localhost:3001/api/panel/approvals',
       'http://localhost:3001/api/lanes',
-      'http://localhost:3001/api/leases',
     ];
     for (const url of mutations) {
       expect(panelGateMiddleware(req(url, { principal: 'spectator', body: {} })).status).toBe(403);

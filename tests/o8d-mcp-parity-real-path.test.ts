@@ -42,7 +42,6 @@ const status = await import('@/app/api/operator/status/route');
 const defaults = await import('@/app/api/panel/operator-defaults/route');
 const repos = await import('@/app/api/panel/repos/route');
 const projects = await import('@/app/api/panel/projects/route');
-const leases = await import('@/app/api/leases/route');
 const spec = await import('@/app/api/repo-spec/route');
 const { closeDb, getSqlite } = await import('@/lib/db');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
@@ -61,7 +60,6 @@ const routes: Record<string, Partial<Record<string, Handler>>> = {
   '/api/panel/operator-defaults': { GET: defaults.GET, POST: defaults.POST },
   '/api/panel/repos': { GET: repos.GET, POST: repos.POST },
   '/api/panel/projects': { GET: projects.GET, POST: projects.POST },
-  '/api/leases': { GET: leases.GET, POST: leases.POST },
   '/api/repo-spec': { GET: spec.GET, POST: spec.POST },
 };
 let base = '';
@@ -161,11 +159,6 @@ beforeAll(async () => {
       label: `Fixture ${laneStatus}`, baseCommit: 'a'.repeat(40) });
     setLaneStatus(lane.id, laneStatus, 'system');
   }
-  const leaseResponse = await fetch(`${base}/api/leases`, { method: 'POST', headers: {
-    authorization: `Bearer ${token}`, 'content-type': 'application/json',
-  }, body: JSON.stringify({ action: 'acquire', resource: 'fixture:mcp-parity',
-    owner: { id: 'fixture-owner', label: 'Fixture owner', pid: process.pid }, claimToken: 'fixture-lease-claim-value-0123456789', ttlMs: 86_400_000 }) });
-  expect(leaseResponse.status).toBe(200);
   rust = await startRust(base);
   nativeRust = await startRust(base, true);
   // Establish the paired publisher generation using the caller's credential.
@@ -303,18 +296,6 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     }
   });
 
-  nativeReadTest.each(['fixture:mcp-parity', 'fixture:unheld', ' fixture:mcp-parity '])(
-    'reads lease status for %s natively through recorded replay', async (resource) => {
-      const recording = [{ name: 'lease status', body: { jsonrpc: '2.0', id: 'lease-status',
-        method: 'tools/call', params: { name: 'o8_lease_status', arguments: { resource } } } }];
-      const reference = await sendRecordedMcp(base, token, recording[0]);
-      seen.length = 0;
-      compareMcpExchanges(reference, await sendRecordedMcp(nativeRust, token, recording[0]));
-      expect(seen).toHaveLength(0);
-      expect(await replayMcp(base, nativeRust, token, recording)).toBe(1);
-    },
-  );
-
   nativeReadTest('reads the spec from disk, including missing files and committed edits, without TypeScript', async () => {
     const repoPath = realpathSync(join(directory, 'repo'));
     const path = join(repoPath, 'o8.md');
@@ -331,12 +312,6 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       expect(await replayMcp(base, nativeRust, token, [recording])).toBe(1);
     }
   });
-
-  it.each([{ resource: '' }, { resource: 'fixture:🦀' }, { resource: '\ninside\ncontrol' }, {}])(
-    'preserves lease-status input refusals for %j', async (args) => {
-      compareMcpExchanges(await call(base, 'o8_lease_status', args), await call(nativeRust, 'o8_lease_status', args));
-    },
-  );
 
   nativeReadTest('retains TypeScript path normalization for noncanonical spec paths', async () => {
     const repo = realpathSync(join(directory, 'repo'));
@@ -416,7 +391,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, [recording])).toBe(1);
   });
 
-  nativeReadTest.each(['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
+  nativeReadTest.each(['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects'])(
     'reads %s natively with zero TypeScript requests', async (name) => {
       const expected = await call(base, name);
       seen.length = 0;
@@ -508,8 +483,8 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, additional)).toBe(additional.length);
   });
 
-  nativeReadTest('keeps all five warmed SQLite reads available during an upstream outage without writes', async () => {
-    const names = ['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
+  nativeReadTest('keeps all four warmed SQLite reads available during an upstream outage without writes', async () => {
+    const names = ['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects'];
     const expected = new Map();
     for (const name of names) expected.set(name, await call(base, name));
     const sqlite = getSqlite();
@@ -693,7 +668,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     } finally { sqlite.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(row.value, row.key); }
   });
 
-  it.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
+  it.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects'])(
     'serves %s without forwarding a tools/call to TypeScript', async (name) => {
       seen.length = 0;
       const result = await call(rust, name);
@@ -909,21 +884,12 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
   it.runIf(Boolean(process.env.O8_MCP_SCALE_BENCH_REPORT_DIR))('measures realistic state with idle and CPU-loaded TypeScript', async () => {
     const fixture = await seedMcpScaleFixture({ directory, sqlite: getSqlite(),
       initializeRepo: async (path) => { await promisify(execFile)('git', ['init', '--quiet', path]); },
-      acquireLease: async (index) => {
-        const response = await fetch(`${base}/api/leases`, { method: 'POST', headers: {
-          authorization: `Bearer ${token}`, 'content-type': 'application/json',
-        }, body: JSON.stringify({ action: 'acquire', resource: `fixture:scale-lease-${index}`,
-          owner: { id: `fixture-owner-${index}`, label: `Fixture owner ${index}`, pid: process.pid },
-          claimToken: `scale-fixture-claim-value-${String(index).padStart(12, '0')}`, ttlMs: 86_400_000 }) });
-        expect(response.status).toBe(200);
-      },
     });
     const registered = toolPayload(await call(base, 'o8_list_repos'));
     expect(registered.count).toBe(50);
     expect(getSqlite().prepare('SELECT COUNT(*) AS count FROM missions').get()).toEqual({ count: 300 });
-    expect(fixture).toMatchObject({ missions: 300, packets: 2_000, lanes: 2_000, repos: 50, leases: 200, projects: 10 });
-    expect(toolPayload(await call(base, 'o8_lease_list')).count).toBe(200);
-    for (const name of ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list']) {
+    expect(fixture).toMatchObject({ missions: 300, packets: 2_000, lanes: 2_000, repos: 50, projects: 10 });
+    for (const name of ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects']) {
       if (name === 'o8_status') await call(base, name, { fresh: true });
       compareMcpExchanges(await call(base, name), await call(nativeRust, name), name === 'o8_status'
         ? ['/body/result/content/0/text/json/data/snapshot/ageMs'] : []);
@@ -971,7 +937,6 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     const before = sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get();
     await expect(seedMcpScaleFixture({ directory: ownedDirectory, sqlite,
       initializeRepo: async () => { throw new Error('Unreachable repo mutation'); },
-      acquireLease: async () => { throw new Error('Unreachable lease mutation'); },
     })).rejects.toThrow('Refusing scale seeding outside the owned fixture database');
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM lanes').get()).toEqual(before);
   });

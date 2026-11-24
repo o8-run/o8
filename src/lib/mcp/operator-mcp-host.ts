@@ -69,13 +69,6 @@ import {
   handleWaitForMissionReady,
 } from '@/lib/mcp/operator-handlers/mission';
 import {
-  LEASE_TOOLS,
-  handleLeaseAcquire,
-  handleLeaseList,
-  handleLeaseRelease,
-  handleLeaseStatus,
-} from '@/lib/mcp/operator-handlers/leases';
-import {
   REPO_MGMT_TOOLS,
   handleCreateProject,
   handleDeleteProject,
@@ -239,7 +232,6 @@ const TOOLS: McpTool[] = [
   ...DIGEST_TOOLS,
   ...SPEC_TOOLS,
   ...TARGETING_TOOLS,
-  ...LEASE_TOOLS,
   ...RECEIPT_TOOLS,
   ...TRUTH_TOOLS,
   ...AGENT_MESSAGE_TOOLS,
@@ -330,10 +322,6 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   digest: handleDigest,
   fetch_raw: handleFetchRaw,
   o8_targets: handleTargets,
-  o8_lease_acquire: handleLeaseAcquire,
-  o8_lease_release: handleLeaseRelease,
-  o8_lease_status: handleLeaseStatus,
-  o8_lease_list: handleLeaseList,
   o8_packet_receipt: handlePacketReceipt,
   o8_verify_receipt: handleVerifyReceipt,
   o8_truth_query: handleTruthQuery,

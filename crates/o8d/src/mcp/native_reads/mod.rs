@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf, sync::Mutex, time::Duration};
 
-mod leases;
 mod mission;
 mod process_identity;
 mod publisher;
@@ -184,8 +183,6 @@ impl NativeReads {
                         super::projections::projects(registries::projects(self, &tx)?)
                     }
                     "o8_task_list" => tasks::read(self, &tx, &args)?,
-                    "o8_lease_list" => leases::read(&tx)?,
-                    "o8_lease_status" => leases::status(&tx, &args)?,
                     "o8_spec_read" => spec::read(&tx, &args, &policy, &self.directory)?,
                     _ => return Err(()),
                 };

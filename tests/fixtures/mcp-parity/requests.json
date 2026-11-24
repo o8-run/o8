@@ -63,18 +63,6 @@
     }
   },
   {
-    "name": "o8_lease_list",
-    "body": {
-      "jsonrpc": "2.0",
-      "id": "o8_lease_list",
-      "method": "tools/call",
-      "params": {
-        "name": "o8_lease_list",
-        "arguments": {}
-      }
-    }
-  },
-  {
     "name": "o8_status {'includeEvidence': True}",
     "body": {
       "jsonrpc": "2.0",
@@ -382,10 +370,10 @@
       },
       {
         "jsonrpc": "2.0",
-        "id": "o8_lease_list",
+        "id": "o8_list_projects",
         "method": "tools/call",
         "params": {
-          "name": "o8_lease_list",
+          "name": "o8_list_projects",
           "arguments": {}
         }
       }

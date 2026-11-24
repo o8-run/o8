@@ -83,8 +83,8 @@ require the explicit runtime flag; default endpoint selection is unchanged.
 To use the existing native readers, enable `O8D_MCP_READS=1` on the
 TypeScript server and pass `--native-reads --data-dir` with the same absolute
 data directory to o8d. `CORTEX_IDE_DB_PATH` selects an alternate database.
-On Linux, `o8_status`, `get_mission_status`, `o8_task_list`, `o8_list_repos`,
-`o8_list_projects` and `o8_lease_list` read persisted state without a
+On Linux, `o8_status`, `get_mission_status`, `o8_task_list`, `o8_list_repos`
+and `o8_list_projects` read persisted state without a
 TypeScript round trip after the publisher generation is authenticated.
 Fresh status, stale snapshots, unsupported state and other platforms use
 the original TypeScript handler. Native readers never migrate or write state.

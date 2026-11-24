@@ -9,7 +9,7 @@ async function main() {
   const output = option('output');
   const token = process.env.O8_MCP_PARITY_TOKEN;
   if (!reference || !candidate || !output || !token) throw new Error('reference, candidate, output and O8_MCP_PARITY_TOKEN required');
-  const supported = ['tools/list', 'o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
+  const supported = ['tools/list', 'o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects'];
   const names = option('tools')?.split(',') ?? supported;
   if (!names.includes('o8_status') || new Set(names).size !== names.length
     || names.some(name => !supported.includes(name))) throw new Error('Unique supported tools including o8_status required');

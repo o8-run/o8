@@ -24,7 +24,7 @@ export async function measureMcp(stack, repoPath, samples = 30) {
   const catalog = await rpc(stack, 'tools/list');
   const names = new Set(catalog.result.tools.map(tool => tool.name));
   const selected = ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_operator_defaults',
-    'o8_list_repos', 'o8_list_projects', 'o8_lease_list', 'o8_msg_agents', 'o8_problem_list'];
+    'o8_list_repos', 'o8_list_projects', 'o8_msg_agents', 'o8_problem_list'];
   const result = [{ name: 'tools/list', firstCallMs: catalog.ms, bytes: catalog.bytes }];
   for (const name of selected) {
     if (!names.has(name)) throw new Error(`Required read tool absent: ${name}`);
