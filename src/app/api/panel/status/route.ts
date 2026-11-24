@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
+import { requirePanelAuth } from '@/lib/panel/auth';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -34,7 +35,15 @@ function readBuildMode(): 'packaged' | 'production' | 'development' {
   return process.env.NODE_ENV === 'production' ? 'production' : 'development';
 }
 
-export async function GET() {
+/**
+ * The build fingerprint (version, commit, platform, Node version) answers only
+ * a request from this machine or one carrying the operator bearer. Anyone else
+ * on the network learns only that an o8 server is here.
+ */
+export async function GET(req: NextRequest) {
+  if (requirePanelAuth(req)) {
+    return NextResponse.json({ product: 'o8' });
+  }
   return NextResponse.json({
     product: 'o8',
     connected: false,

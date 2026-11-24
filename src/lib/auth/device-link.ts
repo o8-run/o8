@@ -1,7 +1,6 @@
 import 'server-only';
 
 import { createHmac } from 'node:crypto';
-import { hostname } from 'node:os';
 
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
 
@@ -59,7 +58,8 @@ export async function startDeviceLink(input: {
   appVersion: string;
 }): Promise<DeviceLinkOffer | null> {
   const response = await linkRequest('', {
-    installId: input.installId, name: hostname().slice(0, 128), platform: process.platform, appVersion: input.appVersion,
+    // No computer name: the approval page shows the platform and version only.
+    installId: input.installId, platform: process.platform, appVersion: input.appVersion,
   });
   if (!response.ok) return null;
   const data = await response.json() as Record<string, unknown>;

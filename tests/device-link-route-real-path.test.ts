@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -101,6 +101,9 @@ describe('code-based sign-in through fake account and identity services and pers
     // The one-time secret never leaves the server process.
     expect(JSON.stringify(started.body)).not.toContain(secret);
     expect(calls[0]!.body).toMatchObject({ platform: process.platform });
+    // The computer's name stays on the computer.
+    expect(calls[0]!.body).not.toHaveProperty('name');
+    expect(JSON.stringify(calls[0]!.body)).not.toContain(hostname());
     expect(typeof (calls[0]!.body as { installId?: unknown }).installId).toBe('string');
 
     expect((await post({ action: 'poll' })).body).toEqual({ ok: true, status: 'pending' });
