@@ -212,12 +212,6 @@
       ]
     },
     {
-      "path": "src/components/desktop/repo-focus/tabs/chats/sections.test.ts",
-      "reasons": [
-        "worktree-api"
-      ]
-    },
-    {
       "path": "src/components/desktop/workspace-terminal/worker-activity.test.ts",
       "reasons": [
         "native-build"

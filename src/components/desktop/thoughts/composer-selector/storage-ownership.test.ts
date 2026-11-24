@@ -8,7 +8,6 @@ const directPersistencePattern = /\blocalStorage\.(?:getItem|setItem|removeItem)
 
 const directPersistenceSeams: Record<string, string> = {
   'chat-panel/transcript-reading-position.ts': 'Owns o8:transcript-reading:v1: reading intent, bounded identities, offsets and order per workspace and thread/session conversation; history deletion removes all matching workspace buckets and invalidates mounted writers before teardown.',
-  'composer-mode-storage.ts': 'Owns tab-scoped composer mode persistence and legacy migration.',
   'composer-selector/state.ts': 'Owns selector feature flags plus global and per-thread effort maps.',
   'composer-selector/service-tier-store.ts': 'Owns explicit browser-local speed choices scoped to backend and model, without rewriting CLI settings. Selection still requires current CLI capability validation.',
 };

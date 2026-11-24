@@ -41,7 +41,6 @@ The original lane records the handoff. Approvals, scope and retry counters are n
 reset. If both routes exhaust, an observable reset can park the current session;
 otherwise the existing operator card remains.
 
-Verification uses [real worker fixtures](../../tests/worker-capacity-resume-real-path.test.ts),
-[provider control fixtures](../../src/lib/claude-code/live-capacity.test.ts), and
-[sidebar rendering](../../src/components/desktop/AgentPanelExtraAgentRow.capacity.test.ts).
+Verification uses [real worker fixtures](../../tests/worker-capacity-resume-real-path.test.ts) and
+[provider control fixtures](../../src/lib/claude-code/live-capacity.test.ts).
 No live account or native desktop acceptance is needed for those checks.

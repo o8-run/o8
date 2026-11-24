@@ -240,7 +240,6 @@ export interface MobileTranscriptMedia {
  *               collapsed summary, even dimmer than reads.
  *
  * When unset, the chat falls back to the legacy unified card rendering.
- * See `src/components/desktop/thoughts/toolClassifier.ts`.
  */
 export type ToolSideEffectClass = 'read' | 'write' | 'meta';
 
