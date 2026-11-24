@@ -37,6 +37,9 @@ pub enum Event {
     Created(String, bool, u64),
     Error(String),
     Workspace(Option<String>, Ledger),
+    /// A folder opened from outside the app is registered and its project is
+    /// active; the shell opens it with the composer focused.
+    OpenedFolder(String, Ledger),
     /// A `ui-command` frame for the main window. Every socket receives the
     /// broadcast; only this global one hands it on.
     UiCommand(serde_json::Value),
@@ -133,6 +136,10 @@ pub struct ThreadList {
     header: project_header::HeaderSnapshot,
     workspace: Option<String>,
     header_busy: bool,
+    /// The running header action opens a folder from outside the app.
+    folder_open: bool,
+    /// A folder opened while another header action ran.
+    pending_folder: Option<String>,
     header_menu: Option<bool>,
     /// Focus before the project menu opened; Switch workspace returns it.
     header_focus: Option<gpui::FocusHandle>,
@@ -348,6 +355,8 @@ impl ThreadList {
             header: project_header::HeaderSnapshot::default(),
             workspace: None,
             header_busy: false,
+            folder_open: false,
+            pending_folder: None,
             header_menu: None,
             header_focus: None,
             scopes: HashMap::new(),

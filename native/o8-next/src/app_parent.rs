@@ -137,6 +137,11 @@ static DOCUMENTS: Mutex<VecDeque<std::path::PathBuf>> = Mutex::new(VecDeque::new
 pub(crate) fn take_document() -> Option<std::path::PathBuf> {
     DOCUMENTS.lock().unwrap().pop_front()
 }
+/// Puts a taken path back at the front, for a surface that is not ready yet.
+#[cfg(unix)]
+pub(crate) fn defer_document(path: std::path::PathBuf) {
+    DOCUMENTS.lock().unwrap().push_front(path);
+}
 #[cfg(not(unix))]
 fn watch_documents() {}
 /// Set when the launcher says opened files are waiting, or the window comes

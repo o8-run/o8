@@ -100,6 +100,26 @@ pub fn member_route(project: &str, repo: &str) -> String {
         route(repo).trim_start_matches("/api/projects/")
     )
 }
+/// The project an opened folder belongs to, and whether it is already active:
+/// the active project when it holds the folder, else the first that does.
+pub fn folder_project(ledger: &Ledger, path: &str) -> Option<(String, bool)> {
+    let holds = |p: &&LedgerProject| p.repo_paths.iter().any(|r| r == path);
+    if let Some(active) = ledger
+        .projects
+        .iter()
+        .filter(holds)
+        .find(|p| p.id == ledger.active_project_id)
+    {
+        return Some((active.id.clone(), true));
+    }
+    ledger
+        .projects
+        .iter()
+        .filter(holds)
+        .find(|p| p.id != "default")
+        .or_else(|| ledger.projects.iter().find(holds))
+        .map(|p| (p.id.clone(), false))
+}
 #[derive(Clone)]
 pub enum Action {
     Save {
@@ -115,6 +135,9 @@ pub enum Action {
     Role(String, String, Option<String>),
     Validate(String),
     Register(String, Option<String>),
+    /// A folder opened from outside the app: registered as `Register` does,
+    /// then the project holding it becomes active and the folder opens.
+    OpenFolder(String, Option<String>),
     Remove(String),
     /// Stable project and repository IDs; the folder is resolved at dispatch.
     Open(String, String),
@@ -270,6 +293,31 @@ impl Action {
                     };
                     link().map_err(|error| format!("Repository registered; project link failed. Retry adding to reuse the entry. {error}"))?;
                 }
+            }
+            Self::OpenFolder(path, project) => {
+                let validated = request(
+                    "POST",
+                    "/api/panel/repos",
+                    json!({"action":"validate","localPath":path.trim()}),
+                )?;
+                let canonical = validated["repo"]["localPath"]
+                    .as_str()
+                    .ok_or("Invalid repository validation")?
+                    .to_owned();
+                Self::Register(canonical.clone(), project.clone()).run(client)?;
+                let ledger: Ledger =
+                    serde_json::from_value(request("GET", "/api/panel/projects", json!({}))?)
+                        .map_err(|e| format!("Invalid project ledger: {e}"))?;
+                let (holder, active) = folder_project(&ledger, &canonical)
+                    .ok_or("The opened folder is in no project. Refresh Projects.")?;
+                if !active {
+                    request(
+                        "POST",
+                        "/api/panel/projects/active",
+                        json!({"projectId":holder}),
+                    )?;
+                }
+                workspace = Some(WorkspaceChange::Open(canonical));
             }
             Self::Remove(id) => {
                 request("DELETE", "/api/panel/repos", json!({"id":id}))?;
