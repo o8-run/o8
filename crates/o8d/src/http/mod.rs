@@ -3,8 +3,7 @@ mod file_content;
 mod directives;
 mod repo_spec;
 mod git_refs;
-mod prompt_library;
-mod prompt_writes;
+mod text;
 mod diff_comments;
 pub(crate) mod commit_notice;
 mod session_rules;
@@ -271,9 +270,6 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         if method == "GET" { return session_rules::read(store, params); }
         if matches!(method, "POST" | "DELETE") { return session_rules::write(store, params, method, body); }
     }
-    if method != "GET" && prompt_writes::matches(path, method) {
-        return prompt_writes::write(store, path, params, method, body);
-    }
     if method != "GET" { return unavailable() }
     if projects::matches(path) {
         return projects::read(store, path, params);
@@ -282,9 +278,7 @@ fn dispatch(store: &ReadContext<'_>, path: &str, params: &Params, method: &str, 
         "/api/panel/file-content" | "/api/v2/files" => file_content::read(store, path, params),
         "/api/panel/files" => file_tree::read(store, params),
         "/api/repo-spec" => repo_spec::read(store, params),
-        "/api/prompt-library" => prompt_library::read(store, params),
         "/api/cortex/directives" => directives::read(store, params),
-        path if path.starts_with("/api/prompt-library/") => prompt_library::single(store, path),
         "/api/panel/file-io" | "/api/panel/file-asset" | "/api/panel/serve-image" | "/api/mobile/media" => file_assets::read(store, path, params),
         "/api/worktrees/diff" | "/api/worktrees/diff-summary" | "/api/panel/file-diff" => git_diff::read(store, path, params),
         "/api/panel/branches"

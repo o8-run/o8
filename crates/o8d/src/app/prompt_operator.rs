@@ -1,4 +1,4 @@
-//! Fresh native operator gate for owned prompts and session rules.
+//! Fresh native operator gate for the composer queue and session rules.
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
 use subtle::ConstantTimeEq;
@@ -56,28 +56,13 @@ pub(super) fn eligible(socket: &tokio::net::TcpStream, header: &str, path: &str)
         .next()
         .and_then(|line| line.split_whitespace().next())
         .unwrap_or("");
-    let target = path.strip_suffix("/use").unwrap_or(path);
-    let use_route = target != path;
     if !header.is_ascii() {
         return false;
     }
-    let single = target.strip_prefix("/api/prompt-library/").filter(|id| {
-        !id.is_empty()
-            && *id != "import"
-            && id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-    });
     if !(if path == "/api/orchestrator/composer-queue" {
-        matches!(method,"GET"|"POST"|"PATCH"|"DELETE")
-    } else if path == "/api/orchestrator/session-rules" {
-        matches!(method, "GET" | "POST" | "DELETE")
-    } else if use_route {
-        single.is_some() && method == "POST"
-    } else if target == "/api/prompt-library" {
-        matches!(method, "GET" | "POST")
+        matches!(method, "GET" | "POST" | "PATCH" | "DELETE")
     } else {
-        single.is_some() && matches!(method, "GET" | "PATCH" | "DELETE")
+        path == "/api/orchestrator/session-rules" && matches!(method, "GET" | "POST" | "DELETE")
     }) {
         return false;
     }

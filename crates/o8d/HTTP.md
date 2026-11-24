@@ -77,7 +77,7 @@ fetcher select routes from that same registry:
 | Held plugin tasks | GET plugins/task-drafts; POST plugins/task-drafts/control | Existing local operator, account/epoch, saved-contract and single-attempt admission. Safety stop retains its signed-out behavior. |
 | Inbox | GET supervisor-inbox and approvals; POST approvals | Existing inbox projection and approval ID/action decision. |
 | Brain | POST cortex/ask | Question/conversation/workspace body; original SSE event stream or validation refusal. |
-| Customize | GET inventory, directives, MCP servers and prompt library; GET/POST/PATCH/DELETE prompt entries | Existing inventories and saved-prompt revision checks; no new configuration writes. |
+| Customize | GET inventory, directives and MCP servers | Existing inventories; no new configuration writes. |
 | Diff | GET review-state, lane diff, worktree diff and worker-corrections; POST review, worker-corrections and discard-orphaned | Existing packet/workspace query, saved-review author availability, decision and original-author delivery receipts. |
 | Activity | GET commits, CI/list/detail, PR details, issues and state; PATCH state; POST stop-mission, orchestrator/merge, reset-packet and rerun-with-feedback | Canonical packet merge gates, prerequisite ordering and cleanup; recovery receipts retain exact-body replay for live operations. Quarantined outcome_unknown errors are terminal. |
 | Pull Requests | GET PR list/detail, GitHub status and merge-preview; POST PR detail | Existing pagination, review/merge gates and action receipts. |
@@ -89,7 +89,7 @@ a transport entry for every surface, checks production handler methods and
 literal native endpoints, and exercises every registered method's auth through
 the public o8d socket with the fixture Next listener closed. It also checks
 saved history, native session checkpoints, canonical paths, stream disconnects,
-concurrent prompt revisions, upload bounds and flag-off behavior.
+concurrent request isolation, upload bounds and flag-off behavior.
 `tests/server-bundles-packaged-layout-real-path.test.ts` runs the generated
 WS entry with the packaged platform-specific addon layout and no Next listener.
 The [review round 1 receipt](evidence/next-surfaces-review-round-1.txt) records

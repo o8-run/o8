@@ -34,7 +34,6 @@ some behavior exists but at least one part of the described behavior is absent.
 | `/recall` searches `/api/orchestrator/archive`, appends up to three matches as context for the next send | Missing | Native command client |
 | `/handoff` compacts, resets remote session and replaces the next-turn prelude; newest context retains its ending | Missing | Native command client |
 | `/rule` POSTs a thread-scoped rule; `/rules` opens active and inherited rules with add/remove controls | Missing | Native rules controls |
-| `/prompts` opens the saved-prompt picker without sending | Missing | Native prompt picker |
 | `/codex`, `/gemini`, `/opencode` open a fresh runtime draft on this repo, carry the body and require another Enter to send | Missing | Codex + configured OpenCode destinations; Gemini remains unavailable |
 | `/chat` opens a fresh casual-chat destination with the body retained | Missing | See residual scope below |
 | Intent row appears with nonempty draft, reads workspace targets, labels repo and base branch (main fallback) | Missing | Native Work on / off chips |
@@ -48,11 +47,7 @@ some behavior exists but at least one part of the described behavior is absent.
 | Keyboard focus, Enter/Space selection and Escape/outside close restore focus; Up/Down move between modes | Partial | Buttons had Tab/Enter; arrow navigation was absent |
 | Mode choice persists per conversation and survives reopening; no server mutation until send | Partial | In-memory draft overrides only |
 | Quick actions open with Cmd/Ctrl+Shift+K outside textarea; search verb/label, Up/Down wrap, Enter picks, Escape/outside closes | Missing | Native shell and conversation key entry |
-| Quick items: Prompts, Dispatch, Decompose, Fix, Review, Status, Clear; insert templates into editable draft without sending | Missing | Native quick actions |
-| Saved prompts GET `/api/prompt-library` with available scope, repo, query and limit 100; nonempty search debounces 100 ms | Missing | Native prompt search with stale-result guard |
-| Prompt picker has loading/error/empty states, keyboard/mouse selection and inserts at cursor/replaces selection, never sends | Missing | Native insertion test |
-| Prompt selection records POST `/api/prompt-library/:id/use` without blocking insertion on failure | Missing | Existing use endpoint |
-| Save prompt opens with title/tags/body and Global/Repository scope; POST `/api/prompt-library`, inline errors and duplicate/success receipt | Missing | Native save form |
+| Quick items: Dispatch, Decompose, Fix, Review, Status, Clear; insert templates into editable draft without sending | Missing | Native quick actions |
 
 The specifically named `IntentChips`, `ModeChip` and visual `ModePicker` modules
 remain in classic source, but the first and both visual mode components have no

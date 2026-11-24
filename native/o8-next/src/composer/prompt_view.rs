@@ -431,13 +431,11 @@ impl Surface {
     ) -> AnyElement {
         let title = match open {
             "quick" => "Quick actions",
-            "prompts" => "Saved prompts",
             "repo" => "Repository",
             "branch" => "Base branch",
-            "branch-create" => "Create branch",
             "rules" => "Session rules",
             "result" => "Command result",
-            _ => "Save prompt",
+            _ => "Create branch",
         };
         let mut menu = panel("composer-prompt-picker", 460.).child(
             div()
@@ -452,8 +450,8 @@ impl Surface {
                     |s, w, cx| s.close_composer_picker(w, cx),
                 )),
         );
-        if matches!(open, "save-prompt" | "branch-create") {
-            menu = menu.child(self.prompt_form(open, cx));
+        if open == "branch-create" {
+            menu = menu.child(self.prompt_form(cx));
         } else if open == "result" {
             menu = menu.child(
                 div()
@@ -492,7 +490,6 @@ impl Surface {
                 let items = self.prompt_items(open, cx);
                 if items.is_empty() {
                     menu = menu.child(small(match open {
-                        "prompts" => "No matching prompts. Add one in Customize.",
                         "repo" => "No repositories in the registry.",
                         _ => "No matches.",
                     }));
@@ -569,82 +566,28 @@ impl Surface {
         )
         .into_any_element()
     }
-    fn prompt_form(&self, open: &str, cx: &mut Context<Self>) -> AnyElement {
+    fn prompt_form(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = &self.composer.read(cx).controls.prompt;
         let fields = state.fields.clone();
         let error = state.error.clone();
-        let result = state.result.clone();
-        let repo_scope = state.scope;
         let busy = state.loading;
         let mut form = div().flex().flex_col().gap(px(8.));
         for (index, field) in fields.iter().enumerate() {
-            form = form
-                .child(small(if open == "branch-create" {
-                    "Branch name"
-                } else {
-                    ["Title", "Tags (comma separated)", "Prompt"][index]
-                }))
-                .child(
-                    div()
-                        .id(SharedString::from(format!("composer-prompt-field-{index}")))
-                        .debug_selector(move || format!("composer-prompt-field-{index}"))
-                        .max_h(px(160.))
-                        .overflow_y_scroll()
-                        .child(field.clone()),
-                );
-        }
-        if open == "save-prompt" {
-            form = form.child(
+            form = form.child(small("Branch name")).child(
                 div()
-                    .flex()
-                    .gap(px(6.))
-                    .child(self.composer_button(
-                        "composer-prompt-global",
-                        if !repo_scope { "✓ Global" } else { "Global" },
-                        !busy,
-                        cx,
-                        |s, _, cx| {
-                            s.composer.update(cx, |i, cx| {
-                                i.controls.prompt.scope = false;
-                                cx.notify();
-                            });
-                            cx.notify();
-                        },
-                    ))
-                    .child(self.composer_button(
-                        "composer-prompt-repo",
-                        if repo_scope {
-                            "✓ Repository"
-                        } else {
-                            "Repository"
-                        },
-                        !busy && self.intent_repo(cx).is_some(),
-                        cx,
-                        |s, _, cx| {
-                            s.composer.update(cx, |i, cx| {
-                                i.controls.prompt.scope = true;
-                                cx.notify();
-                            });
-                            cx.notify();
-                        },
-                    )),
+                    .id(SharedString::from(format!("composer-prompt-field-{index}")))
+                    .debug_selector(move || format!("composer-prompt-field-{index}"))
+                    .max_h(px(160.))
+                    .overflow_y_scroll()
+                    .child(field.clone()),
             );
         }
         if !error.is_empty() {
             form = form.child(small(error));
         }
-        if !result.is_empty() {
-            form = form.child(small(result));
-        }
         form.child(self.composer_button(
             "composer-prompt-submit",
-            if busy {
-                "Saving…"
-            } else if open == "branch-create" {
-                "Create branch"
-            } else {
-                "Save prompt"
-            },
+            if busy { "Saving…" } else { "Create branch" },
             !busy,
             cx,
             |s, _, cx| s.submit_prompt_form(cx),

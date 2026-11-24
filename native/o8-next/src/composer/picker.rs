@@ -90,14 +90,7 @@ impl Surface {
     ) -> AnyElement {
         if matches!(
             open,
-            "quick"
-                | "prompts"
-                | "repo"
-                | "branch"
-                | "branch-create"
-                | "save-prompt"
-                | "rules"
-                | "result"
+            "quick" | "repo" | "branch" | "branch-create" | "rules" | "result"
         ) {
             return self.prompt_popover(open, window, cx);
         }
@@ -238,12 +231,10 @@ impl Surface {
                     );
                 }
             }
-            // AttachFilesButton's menu: saved prompts, then files from disk.
             // The "+" drawer, after the mobile Add context sheet: recent
-            // screenshots, files, prompts, scope and permission in one place
+            // screenshots, files, scope and permission in one place
             // so the footer stays clean (Q 2026-10-31).
             "attach" => {
-                let has_text = !self.composer.read(cx).text.trim().is_empty();
                 let images = matches!(
                     routing["backend"].as_str(),
                     Some("codex" | "claude" | "fable" | "collide")
@@ -267,26 +258,6 @@ impl Surface {
                         s.attach_composer_image(cx);
                     },
                 ));
-                menu = menu.child(self.menu_row(
-                    "attach-browse-prompts",
-                    "Saved prompts",
-                    "Insert a prompt from your library",
-                    false,
-                    !busy,
-                    cx,
-                    |s, w, cx| s.open_prompt("prompts", w, cx),
-                ));
-                if has_text {
-                    menu = menu.child(self.menu_row(
-                        "attach-save-prompt",
-                        "Save as prompt",
-                        "Keep this draft in your library",
-                        false,
-                        !busy,
-                        cx,
-                        |s, w, cx| s.open_prompt("save-prompt", w, cx),
-                    ));
-                }
                 let repo = self
                     .intent_repo(cx)
                     .as_deref()

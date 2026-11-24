@@ -99,14 +99,6 @@ pub(crate) const COMMANDS: &[Command] = &[
         group: "context",
     },
     Command {
-        command: "/prompts",
-        title: "Saved prompts",
-        description: "Search the prompt library and insert one into this composer.",
-        argument: false,
-        aliases: &[],
-        group: "context",
-    },
-    Command {
         command: "/codex",
         title: "Codex",
         description: "Open a one-agent Codex tab for this repo.",
@@ -132,7 +124,6 @@ pub(crate) const COMMANDS: &[Command] = &[
     },
 ];
 pub(crate) const QUICK: &[(&str, &str, &str, &str)] = &[
-    ("prompts", "Prompts", "Insert a saved prompt", ""),
     (
         "dispatch",
         "Dispatch",

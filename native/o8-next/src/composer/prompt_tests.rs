@@ -6,12 +6,12 @@ fn native_composer_uppercase_slash_runs_on_enter(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     click("composer-input", cx);
-    cx.simulate_input("/PROMPTS");
+    cx.simulate_input("/RULES");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     draw(cx);
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).controls.open, Some("prompts"));
+        assert_eq!(s.composer.read(cx).controls.open, Some("rules"));
         assert!(s.composer.read(cx).text.is_empty());
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
@@ -183,36 +183,13 @@ fn native_composer_controls_rule_send_button_and_manager_use_persisted_routes(
 }
 
 #[gpui::test]
-fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
-    cx: &mut TestAppContext,
-) {
+fn native_composer_controls_create_branch_persists_without_send(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     focus(&surface, cx);
-    cx.simulate_input("A saved composer prompt");
+    cx.simulate_input("A composer draft");
     draw(cx);
-    click("composer-attach", cx);
-    click("attach-save-prompt", cx);
-    click("composer-prompt-submit", cx);
-    wait(&surface, cx, |s, cx| {
-        !s.composer.read(cx).controls.prompt.result.is_empty()
-    });
     let repo = surface.read_with(cx, |s, cx| s.intent_repo(cx).unwrap());
-    let prompts: Value = fixture
-        .client
-        .get(
-            "/api/prompt-library",
-            &[("scope", "available"), ("repoPath", &repo)],
-        )
-        .unwrap();
-    assert!(
-        prompts["prompts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|p| p["body"] == "A saved composer prompt" && p["scope"] == "repo")
-    );
-    click("composer-prompt-close", cx);
     click("composer-attach", cx);
     click("attach-branch", cx);
     wait_selector(cx, "composer-branch-new");
@@ -252,7 +229,7 @@ fn native_composer_controls_save_prompt_and_create_branch_persist_without_send(
         "creating the advisory branch must not switch checkout"
     );
     surface.read_with(cx, |s, cx| {
-        assert_eq!(s.composer.read(cx).text, "A saved composer prompt");
+        assert_eq!(s.composer.read(cx).text, "A composer draft");
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
 }

@@ -1,8 +1,8 @@
 # Native Customize slice (#4548)
 
 The opt-in shell opens Customize from its toolbar. It uses shared theme tokens,
-the existing Client and Composer, and the desktop inventory and prompt-library
-routes with operator-token auth. This is a partial port. It changes no installed
+the existing Client and Composer, and the desktop inventory routes with
+operator-token auth. This is a partial port. It changes no installed
 app defaults, packages, dependency licenses, versions or release configuration.
 
 | Desktop control | Native counterpart | Status |
@@ -55,7 +55,7 @@ app defaults, packages, dependency licenses, versions or release configuration.
 
 `shell_tests.rs` opens the actual shell and drives GPUI clicks, editors and the
 clipboard. `scripts/next/dev-server.ts --customize` hosts production middleware,
-repository, inventory, directives, MCP-server and prompt-library handlers. Its
+repository, inventory, directives and MCP-server handlers. Its
 filesystem input is an owned disposable profile and registered repository; it
 never inspects account files. Database writes and refusal/validation behavior
 are production code. Assertions canonicalize repository paths on both sides.

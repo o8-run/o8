@@ -192,7 +192,7 @@ fn native_composer_controls_intent_chips_apply_without_sending(cx: &mut TestAppC
     });
 }
 #[gpui::test]
-fn native_composer_controls_quick_action_and_prompt_insert_without_send(cx: &mut TestAppContext) {
+fn native_composer_controls_quick_action_inserts_without_send(cx: &mut TestAppContext) {
     let fixture = Fixture::start(true);
     let (surface, cx) = open(cx, &fixture);
     focus(&surface, cx);
@@ -206,19 +206,7 @@ fn native_composer_controls_quick_action_and_prompt_insert_without_send(cx: &mut
     draw(cx);
     let template = surface.read_with(cx, |s, cx| s.composer.read(cx).text.clone());
     assert!(template.starts_with("Decompose the following issue"));
-    focus(&surface, cx);
-    cx.simulate_keystrokes("ctrl-a");
-    cx.simulate_input("Replace this");
-    cx.simulate_keystrokes("ctrl-a");
-    click("composer-attach", cx);
-    click("attach-browse-prompts", cx);
-    wait_selector(cx, "composer-prompt-item-0");
-    click("composer-prompt-item-0", cx);
-    surface.read_with(cx, |s, cx| {
-        assert_eq!(
-            s.composer.read(cx).text,
-            "Review the patch and report the checks."
-        );
+    surface.read_with(cx, |s, _| {
         assert!(s.queue["items"].as_array().unwrap().is_empty());
     });
 }

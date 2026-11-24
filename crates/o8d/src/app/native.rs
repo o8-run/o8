@@ -1,4 +1,4 @@
-//! Saved reads: native prompt operator gate; other reads retain TS admission.
+//! Saved reads: native operator gate; other reads retain TS admission.
 use crate::http;
 use axum::{body::to_bytes, http::StatusCode};
 use std::{path::PathBuf, sync::OnceLock, time::Duration};

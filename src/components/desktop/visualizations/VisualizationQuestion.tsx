@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { RamsButton } from '@/components/desktop/settings/shared';
-import { insertPromptIntoActiveComposer } from '@/lib/prompt-library/client';
 
 /** A visualization proposes a question; the reader explicitly adds it to the draft. */
 export function VisualizationQuestion({ title, question, onClose }: { title: string; question: string; onClose: () => void }) {
@@ -11,7 +10,7 @@ export function VisualizationQuestion({ title, question, onClose }: { title: str
     const composer = document.querySelector<HTMLTextAreaElement>('textarea[data-o8-active-composer="true"]');
     // Add a question after the reader's draft rather than replace a selected phrase.
     composer?.setSelectionRange(composer.value.length, composer.value.length);
-    if (!insertPromptIntoActiveComposer(`${composer?.value.trim() ? '\n\n' : ''}About “${title}”: ${question}\n`)) {
+    if (!insertIntoActiveComposer(`${composer?.value.trim() ? '\n\n' : ''}About “${title}”: ${question}\n`)) {
       setError('Open a chat composer to use this question.');
       return;
     }
@@ -28,4 +27,24 @@ export function VisualizationQuestion({ title, question, onClose }: { title: str
     </div>
     {error ? <div role="status" style={{ marginTop: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>{error}</div> : null}
   </div>;
+}
+
+function insertIntoActiveComposer(body: string): boolean {
+  const composer = document.querySelector<HTMLTextAreaElement>('textarea[data-o8-active-composer="true"]');
+  if (!composer) return false;
+  const start = composer.selectionStart ?? composer.value.length;
+  const end = composer.selectionEnd ?? start;
+  const nextValue = `${composer.value.slice(0, start)}${body}${composer.value.slice(end)}`;
+  const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  if (valueSetter) valueSetter.call(composer, nextValue);
+  else composer.value = nextValue;
+  composer.dispatchEvent(typeof InputEvent === 'function'
+    ? new InputEvent('input', { bubbles: true, inputType: 'insertText', data: body })
+    : new Event('input', { bubbles: true }));
+  const cursor = start + body.length;
+  window.requestAnimationFrame(() => {
+    composer.focus();
+    composer.setSelectionRange(cursor, cursor);
+  });
+  return true;
 }

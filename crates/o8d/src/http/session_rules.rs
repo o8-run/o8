@@ -1,5 +1,5 @@
 //! Operator session-rule writes and the complete correction-hold commit.
-use super::prompt_library::trim;
+use super::text::trim;
 use super::session_rule_lease::{open, Lease};
 use super::*;
 use rusqlite::{params, OptionalExtension};

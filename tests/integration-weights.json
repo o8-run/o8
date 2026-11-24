@@ -713,7 +713,6 @@
   "tests/project-verification-dispatch-real-path.test.ts": 12,
   "tests/promote-beta-real-path.test.ts": 4,
   "tests/prompt-inventory-real-path.test.ts": 7,
-  "tests/prompt-library-api-real-path.test.ts": 4,
   "tests/provider-key-acp-handshake-race-real-path.test.ts": 2,
   "tests/provider-key-background-consumers-real-path.test.ts": 5,
   "tests/provider-key-child-boundary-real-path.test.ts": 3,

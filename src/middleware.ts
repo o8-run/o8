@@ -64,20 +64,8 @@ export const config = {
 let _cachedToken: { path: string; value: string | null; mtimeMs: number; size: number } | null = null;
 
 /** The operator token by the rule handlers and the WS upgrade share (wsTokenFor). */
-function loadPanelToken(freshPrompt = false): string | null {
-  if (freshPrompt) {
-    // Saved prompts use the current credential, without mutating the cache
-    // retained by unrelated routes. Missing/invalid files retain provisioning's
-    // existing WS_TOKEN fallback; read failures never establish authority.
-    try { return wsTokenFor(validWsToken(readFileSync(join(getDataDir(), 'ws-token'), 'utf8'))); }
-    catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? wsTokenFor(null) : null; }
-  }
+function loadPanelToken(): string | null {
   return wsTokenFor(loadStoredPanelToken());
-}
-function isSavedPromptOperatorPath(path: string): boolean {
-  return /^\/api\/prompt-library\/[^/]+\/use\/?$/.test(path)
-    || /^\/api\/prompt-library\/?$/.test(path)
-    || /^\/api\/prompt-library\/[^/]+\/?$/.test(path);
 }
 
 function loadStoredPanelToken(): string | null {
@@ -505,7 +493,7 @@ export function panelGateMiddleware(req: NextRequest, options: { rebuildMissing?
 
   // An operator bearer is valid on every API route. The retained shell layout
   // installs it on same-origin fetches before hydration for local desktop pages.
-  const panelToken = loadPanelToken(isSavedPromptOperatorPath(pathname));
+  const panelToken = loadPanelToken();
   if (panelToken) {
     if (bearer && tokenMatches(bearer, panelToken)) {
       return NextResponse.next();

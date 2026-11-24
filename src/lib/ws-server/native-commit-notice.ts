@@ -1,5 +1,5 @@
 import type { RealtimeMutationPublishRequest } from '@/lib/realtime/types';
-const ACTIONS = new Set(['prompt-library.create', 'prompt-library.edit', 'prompt-library.use', 'prompt-library.delete', 'session-rule.add', 'session-rule.remove']);
+const ACTIONS = new Set(['session-rule.add', 'session-rule.remove']);
 /** Narrow metadata only, on the already-authenticated owner/producer socket. */
 export function nativeCommitNotice(value: unknown, epoch: string): RealtimeMutationPublishRequest | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;

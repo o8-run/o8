@@ -1,4 +1,4 @@
-//! Native customization inventories and the existing saved-prompt library.
+//! Native customization inventories.
 use super::{
     inventory::{Inventory, Row},
     plugins::Plugins,
@@ -7,28 +7,17 @@ use crate::{client::Client, composer::Composer, theme::current as theme};
 use gpui::{
     ClipboardItem, Context, Entity, Render, SharedString, Window, canvas, div, prelude::*, px,
 };
-use serde_json::{Value, json};
 use std::{cell::Cell, collections::HashSet, rc::Rc};
 
 const PAGE_WIDTH: f32 = 1040.;
-const TABS: [(&str, &str); 7] = [
+const TABS: [(&str, &str); 6] = [
     ("rules", "Instructions"),
-    ("prompts", "Prompts"),
     ("skills", "Skills"),
     ("connections", "Connections"),
     ("agents", "Agents"),
     ("hooks", "Hooks"),
     ("plugins", "Plugins"),
 ];
-struct Editor {
-    id: Option<String>,
-    scope: String,
-    updated_at: Option<u64>,
-    repo_path: Option<String>,
-    title: Entity<Composer>,
-    body: Entity<Composer>,
-    tags: Entity<Composer>,
-}
 /// The page's Close button.
 pub struct Close;
 impl gpui::EventEmitter<Close> for Customize {}
@@ -40,8 +29,6 @@ pub struct Customize {
     inventory: Inventory,
     query: Entity<Composer>,
     plugins: Entity<Plugins>,
-    editor: Option<Editor>,
-    deleting: Option<Row>,
     expanded: HashSet<String>,
     loading: bool,
     error: Option<String>,
@@ -73,8 +60,6 @@ impl Customize {
             inventory: Inventory::default(),
             query,
             plugins,
-            editor: None,
-            deleting: None,
             expanded: HashSet::new(),
             loading: false,
             error: None,
@@ -82,7 +67,7 @@ impl Customize {
             painted: Rc::new(Cell::new(u64::MAX)),
             _subscriptions: vec![subscription, plugins_changed],
         };
-        this.load(None, cx);
+        this.load(cx);
         this
     }
     pub fn busy(&self) -> bool {
@@ -91,7 +76,7 @@ impl Customize {
     pub fn belongs_to(&self, repo: Option<&str>) -> bool {
         self.repo.as_deref() == repo
     }
-    fn load(&mut self, write: Option<(String, String, Value)>, cx: &mut Context<Self>) {
+    fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }
@@ -103,57 +88,15 @@ impl Customize {
         } else {
             self.repo.clone()
         };
-        let saving = write.is_some();
-        let task = cx.background_executor().spawn(async move {
-            if let Some((method, path, body)) = write {
-                client.customize_request(&method, &path, &body)?;
-            }
-            Inventory::load(&client, repo.as_deref())
-        });
+        let task = cx
+            .background_executor()
+            .spawn(async move { Inventory::load(&client, repo.as_deref()) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
                 match result {
-                    Ok(inventory) => {
-                        this.inventory = inventory;
-                        if saving {
-                            this.editor = None;
-                            this.deleting = None;
-                        }
-                    }
-                    Err(error) => this.error = Some(error),
-                }
-                this.revision += 1;
-                cx.notify();
-            });
-        })
-        .detach();
-        self.revision += 1;
-        cx.notify();
-    }
-    fn edit(&mut self, row: Option<Row>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
-        }
-        let Some(row) = row else {
-            self.begin_edit(None, window, cx);
-            return;
-        };
-        self.loading = true;
-        self.error = None;
-        let client = self.client.clone();
-        let task = cx.background_executor().spawn(async move {
-            let response: Value =
-                client.get(&format!("/api/prompt-library/{}", escape(&row.id)), &[])?;
-            Row::prompt(&response["prompt"])
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let result = task.await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.loading = false;
-                match result {
-                    Ok(row) => this.begin_edit(Some(row), window, cx),
+                    Ok(inventory) => this.inventory = inventory,
                     Err(error) => this.error = Some(error),
                 }
                 this.revision += 1;
@@ -165,115 +108,18 @@ impl Customize {
         cx.notify();
     }
     fn copy(&mut self, row: Row, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
-        }
-        if self.tab != "prompts" {
+        if !self.loading {
             cx.write_to_clipboard(ClipboardItem::new_string(row.body));
-            return;
         }
-        self.loading = true;
-        self.error = None;
-        let client = self.client.clone();
-        let task = cx.background_executor().spawn(async move {
-            let response: Value =
-                client.get(&format!("/api/prompt-library/{}", escape(&row.id)), &[])?;
-            Row::prompt(&response["prompt"])
-        });
-        cx.spawn(async move |this, cx| {
-            let result = task.await;
-            let _ = this.update(cx, |this, cx| {
-                this.loading = false;
-                match result {
-                    Ok(row) => cx.write_to_clipboard(ClipboardItem::new_string(row.body)),
-                    Err(error) => this.error = Some(error),
-                }
-                this.revision += 1;
-                cx.notify();
-            });
-        })
-        .detach();
-        self.revision += 1;
-        cx.notify();
-    }
-    fn begin_edit(&mut self, row: Option<Row>, window: &mut Window, cx: &mut Context<Self>) {
-        let input = |text: String, cx: &mut Context<Self>| {
-            cx.new(|cx| {
-                let mut input = Composer::new(cx);
-                input.text = text;
-                input
-            })
-        };
-        let title = input(
-            row.as_ref().map(|r| r.title.clone()).unwrap_or_default(),
-            cx,
-        );
-        let body = input(row.as_ref().map(|r| r.body.clone()).unwrap_or_default(), cx);
-        let tags = input(
-            row.as_ref().map(|r| r.tags.join(", ")).unwrap_or_default(),
-            cx,
-        );
-        title.read(cx).focus.focus(window);
-        self.editor = Some(Editor {
-            repo_path: row
-                .as_ref()
-                .map(|r| r.repo_path.clone())
-                .unwrap_or_else(|| {
-                    if self.personal {
-                        None
-                    } else {
-                        self.repo.clone()
-                    }
-                }),
-            updated_at: row.as_ref().and_then(|r| r.updated_at),
-            id: row.as_ref().map(|r| r.id.clone()),
-            scope: row
-                .map(|r| r.scope)
-                .unwrap_or_else(|| if self.personal { "global" } else { "repo" }.into()),
-            title,
-            body,
-            tags,
-        });
-        self.error = None;
-        self.revision += 1;
-        cx.notify();
-    }
-    fn save(&mut self, cx: &mut Context<Self>) {
-        let Some(editor) = &self.editor else {
-            return;
-        };
-        let tags: Vec<_> = editor
-            .tags
-            .read(cx)
-            .text
-            .split(',')
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(str::to_owned)
-            .collect();
-        let mut body = json!({"title":editor.title.read(cx).text,"body":editor.body.read(cx).text,"tags":tags,"scope":editor.scope,"repoPath":editor.repo_path});
-        if let Some(revision) = editor.updated_at {
-            body["expectedUpdatedAt"] = json!(revision);
-        }
-        let (method, path) = if let Some(id) = &editor.id {
-            ("PATCH", format!("/api/prompt-library/{}", escape(id)))
-        } else {
-            ("POST", "/api/prompt-library".into())
-        };
-        self.load(Some((method.into(), path, body)), cx);
     }
     fn scope(&mut self, personal: bool, cx: &mut Context<Self>) {
-        if self.loading || self.editor.is_some() {
+        if self.loading {
             return;
         }
         self.personal = personal;
         self.inventory = Inventory::default();
-        self.deleting = None;
-        self.load(None, cx);
+        self.load(cx);
     }
-}
-fn escape(id: &str) -> String {
-    url::form_urlencoded::byte_serialize(id.as_bytes()).collect()
 }
 pub(super) fn control(
     id: &str,
@@ -301,28 +147,12 @@ pub(super) fn control(
         })
         .child(label.into())
 }
-fn field(id: &'static str, input: &Entity<Composer>, busy: bool, cx: &gpui::App) -> gpui::Div {
-    div().debug_selector(move || id.into()).child(if busy {
-        // Removing the input entity from the frame also removes its platform
-        // input handler while the frozen request is in flight.
-        div()
-            .min_h(px(38.))
-            .p(px(9.))
-            .text_color(theme().text_secondary)
-            .child(input.read(cx).text.clone())
-            .into_any_element()
-    } else {
-        input.clone().into_any_element()
-    })
-}
 impl Customize {
     pub fn tab_is(&self, id: &str) -> bool {
         self.tab == id
     }
     pub fn select_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         self.tab = id.into();
-        self.editor = None;
-        self.deleting = None;
         self.error = None;
         self.revision += 1;
         cx.notify();
@@ -431,9 +261,8 @@ impl Render for Customize {
                                     )
                                 })
                                 .child(
-                                    control("custom-refresh", "Refresh", !busy).on_click(
-                                        cx.listener(|this, _, _, cx| this.load(None, cx)),
-                                    ),
+                                    control("custom-refresh", "Refresh", !busy)
+                                        .on_click(cx.listener(|this, _, _, cx| this.load(cx))),
                                 )
                                 .child(
                                     control("custom-close", "Close", true)
@@ -470,8 +299,6 @@ impl Render for Customize {
                                 move |this, _, _, cx| {
                                     if !this.loading {
                                         this.tab = id.into();
-                                        this.editor = None;
-                                        this.deleting = None;
                                         this.error = None;
                                         this.revision += 1;
                                         cx.notify();
@@ -506,47 +333,7 @@ impl Render for Customize {
                             .child(error),
                     )
                 })
-                .when(self.tab == "prompts" && self.editor.is_none(), |v| {
-                    v.child(
-                        control("custom-new", "Save a prompt", !busy).on_click(
-                            cx.listener(|this, _, window, cx| this.edit(None, window, cx)),
-                        ),
-                    )
-                })
-                .when_some(self.editor.as_ref(), |v, editor| {
-                    v.child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.))
-                            .child("Title")
-                            .child(field("custom-title", &editor.title, busy, cx))
-                            .child("Text")
-                            .child(field("custom-body", &editor.body, busy, cx))
-                            .child("Tags")
-                            .child(field("custom-tags", &editor.tags, busy, cx))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(8.))
-                                    .child(
-                                        control("custom-save", "Save", !busy)
-                                            .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
-                                    )
-                                    .child(control("custom-cancel", "Cancel", !busy).on_click(
-                                        cx.listener(|this, _, _, cx| {
-                                            if !this.loading {
-                                                this.editor = None;
-                                                this.error = None;
-                                                this.revision += 1;
-                                                cx.notify();
-                                            }
-                                        }),
-                                    )),
-                            ),
-                    )
-                })
-                .when(self.editor.is_none() && self.tab != "plugins", |v| {
+                .when(self.tab != "plugins", |v| {
                     v.when(all.is_empty() && !busy && self.error.is_none(), |v| {
                         v.child(
                             div()
@@ -573,8 +360,6 @@ impl Render for Customize {
                                 .overflow_hidden()
                                 .children(rows.into_iter().enumerate().map(|(i, row)| {
                                     let copy = row.clone();
-                                    let edit = row.clone();
-                                    let delete = row.clone();
                                     let key = format!("{}:{}", self.tab, row.title);
                                     let open = self.expanded.contains(&key);
                                     let preview = row
@@ -651,42 +436,7 @@ impl Render for Customize {
                                                     .on_click(cx.listener(move |this, _, _, cx| {
                                                         this.copy(copy.clone(), cx)
                                                     })),
-                                                )
-                                                .when(self.tab == "prompts", |v| {
-                                                    v.child(
-                                                        control(
-                                                            &format!("custom-edit-{i}"),
-                                                            "Edit",
-                                                            !busy,
-                                                        )
-                                                        .on_click(cx.listener(
-                                                            move |this, _, window, cx| {
-                                                                this.edit(
-                                                                    Some(edit.clone()),
-                                                                    window,
-                                                                    cx,
-                                                                )
-                                                            },
-                                                        )),
-                                                    )
-                                                    .child(
-                                                        control(
-                                                            &format!("custom-delete-{i}"),
-                                                            "Delete",
-                                                            !busy,
-                                                        )
-                                                        .on_click(cx.listener(
-                                                            move |this, _, _, cx| {
-                                                                if !this.loading {
-                                                                    this.deleting =
-                                                                        Some(delete.clone());
-                                                                    this.revision += 1;
-                                                                    cx.notify();
-                                                                }
-                                                            },
-                                                        )),
-                                                    )
-                                                }),
+                                                ),
                                         )
                                         .when(open, |v| {
                                             v.child(
@@ -700,39 +450,6 @@ impl Render for Customize {
                                 })),
                         )
                     })
-                })
-                .when_some(self.deleting.clone(), |v, id| {
-                    v.child(
-                        div()
-                            .flex()
-                            .gap(px(8.))
-                            .child("Delete saved prompt?")
-                            .child(control("custom-delete-confirm", "Delete", !busy).on_click(
-                                cx.listener(move |this, _, _, cx| {
-                                    this.load(
-                                        Some((
-                                            "DELETE".into(),
-                                            format!(
-                                                "/api/prompt-library/{}?expectedUpdatedAt={}",
-                                                escape(&id.id),
-                                                id.updated_at.unwrap()
-                                            ),
-                                            json!({}),
-                                        )),
-                                        cx,
-                                    )
-                                }),
-                            ))
-                            .child(control("custom-delete-cancel", "Cancel", !busy).on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    if !this.loading {
-                                        this.deleting = None;
-                                        this.revision += 1;
-                                        cx.notify();
-                                    }
-                                }),
-                            )),
-                    )
                 })
                 .child(canvas(|_, _, _| (), move |_, _, _, _| painted.set(revision)).size(px(1.))),
             )

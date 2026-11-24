@@ -56,17 +56,6 @@
       }
     },
     {
-      "path": "/api/prompt-library",
-      "o8d": {
-        "p50Ms": 1.4,
-        "p95Ms": 2.99
-      },
-      "next": {
-        "p50Ms": 4.48,
-        "p95Ms": 8.56
-      }
-    },
-    {
       "path": "/api/customize/inventory",
       "o8d": {
         "p50Ms": 1.47,
