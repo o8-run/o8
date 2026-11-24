@@ -107,14 +107,6 @@ pub(crate) const COMMANDS: &[Command] = &[
         group: "context",
     },
     Command {
-        command: "/chat",
-        title: "Chat",
-        description: "Open a casual o8 chat tab with tools on this repo.",
-        argument: true,
-        aliases: &[],
-        group: "route",
-    },
-    Command {
         command: "/codex",
         title: "Codex",
         description: "Open a one-agent Codex tab for this repo.",

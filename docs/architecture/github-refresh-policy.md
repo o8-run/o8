@@ -33,7 +33,6 @@ They share the policy, not an unsafe cast between different response shapes.
 | `components/desktop/useBranchPr.ts` and branch/session marker callers | Select from shared PR list; never read detail per badge | Inherit list |
 | `components/desktop/repo-registry/useRepoCardModel.ts`, `RepoStatusHover.tsx` | PR list on hover; cached badges survive closing; CI uses shared run list | Inherit list while enabled |
 | `components/desktop/IssueLinkPicker.tsx` | Shared issue list while picker open | Inherit list |
-| `components/desktop/llm-chat/useHistoryAndMission.ts` | Shared issue/PR counts for resolved mission repository | Inherit list |
 | `components/desktop/repo-focus/tabs/control-room/useIssueIntake.ts` | Canonical issue lists grouped by remote (checkout-scoped fallback); explicit refresh | Inherit list |
 | `components/desktop/agent-panel/useActivityExtras.ts` | Four shared list entries per repository; lifecycle and explicit refresh | 120s / 300s |
 | `components/desktop/useO8ActivityData.ts`, `o8-activity-helpers.tsx` | Same remote entries; local folder validation remains independent; lifecycle/relevant realtime/manual retry | 120s / 300s fallback; transcript-only batches ignored |

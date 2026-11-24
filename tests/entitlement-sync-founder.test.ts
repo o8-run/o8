@@ -1,7 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { NextRequest } from 'next/server';
 import { exportSPKI, generateKeyPair, SignJWT } from 'jose';
 // @ts-expect-error jsdom is a test dependency without bundled declarations
@@ -16,13 +15,7 @@ import type { Plan } from '@/lib/entitlement/types';
 const SUBJECT = 'user_lifetime_fixture';
 
 const serverIdentity = vi.hoisted(() => ({ userId: null as string | null }));
-const gatewayStream = vi.hoisted(() => vi.fn(async function* () { yield 'Fixture response'; }));
 vi.mock('@clerk/nextjs/server', () => ({ auth: async () => serverIdentity }));
-vi.mock('@/lib/chat/gateway-client', () => ({
-  FREE_CHAT_MODEL_ID: 'fixture-model', PAID_CHAT_MODEL_ID: 'paid:fixture',
-  missingChatGatewayEnv: () => [], resolveDeepSeekByokKey: async () => null,
-  streamGatewayChat: gatewayStream,
-}));
 vi.mock('@/lib/llm/context', () => ({ buildSystemPrompt: () => '', getWorkspaceContext: () => ({}) }));
 const fixtureAuth = vi.hoisted(() => ({
   clerkEnabled: true, isLoaded: true, signedIn: true,
@@ -102,7 +95,6 @@ describe('lifetime seat through desktop entitlement sync (#3269)', () => {
   beforeEach(async () => {
     vi.resetModules();
     serverIdentity.userId = null;
-    gatewayStream.mockClear();
     closeMainDb = null;
     fixtureAuth.user = { id: SUBJECT, name: 'Account' };
     fixtureAuth.signedIn = true;
@@ -214,30 +206,6 @@ describe('lifetime seat through desktop entitlement sync (#3269)', () => {
     expect(existsSync(founderPath())).toBe(false);
     expect(existsSync(path.join(dataDir, 'entitlement.json'))).toBe(false);
   });
-  it('preserves the ten-turn daily chat cap through the real route and persisted counter', async () => {
-    serverIdentity.userId = SUBJECT;
-    const { POST } = await import('@/app/api/v2/chat/route');
-    const request = () => new NextRequest('http://localhost/api/v2/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Hello', model: 'o8-default', history: [] }),
-    });
-    for (let turn = 0; turn < 10; turn++) {
-      const result = await POST(request());
-      expect(result.status).toBe(200);
-      await result.text();
-    }
-    const rejected = await POST(request());
-    expect(rejected.status).toBe(429);
-    const error = await rejected.json();
-    expect(error).toMatchObject({ error: 'free_tier_rate_limit', limit: 10, remaining: 0 });
-    expect(error).not.toHaveProperty('upgradeUrl');
-    expect(gatewayStream).toHaveBeenCalledTimes(10);
-    const persisted = new Database(path.join(dataDir, 'chat-usage.db'), { readonly: true });
-    try {
-      expect(persisted.prepare('SELECT count FROM chat_usage WHERE user_id = ?').get(SUBJECT)).toEqual({ count: 10 });
-    } finally { persisted.close(); }
-  });
-
   it('preserves the proxy budget gate with a real authenticated session and persisted usage', async () => {
     const upstream = vi.fn();
     vi.stubGlobal('fetch', upstream);

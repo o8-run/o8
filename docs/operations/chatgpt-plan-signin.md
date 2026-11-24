@@ -67,9 +67,6 @@ expose that route or provide a ChatGPT API lead or Symon integration.
   persist and restore the explicit tab without adopting a repository or terminal.
   The entry-point fixture also verifies the exact upstream input and refuses
   stale selection, repository and tool context for text-only requests.
-- [Streaming tests](../../src/components/desktop/llm-chat/streaming-plan.test.ts)
-  cover split frames, explicit completion, malformed data, usage metadata and
-  absence of extra automatic inference.
 - [Opt-in native credential test](../../src/lib/chatgpt-plan/native-keychain.test.ts)
   verifies a large synthetic record through the real macOS Keychain, including
   replacement and a cold read. The test creates and removes only its own entries.

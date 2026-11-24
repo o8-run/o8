@@ -63,7 +63,6 @@ chmodSync(binary, 0o700);
 
 const { codexBackend } = await import('@/lib/lane/orchestrator-backends/codex');
 const { launchOwnedCodexSession, getOwnedCodexRuntimeTail, getOwnedCodexReviewPacket, interruptOwnedCodexSession } = await import('@/lib/codex/owned');
-const { POST } = await import('@/app/api/v2/proxy/cli/route');
 
 function repo(name: string, reject: boolean) {
   const cwd = join(root, name);
@@ -169,13 +168,6 @@ describe.skipIf(process.platform === 'win32')('GPT-6.1 Sol real CLI entry points
       expect(saved(launched.surfaceId).recentRuns).toHaveLength(attempts);
     }, { timeout: 10_000 });
     expect(calls(cwd)).toHaveLength(attempts * 2);
-    writeFileSync(join(getDataDir(), 'repos.json'), JSON.stringify([{ id: 'fixture', name: 'fixture', localPath: cwd }]));
-    const response = await POST(new Request('http://localhost/api/v2/proxy/cli', {
-      method: 'POST', body: JSON.stringify({ runtime: 'codex', model: 'cli:codex:gpt-6.1-sol',
-        repoPath: cwd, messages: [{ role: 'user', content: 'Reply once' }] }),
-    }));
-    expect(await response.text()).toContain('"type":"error"');
-    expect(calls(cwd)).toHaveLength(attempts * 3);
   });
 
   it.each([true, false])('reconciles a failed bridge review without reacquiring its lock, unsupported=%s', async (unsupported) => {
@@ -199,19 +191,4 @@ describe.skipIf(process.platform === 'win32')('GPT-6.1 Sol real CLI entry points
     expect(calls(cwd)).toHaveLength(1);
     expect(saved(surfaceId).model).toBe('gpt-6.1-sol');
   }, 15_000);
-
-  it.each([true, false])('CLI chat POST rejects=%s without hiding the selected model', async (reject) => {
-    const cwd = repo(`proxy-${reject}`, reject);
-    writeFileSync(join(getDataDir(), 'repos.json'), JSON.stringify([{ id: 'fixture', name: 'fixture', localPath: cwd }]));
-    const response = await POST(new Request('http://localhost/api/v2/proxy/cli', {
-      method: 'POST', body: JSON.stringify({ runtime: 'codex', model: 'cli:codex:gpt-6.1-sol',
-        repoPath: cwd, messages: [{ role: 'user', content: 'Reply once' }] }),
-    }));
-    expect(response.status).toBe(200);
-    const text = await response.text();
-    expect(calls(cwd).map((call) => call.model)).toEqual(reject ? ['gpt-6.1-sol', 'gpt-5.6-sol'] : ['gpt-6.1-sol']);
-    expect(text).not.toContain('"type":"error"');
-    expect(text.match(/Update the Codex CLI/g) ?? []).toHaveLength(reject ? 1 : 0);
-    expect(text).toContain('Completed on ' + (reject ? 'gpt-5.6-sol' : 'gpt-6.1-sol'));
-  });
 });

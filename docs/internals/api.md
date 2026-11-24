@@ -512,7 +512,6 @@ principal for stateful routes. Only session inspection (read) and logout
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/v2/chat` | Streaming chat endpoint (free / paid tier routing via gateway). |
 | GET | `/api/v2/chat-history?tabId=...` | Read persisted LLM chat messages per tab. |
 | POST | `/api/v2/chat-history` | Append a message to a tab's history. |
 | PATCH | `/api/v2/chat-history` | Update a tab's history. |
@@ -520,12 +519,11 @@ principal for stateful routes. Only session inspection (read) and logout
 | GET | `/api/v2/chat-history/list?q=...` | List saved LLM chat conversations with optional FTS. |
 | GET | `/api/v2/context/files?q=...` | Autocomplete file paths in workspace. |
 | POST | `/api/v2/context/files` | Read file contents for context injection. |
-| GET | `/api/v2/files?path=...` | Read a workspace file (LLM Chat "Apply to File"). |
+| GET | `/api/v2/files?path=...` | Read a workspace file. |
 | POST | `/api/v2/files` | Write / edit a workspace file. |
 | GET | `/api/v2/keys` | List configured BYOK providers (keys masked). |
 | POST | `/api/v2/keys` | Set / update a provider key. |
 | DELETE | `/api/v2/keys` | Remove a provider key. |
-| POST | `/api/v2/proxy/cli` | Route chat through an installed CLI runtime (Claude Code, Codex, Gemini CLI). |
 | POST | `/api/v2/proxy/llm` | BYOK provider proxy (Anthropic / OpenAI / OpenRouter / Gemini) with cost computation + cache multipliers. |
 
 ### `/api/worker/*` — Cloud worker event polling (self-authenticating)

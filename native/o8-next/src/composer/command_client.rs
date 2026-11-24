@@ -274,10 +274,6 @@ pub(super) fn run(
             "Gemini has no native single-runtime destination yet. The command draft is retained."
                 .into(),
         ),
-        "/chat" => Err(
-            "This native surface has no Chat-tab destination yet. The command draft is retained."
-                .into(),
-        ),
         "/rule" => {
             if args.is_empty() {
                 return Err("A session rule needs text.".into());

@@ -112,7 +112,6 @@
     "bench:coding:e2e:judge": "node scripts/run.mjs NODE_OPTIONS=--import=./scripts/register-server-only-stub.mjs -- tsx scripts/bench/run-coding.ts --e2e-judge"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "^3.0.190",
     "@chenglou/pretext": "^0.0.8",
     "@clerk/nextjs": "^7.3.0",
     "@earendil-works/chord": "1.1.0",
@@ -134,7 +133,6 @@
     "@tauri-apps/plugin-store": "^2.4.2",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "adm-zip": "^0.6.1",
-    "ai": "^6.0.278",
     "better-sqlite3": "^12.8.0",
     "dompurify": "^3.4.17",
     "drizzle-orm": "^0.45.2",
