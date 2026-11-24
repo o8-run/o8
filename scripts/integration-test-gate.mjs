@@ -61,7 +61,7 @@ if (process.env.CI === 'true' && !process.env.O8D_TEST_BINARY
   // opt-level 1 keeps the cold build near a debug build's time; an unoptimized
   // daemon is too slow for the 20 x 3 MiB screenshot ledger proof.
   const build = spawnSync('cargo', ['build', '--locked', '--manifest-path', manifest,
-    '--features', 'experimental-session-reads', '--bin', 'o8d',
+    '--features', 'experimental-session-reads,experimental-mcp', '--bin', 'o8d',
     '--config', 'profile.dev.opt-level=1', '--config', 'profile.dev.debug=0'], { cwd: root, stdio: 'inherit' });
   if (build.status !== 0) {
     console.error('[integration-gate] o8d build failed; native composer owner tests cannot run');
@@ -70,6 +70,8 @@ if (process.env.CI === 'true' && !process.env.O8D_TEST_BINARY
   process.env.O8D_TEST_BINARY = join(root, 'crates/o8d/target/debug/o8d');
   // The HTTP parity suite reuses this daemon instead of starting its own build.
   process.env.O8D_HTTP_TEST_BINARY ??= process.env.O8D_TEST_BINARY;
+  // So does the MCP parity suite, which always runs in the merge group (#6761).
+  process.env.O8D_MCP_TEST_BINARY ??= process.env.O8D_TEST_BINARY;
 }
 
 function sleep(ms) {
