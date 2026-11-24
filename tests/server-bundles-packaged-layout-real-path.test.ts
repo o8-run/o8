@@ -168,6 +168,10 @@ describe('shared server bundles in the packaged layout', () => {
       expect(files).toContain(`${label}.mjs`);
       expect(files).toContain(`${label}-impl.mjs`);
       const launcher = readFileSync(join(serverDir, `${label}.mjs`), 'utf8');
+      // The launcher's allocator setting stays with the server, not the agents it starts.
+      const dropsAllocatorSetting = launcher.indexOf('delete process.env.MallocSpaceEfficient;');
+      expect(dropsAllocatorSetting).toBeGreaterThan(-1);
+      expect(dropsAllocatorSetting).toBeLessThan(launcher.indexOf('await import'));
       if (label !== 'operator-mcp-proxy') {
         expect(launcher.indexOf('prepareNativeAddons')).toBeLessThan(launcher.indexOf('await import'));
       } else expect(launcher).not.toContain('prepareNativeAddons');

@@ -426,6 +426,10 @@ try {
   }
 } catch { /* never let a cache failure stop the server booting */ }
 
+// The launcher's macOS allocator setting applies to this process only; agents
+// and tools it starts keep the default allocator.
+delete process.env.MallocSpaceEfficient;
+
 // Select the immutable packaged prebuild for the user's Node ABI and
 // architecture before either package loads. This must never copy or chmod files
 // inside the signed app bundle; native-bundle.mjs removes build/ at export time.
