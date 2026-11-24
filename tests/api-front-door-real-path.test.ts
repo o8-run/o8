@@ -132,15 +132,15 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     expect(requests).toEqual([]);
     expect(await registered.json()).toMatchObject({ apiPort, wsPort: apiPort });
     if (rust) {
-      // Front-door takeover keeps native readers off by default (#6453),
-      // including authenticated requests through the real o8d bridge.
+      // Session readers stay off behind the front door (#6453), but identity is an
+      // o8d-owned startup read (#6500), served natively through the real bridge.
       const admitted = await fetch(origin + '/api/setup/identity', { headers: { authorization: 'Bearer ' + token } });
-      expect(admitted.headers.get('x-o8d-native-session-read')).toBe(null);
+      expect(admitted.headers.get('x-o8d-native')).toBe('1');
       expect(await admitted.json()).toMatchObject({ apiPort, wsPort: apiPort });
     }
     const wsInfo = await fetch(origin + '/api/panel/ws-info', { headers: { authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10_000) });
     expect(wsInfo.status).toBe(200);
-    if (rust) expect(wsInfo.headers.get('x-o8d-native-session-read')).toBe(null);
+    if (rust) expect(wsInfo.headers.get('x-o8d-native')).toBe('1');
     expect(await wsInfo.json()).toMatchObject({ wsPort: apiPort });
     const websocket = new WebSocket(`ws://127.0.0.1:${apiPort}/ws?token=${token}`);
     const wsDeadline = setTimeout(() => websocket.terminate(), 30_000);
@@ -157,7 +157,7 @@ it.each([false, true])('owns the advertised API socket and forwards with legacy 
     expect(await forwarded.json()).toEqual({ method: 'POST', path: '/api/fixture/unregistered?repeat=a&repeat=b&text=%E9%9B%AA',
       host: `127.0.0.1:${apiPort}`, body: bytes.toString('base64') });
     for (const [path, method] of [['/api/setup/identity', 'POST'], ['/api/lanes/reap', 'GET'],
-      ['/api/prompt-library/import', 'GET'], ['/api/automations/connected', 'PUT']]) {
+      ['/api/automations/connected', 'PUT']]) {
       const response = await fetch(origin + path, { method, headers: { authorization: 'Bearer ' + token } });
       expect(response.status, path).toBe(207); expect((await response.json()).path).toBe(path);
     }

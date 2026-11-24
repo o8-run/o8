@@ -227,6 +227,8 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/mcp', 'GET', () => import('@/lib/mcp/operator-mcp-get')),
     route('/api/mcp', 'POST DELETE', () => import('@/app/api/mcp/route')),
   ],
+  // The canvas reads operator defaults through the settings registration above.
+  canvas: [],
   grid: [],
   shortcuts: [], // Local shortcut reference has no HTTP transport.
   terminal: [route('/api/mobile/terminal-sessions', 'GET', () => import('@/app/api/mobile/terminal-sessions/route'))],

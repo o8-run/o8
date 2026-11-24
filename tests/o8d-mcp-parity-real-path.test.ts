@@ -416,7 +416,7 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, [recording])).toBe(1);
   });
 
-  nativeReadTest.each(['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
+  nativeReadTest.each(['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'])(
     'reads %s natively with zero TypeScript requests', async (name) => {
       const expected = await call(base, name);
       seen.length = 0;
@@ -426,6 +426,15 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
       expect(seen.map((entry) => entry.path)).toEqual([]);
     },
   );
+
+  // Review backpressure counts this process's live review claims, which o8d cannot see,
+  // so the native host hands mission status to TypeScript and returns its exact answer.
+  nativeReadTest('falls back to TypeScript for get_mission_status with the same answer', async () => {
+    const expected = await call(base, 'get_mission_status');
+    seen.length = 0;
+    compareMcpExchanges(expected, await call(nativeRust, 'get_mission_status'));
+    expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
+  });
 
   nativeReadTest('preserves runtime evidence and unavailable lead markers across native MCP transports', async () => {
     await call(base, 'o8_status', { fresh: true });
@@ -499,8 +508,8 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
     expect(await replayMcp(base, nativeRust, token, additional)).toBe(additional.length);
   });
 
-  nativeReadTest('keeps all six warmed SQLite reads available during an upstream outage without writes', async () => {
-    const names = ['o8_status', 'get_mission_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
+  nativeReadTest('keeps all five warmed SQLite reads available during an upstream outage without writes', async () => {
+    const names = ['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects', 'o8_lease_list'];
     const expected = new Map();
     for (const name of names) expected.set(name, await call(base, name));
     const sqlite = getSqlite();
