@@ -1,7 +1,7 @@
 /**
- * The review stall pass is skipped while nothing it reads has changed: lanes,
- * lane events, the review queue, a reviewing lane's approvals, its HEAD and its
- * branch and base refs.
+ * The review stall pass is skipped while nothing it reads has changed: the
+ * reviewing lanes and their lane events, the review queue, a reviewing lane's
+ * approvals, its HEAD and its branch and base refs. Other lanes do not count.
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -95,17 +95,39 @@ it('skips the stall pass until a lane, its approvals, the queue, its HEAD or its
     await tick();
     expect(passes.count).toBe(4);
 
+    // Another lane's events and updates are not read by the pass.
+    const other = createLane({
+      repoPath: repoDir, worktreePath: repoDir, branch: 'other', baseBranch: 'main',
+      runtime: 'codex', label: 'idle neighbour', packetId: 'pkt-stall-other', sessionKey: 'test-runtime:stall-other',
+    });
+    await tick();
+    const afterCreate = passes.count;
+    recordLaneEvent(other.id, 'close_timing', 'system', { totalMs: 1 });
+    setLaneStatus(other.id, 'idle', 'system', 'fixture');
+    recordLaneEvent(other.id, 'close_timing', 'system', { totalMs: 2 });
+    await tick();
+    await tick();
+    expect(passes.count).toBe(afterCreate);
+
+    // A lane that starts awaiting review is read.
+    setLaneStatus(other.id, 'reviewing', 'system', 'fixture');
+    await tick();
+    expect(passes.count).toBe(afterCreate + 1);
+    setLaneStatus(other.id, 'idle', 'system', 'fixture');
+    await tick();
+    expect(passes.count).toBe(afterCreate + 2);
+
     // No timer: ten minutes with nothing changed is still skipped.
     vi.setSystemTime(Date.now() + 10 * 60_000);
     await runReviewRecoveryPass();
-    expect(passes.count).toBe(4);
+    expect(passes.count).toBe(afterCreate + 2);
 
     // A fetch moves origin's copy of the base, without touching this worktree's HEAD.
     git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     await tick();
-    expect(passes.count).toBe(5);
+    expect(passes.count).toBe(afterCreate + 3);
     await tick();
-    expect(passes.count).toBe(5);
+    expect(passes.count).toBe(afterCreate + 3);
   } finally {
     vi.useRealTimers();
   }

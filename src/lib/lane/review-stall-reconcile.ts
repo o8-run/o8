@@ -193,22 +193,22 @@ function laneRefsStamp(repoPath: string, branch: string | null, baseBranch: stri
 }
 
 /**
- * Everything a stall pass reads, as one string: lanes and lane events, the
- * review queue, approvals, and the HEAD, branch and base refs of each
- * reviewing lane.
+ * Everything a stall pass reads, as one string: the reviewing lanes and their
+ * lane events, the review queue, their approvals, and the HEAD, branch and base
+ * refs of each. Other lanes are not read, so their updates and events (an
+ * archived lane's close receipts, a running lane's progress) do not count.
  */
 export function reviewStallInputs(): string {
   const db = getSqlite();
-  const row = db.prepare(`
-    SELECT
-      (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), '') FROM lanes) AS lanes,
-      (SELECT COALESCE(MAX(rowid), 0) FROM lane_events) AS events,
-      (SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), '') FROM review_queue) AS queue
-  `).get() as Record<string, string | number>;
+  const queue = db.prepare(`
+    SELECT COUNT(*) || ':' || COALESCE(MAX(updated_at), '') AS queue FROM review_queue
+  `).get() as { queue: string };
   const reviewing = db.prepare(`
-    SELECT id, worktree_path, repo_path, packet_id, session_key, branch, base_branch FROM lanes WHERE status = 'reviewing' ORDER BY id
-  `).all() as Array<{ id: string; worktree_path: string | null; repo_path: string; packet_id: string | null; session_key: string | null;
-    branch: string | null; base_branch: string | null }>;
+    SELECT id, updated_at, worktree_path, repo_path, packet_id, session_key, branch, base_branch FROM lanes WHERE status = 'reviewing' ORDER BY id
+  `).all() as Array<{ id: string; updated_at: string; worktree_path: string | null; repo_path: string; packet_id: string | null;
+    session_key: string | null; branch: string | null; base_branch: string | null }>;
+  // Through the (lane_id, timestamp) index, which also holds each row's rowid.
+  const laneEvents = db.prepare('SELECT COALESCE(MAX(rowid), 0) AS at FROM lane_events WHERE lane_id = ?');
   // Only the approvals a pass reads (by lane, packet or session), through their
   // indexes: scanning the whole table reads every stored diff.
   const approvals = reviewing.map((lane) => {
@@ -219,10 +219,11 @@ export function reviewStallInputs(): string {
     return `${found.n}:${found.at}`;
   });
   const heads = reviewing.map((lane, index) => (
-    `${lane.id}=${worktreeHeadStamp(lane.worktree_path || lane.repo_path)}/${approvals[index]}`
+    `${lane.id}@${lane.updated_at}#${(laneEvents.get(lane.id) as { at: number }).at}`
+      + `=${worktreeHeadStamp(lane.worktree_path || lane.repo_path)}/${approvals[index]}`
       + `/${laneRefsStamp(lane.repo_path, lane.branch, lane.base_branch)}`
   ));
-  return [row.lanes, row.events, row.queue, ...heads].join('|');
+  return [queue.queue, ...heads].join('|');
 }
 
 export async function reconcileReviewStalls(): Promise<ReviewStallReconcileResult> {
