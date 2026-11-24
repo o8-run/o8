@@ -5,6 +5,9 @@ pub fn voice_only(value: Option<&str>) -> bool {
     value.is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
+/// The allocator setting the Node servers start with on macOS.
+pub const MALLOC_SPACE_EFFICIENT: &str = "MallocSpaceEfficient";
+
 #[derive(Default)]
 pub struct ServerEnvironment {
     pub data_dir: String,
@@ -42,6 +45,13 @@ impl ServerEnvironment {
             .env("O8_INSTANCE_ID", &self.instance_id)
             .env("O8_SIDECAR_PID", std::process::id().to_string())
             .env("NODE_COMPILE_CACHE", &self.compile_cache);
+        // macOS keeps pages a server freed after startup counted against it
+        // until memory runs short. This mode hands them back (about 40 MB less
+        // footprint for the WS server at rest). Each server removes it from its
+        // own environment at startup, so the agents and tools it starts keep
+        // the default allocator.
+        #[cfg(target_os = "macos")]
+        command.env(MALLOC_SPACE_EFFICIENT, "1");
         if let Some(path) = &self.pi_write {
             command.env("O8_PI_WRITE_BIN", path);
         }
@@ -201,6 +211,10 @@ mod tests {
             ] {
                 assert_eq!(map.get(key).map(String::as_str), Some(value));
             }
+            assert_eq!(
+                map.get(MALLOC_SPACE_EFFICIENT).map(String::as_str),
+                cfg!(target_os = "macos").then_some("1")
+            );
             if api {
                 assert_eq!(map["O8_NEXT_BIN"], "");
                 assert_eq!(map["O8_CODEBASE_MEMORY_BIN"], "/fixture/memory");

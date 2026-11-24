@@ -25,6 +25,11 @@ const ESM_BANNER = [
   'const __dirname = __o8_dirname(__filename);',
 ].join(' ');
 
+// The launcher starts the servers with a macOS allocator setting that returns
+// freed pages; it applies at process start, so each server drops it before it
+// can start agents or tools, which keep the default allocator.
+export const KEEP_ALLOCATOR_SETTING_LOCAL = 'delete process.env.MallocSpaceEfficient;\n';
+
 // Lazy runtimes the desktop export already traces for Next. The server bundles
 // load them from node_modules beside the entries instead of embedding them;
 // native-only packages receive the same runtime without checkout resolution.
@@ -157,7 +162,7 @@ if (process.platform === 'darwin' || process.platform === 'linux') {
   require('./native-addon-runtime.cjs').prepareNativeAddons(dirname(fileURLToPath(import.meta.url)));
 }
 `;
-    writeFileSync(join(outDir, `${label}.mjs`), `// Generated entry for ${label}.\n${bootstrap}await import('./${label}-impl.mjs');\n`);
+    writeFileSync(join(outDir, `${label}.mjs`), `// Generated entry for ${label}.\n${KEEP_ALLOCATOR_SETTING_LOCAL}${bootstrap}await import('./${label}-impl.mjs');\n`);
   }
 
   // Content hashes change on ordinary edits. Key each shared output by its
