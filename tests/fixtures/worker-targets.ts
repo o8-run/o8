@@ -5,6 +5,9 @@ export async function seedWorkerTargets(directory: string) {
   const { createLane, updateLane } = await import('@/lib/lane/registry');
   const { withLockedState } = await import('@/lib/orchestrator/control-plane');
   const { mintPacketWorkerToken } = await import('@/lib/auth/packet-worker-token');
+  const { watchAutomationSource } = await import('../helpers/automation-watch');
+  // The managed-run tests read the source events a watch keeps.
+  await watchAutomationSource('managed_run', directory);
   await withLockedState(state => {
     for (const id of ['packet-a', 'packet-b', 'packet-no-pr', 'packet-merged']) state.packets.push({
       id, title: id, summary: 'fixture', status: 'running', workspaceTargetPath: join(directory, id), orchestratorThreadId: `thread-${id}`,

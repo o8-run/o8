@@ -2,8 +2,12 @@ import { createHash } from 'node:crypto';
 
 import { redactBroadcastRecord } from '@/lib/broadcast/redaction';
 import { getSqlite } from '@/lib/db';
+import { signalAutomationSourceEvent, watchedSourceKinds } from './scheduler-signal';
 
 const MAX_PAYLOAD_BYTES = 8 * 1024;
+// Source events exist only to feed watches. Keep a week, and never drop one a
+// watch has not read yet.
+export const AUTOMATION_SOURCE_EVENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type AutomationSourceKind = 'managed_run' | 'packet' | 'repository';
 
@@ -94,7 +98,9 @@ export function recordAutomationSourceEvent(input: {
   payload?: Record<string, unknown>;
   occurredAt?: number;
   persistedAt?: number;
-}): AutomationSourceEvent {
+}): AutomationSourceEvent | null {
+  // Nothing reads events from a source no enabled watch follows: skip them.
+  if (!watchedSourceKinds().has(input.sourceKind)) return null;
   const sqlite = getSqlite();
   const occurredAt = input.occurredAt ?? Date.now();
   const persistedAt = input.persistedAt ?? Date.now();
@@ -158,7 +164,21 @@ export function recordAutomationSourceEvent(input: {
     return sqlite.prepare('SELECT * FROM automation_source_events WHERE fingerprint = ?')
       .get(fingerprint) as SourceEventRow;
   });
-  return sourceEventFromRow(persist.immediate());
+  const event = sourceEventFromRow(persist.immediate());
+  signalAutomationSourceEvent();
+  return event;
+}
+
+/** Delete events older than the retention window that every enabled watch has already read. */
+export function pruneAutomationSourceEvents(nowMs: number = Date.now()): number {
+  const sqlite = getSqlite();
+  const unread = sqlite.prepare(`
+    SELECT MIN(watch_checkpoint) AS checkpoint FROM automations
+    WHERE enabled = 1 AND trigger_kind = 'watch' AND watch_source_kind IS NOT NULL
+  `).get() as { checkpoint: number | null };
+  return sqlite.prepare(`
+    DELETE FROM automation_source_events WHERE persisted_at < ? AND sequence <= ?
+  `).run(nowMs - AUTOMATION_SOURCE_EVENT_RETENTION_MS, unread.checkpoint ?? Number.MAX_SAFE_INTEGER).changes;
 }
 
 export function listAutomationSourceEvents(input: {
@@ -210,11 +230,22 @@ export function latestAutomationSourceSequence(input: {
 
 export function ingestLaneAutomationSourceEvents(limit: number = 500, nowMs: number = Date.now()): number {
   const sqlite = getSqlite();
+  // Lane events feed packet watches only. Without one, copy nothing.
+  const watchedSince = watchedSourceKinds().get('packet');
+  if (watchedSince === undefined) return 0;
   const ingest = sqlite.transaction(() => {
     const checkpointRow = sqlite.prepare(`
-      SELECT checkpoint FROM automation_source_ingest_state WHERE source_kind = 'lane'
-    `).get() as { checkpoint: number } | undefined;
-    const checkpoint = checkpointRow?.checkpoint ?? 0;
+      SELECT checkpoint, updated_at FROM automation_source_ingest_state WHERE source_kind = 'lane'
+    `).get() as { checkpoint: number; updated_at: number } | undefined;
+    let checkpoint = checkpointRow?.checkpoint ?? 0;
+    if (!checkpointRow || checkpointRow.updated_at < watchedSince) {
+      // Intake was off until a packet watch existed: start at that watch, not at old history.
+      const first = sqlite.prepare(`
+        SELECT MIN(rowid) AS rowid FROM lane_events WHERE rowid > ? AND timestamp >= ?
+      `).get(checkpoint, new Date(watchedSince).toISOString()) as { rowid: number | null };
+      const last = sqlite.prepare('SELECT MAX(rowid) AS rowid FROM lane_events').get() as { rowid: number | null };
+      checkpoint = Math.max(checkpoint, first.rowid != null ? first.rowid - 1 : last.rowid ?? 0);
+    }
     const rows = sqlite.prepare(`
       SELECT event.rowid AS source_sequence, event.id, event.lane_id, event.verb,
              event.actor, event.payload_json, event.timestamp,
