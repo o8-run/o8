@@ -557,8 +557,8 @@ const clerkSecretKey = optionalEnv('CLERK_SECRET_KEY');
 // and server-side user resolution verifies the session token networklessly in the
 // route handler (not via auth()/clerkMiddleware). So only wrap with clerkMiddleware
 // when BOTH keys are present (the hosted/web path); otherwise — fresh install OR the
-// desktop (publishable-only) — run the bare loopback gate. Clerk-gated routes like
-// /api/v2/chat still fail closed inside their own handlers.
+// desktop (publishable-only) — run the bare loopback gate. Clerk-gated routes
+// still fail closed inside their own handlers.
 let hostedMiddleware: Promise<NextMiddleware> | undefined;
 export default async function middleware(req: NextRequest, event?: NextFetchEvent) {
   const boundary = localRequestRefusal(req);

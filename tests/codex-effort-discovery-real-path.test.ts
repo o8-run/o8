@@ -85,7 +85,6 @@ const { resolveEffortPin } = await import('@/lib/orchestrator/effort-pin');
 const { workerModelCatalog } = await import('@/lib/orchestrator/worker-catalog');
 const { callCodex } = await import('@/lib/cortex/qa/llm/codex-adapter');
 const { POST } = await import('@/app/api/runtime/launch/route');
-const { POST: cliPOST } = await import('@/app/api/v2/proxy/cli/route');
 const { startCodex } = await import('../scripts/worker/run-codex');
 const { closeDb } = await import('@/lib/db');
 function cache(config: string, model: string, efforts: string[]) {
@@ -472,7 +471,7 @@ it.each(['launch-route', 'single-attempt', 'effort-pin', 'worker-dispatch', 'lea
 });
 
 // Each independent process entry point must carry its validated account into spawn.
-it.each(['cli-proxy', 'external-worker'].flatMap(entry =>
+it.each(['external-worker'].flatMap(entry =>
   (['none', 'minimal'] as const).flatMap(effort => [false, true].map(advertised => ({ entry, effort, advertised }))),
 ))('$entry validates and spawns one home for $effort (advertised=$advertised)', async ({ entry, effort, advertised }) => {
   const identityHome = join(root, `${entry}-${effort}-${advertised}-home`);
@@ -481,26 +480,12 @@ it.each(['cli-proxy', 'external-worker'].flatMap(entry =>
   cache(configHome, 'gpt-6.1-sol', advertised ? ['low'] : [effort]);
   const identity = await registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture', configHomeRef: identityHome });
   await selectRuntimeIdentity('codex', identity.id);
-  if (entry === 'cli-proxy') {
-    writeFileSync(join(getDataDir(), 'repos.json'), JSON.stringify([{ path: cwd }]));
-    const response = await cliPOST(new NextRequest('http://localhost/api/v2/proxy/cli', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runtime: 'codex', model: 'cli:codex:gpt-6.1-sol', effort,
-        repoPath: cwd, messages: [{ role: 'user', content: 'fixture' }] }),
-    }));
-    // Consume even an unexpected successful stream so red runs leave no child.
-    const text = await response.text();
-    expect(response.status).toBe(advertised ? 200 : 400);
-    if (advertised) expect(text).toContain(identityHome);
-    else expect(JSON.parse(text)).toMatchObject({ code: 'effort_unsupported_model' });
-  } else {
-    const running = startCodex({ cwd, prompt: 'fixture', model: 'gpt-6.1-sol', effort, onChunk: async () => {} });
-    const result = await running.then(process => process.result).catch(() => null);
-    if (advertised) {
-      await expect(running).resolves.toBeDefined();
-      expect(result?.exitCode).toBe(0);
-    } else await expect(running).rejects.toMatchObject({ name: 'EffortPinRejectionError' });
-  }
+  const running = startCodex({ cwd, prompt: 'fixture', model: 'gpt-6.1-sol', effort, onChunk: async () => {} });
+  const result = await running.then(process => process.result).catch(() => null);
+  if (advertised) {
+    await expect(running).resolves.toBeDefined();
+    expect(result?.exitCode).toBe(0);
+  } else await expect(running).rejects.toMatchObject({ name: 'EffortPinRejectionError' });
   expect(calls(cwd)).toEqual(advertised ? [{
     configHome: identityHome, args: expect.arrayContaining([`model_reasoning_effort=${effort}`]),
   }] : []);

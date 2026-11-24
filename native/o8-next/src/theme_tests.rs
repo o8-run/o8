@@ -171,21 +171,6 @@ fn chrome_metrics_follow_the_locked_desktop_sources() {
             "{key}"
         );
     }
-    let composer = include_str!("../../../src/components/desktop/llm-chat/Composer.tsx");
-    let card = composer
-        .lines()
-        .find(|line| line.contains("transition: 'border-color"))
-        .unwrap();
-    for (key, native) in [
-        ("maxWidth", GEOMETRY.composer_width),
-        ("borderRadius", GEOMETRY.composer_radius),
-    ] {
-        let pattern = Regex::new(&format!(r"{key}: ([\d.]+)")).unwrap();
-        assert_eq!(
-            native,
-            pattern.captures(card).unwrap()[1].parse::<f32>().unwrap()
-        );
-    }
 }
 
 fn css_color(block: &str, variable: &str) -> gpui::Rgba {

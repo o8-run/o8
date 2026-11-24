@@ -7,7 +7,6 @@ import { describe, expect, it } from 'vitest';
 // essential: the vulnerable implementation emits an unhandled stream error even
 // when its caller catches the fetch rejection.
 const consumerRoots = [
-  '@ai-sdk/provider-utils',
   '@earendil-works/pi-coding-agent',
   'jsdom',
   'node-gyp',

@@ -20,9 +20,8 @@ description: Inspect or change application code, API behavior, routing, model ca
 - TypeScript is strict. Use the existing two-space, single-quote, semicolon style and `@/` imports.
   The default file ceiling is 800 lines; existing waivers do not authorize new ones.
 
-- Ad-hoc model calls use the existing proxy and routing layer. The sanctioned AI SDK import boundary
-  is `src/lib/chat/gateway-client.ts`. Strict-mode MCP schemas keep a plain top-level object; validate
-  conditional relationships in the handler.
+- Ad-hoc model calls use the existing proxy and routing layer. Strict-mode MCP schemas keep a plain
+  top-level object; validate conditional relationships in the handler.
 
 - Architecture and extension contracts: [`docs/internals/system-architecture.md`](../../../docs/internals/system-architecture.md),
   [`docs/internals/runtime-adapter-contract.md`](../../../docs/internals/runtime-adapter-contract.md), and the

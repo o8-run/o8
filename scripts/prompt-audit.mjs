@@ -17,7 +17,6 @@ const assets = new Set([
 ]);
 // Inline model messages whose enclosing function does not have a prompt name.
 const inlineSources = new Map([
-  ['src/lib/chat/compaction.ts', 'Chat compression'],
   ['src/lib/orchestrator/auto-compact.ts', 'Thread compression and digest'],
   ['src/lib/cortex/qa/contradictions.ts', 'Contradiction judgment'],
   ['src/lib/projects/suggest.ts', 'Project suggestion'],

@@ -251,7 +251,6 @@ rail. Keep the existing compact mobile shell below the desktop breakpoint.
 | Chat list column | `src/components/desktop/shell/ChatListColumn.tsx` | Retained, independently collapsible and resizable |
 | Workspace terminal | `src/components/desktop/workspace-terminal/` | Center tabbed workspace |
 | Orchestrator tab | `workspace-terminal/OrchestratorTab.tsx` | Full-width orchestrator surface |
-| LLM chat | `src/components/desktop/LLMChat.tsx` | Assistant surface |
 
 ### Asymmetry
 

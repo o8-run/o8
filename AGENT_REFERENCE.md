@@ -115,7 +115,7 @@ CI currently runs on pull requests and manual dispatch. PRs run typecheck, unit 
 - API middleware is default-deny for `/api/*`. Public routes must be added deliberately to the narrow read/any-method allowlists, and externally reachable self-authenticating routes must verify their own credentials. There is no `GATED_PREFIXES` list.
 - API routes should return structured error responses rather than throwing to the framework.
 - Do not hardcode `3001`/`3002` or `/Users/example/...` in implementation code. Use the port resolver, `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit env variable.
-- Ad-hoc LLM calls go through the existing proxy/routing layer. The sanctioned AI SDK import boundary is `src/lib/chat/gateway-client.ts`; do not spread `ai`/`@ai-sdk/*` imports elsewhere without an explicit architecture change.
+- Ad-hoc LLM calls go through the existing proxy/routing layer.
 - For MCP tools consumed by OpenAI strict mode, keep the top-level input schema a plain object with `properties` and `required`; validate unions or conditional relationships in the handler.
 
 ## Commits and Coordination

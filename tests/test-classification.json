@@ -218,12 +218,6 @@
       ]
     },
     {
-      "path": "src/app/api/v2/proxy/cli/route.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "src/app/api/worktrees/conflicts/route.test.ts",
       "reasons": [
         "worktree-api"
@@ -2576,13 +2570,6 @@
         "executable-fixture",
         "git-cli",
         "real-path"
-      ]
-    },
-    {
-      "path": "tests/cold-start-runtime-spawn-routes.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli"
       ]
     },
     {
@@ -7227,13 +7214,6 @@
       "path": "tests/provider-key-background-consumers-real-path.test.ts",
       "reasons": [
         "executable-fixture",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/provider-key-chat-routes-real-path.test.ts",
-      "reasons": [
-        "child-process",
         "real-path"
       ]
     },
