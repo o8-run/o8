@@ -455,6 +455,41 @@ describe('bounded automatic worktree reconciliation', () => {
     expect(readExactWorkspaceClaim('managed-retirement', source.repoPath, source.workspace.id)).toBeNull();
   }, 120_000);
 
+  it('waits on a refused terminal lane retirement until the lane changes or its backoff ends', async () => {
+    const source = await fixture();
+    getSqlite().prepare('INSERT INTO worktree_maintenance_pending (lane_id) VALUES (?)').run(source.laneId);
+    // A checkout whose worker run did not exit cleanly: retirement refuses, every time.
+    const manager = getWorktreeManager(source.repoPath);
+    const refuse = vi.spyOn(Object.getPrototypeOf(manager), 'cleanup').mockResolvedValue(false);
+    const completionPass = async () => {
+      writeMaintenanceState('next-phase', 6);
+      getSqlite().prepare("DELETE FROM worktree_maintenance_state WHERE key = 'cursor:completion'").run();
+      const pass = await runBoundedWorktreeMaintenance(async () => {}, { primaryRepoPath: source.repoPath, maxCandidates: 1 });
+      const outcome = pass.outcomes.find((entry) => entry.phase === 'completion')?.outcome;
+      return { pass, outcome };
+    };
+
+    const first = await completionPass();
+    expect(first.outcome).toBe('held: preservation, owner, identity or retention policy refused');
+    const second = await completionPass();
+    expect(second.outcome).toBeUndefined();
+    expect(second.pass.deferred).toBe(1);
+    expect(refuse).toHaveBeenCalledTimes(1);
+
+    // An operator action on the lane retries it at once.
+    getSqlite().prepare("UPDATE lanes SET updated_at = '2099-01-01T00:00:00.000Z' WHERE id = ?").run(source.laneId);
+    expect((await completionPass()).outcome).toBe('held: preservation, owner, identity or retention policy refused');
+    expect((await completionPass()).outcome).toBeUndefined();
+    expect(refuse).toHaveBeenCalledTimes(2);
+
+    // After the backoff it is retried; the real cleanup then retires the checkout and settles the lane.
+    refuse.mockRestore();
+    getSqlite().prepare('UPDATE worktree_maintenance_refusals SET retry_after = 0').run();
+    expect((await completionPass()).outcome).toBe('removed');
+    expect(existsSync(source.workspace.path)).toBe(false);
+    expect(getSqlite().prepare('SELECT 1 FROM worktree_maintenance_pending WHERE lane_id = ?').get(source.laneId)).toBeUndefined();
+  }, 120_000);
+
   it('excludes a second process through the first admitted action settlement', async () => {
     createLane({ repoPath: root, runtime: 'codex', branch: 'cross-process' });
     writeMaintenanceState('next-phase', 0);

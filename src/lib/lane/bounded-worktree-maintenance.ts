@@ -49,10 +49,20 @@ const terminal = (lane: Lane) => lane.status === 'completed' || lane.status === 
  * and a purge capture child, every five minutes. The startup replay already
  * waits on the same refusal; this pass now does too: a day, doubling per
  * refusal of the same claim row, at most a week. A changed claim retries at once.
+ *
+ * A terminal lane whose retirement is refused waits the same way, keyed by its
+ * lane row. The orphan-close proof refuses a checkout whose worker run did not
+ * exit cleanly, and nothing the pass can see changes that: on the owner's data
+ * four archived lanes were refused every pass for weeks, each attempt taking
+ * the close lease and writing a close_timing lane event.
  */
 const REFUSAL_RETRY_MS = 24 * 60 * 60_000;
 const REFUSAL_RETRY_MAX_MS = 7 * REFUSAL_RETRY_MS;
 const JOURNAL_REFUSED = 'held: exact retirement journal refused';
+const LANE_REFUSED = 'held: preservation, owner, identity or retention policy refused';
+const REFUSED_OUTCOME: Partial<Record<MaintenancePhase, string>> = {
+  claims: JOURNAL_REFUSED, terminal: LANE_REFUSED, completion: LANE_REFUSED,
+};
 
 function refusalStore() {
   const sqlite = getSqlite();
@@ -72,22 +82,34 @@ function claimStamp(candidate: MaintenanceCandidate): string {
   return claim ? `${claim.state}:${claim.updatedAt}` : '-';
 }
 
+/** The lane row a terminal retirement reads: an operator action on the lane changes it. */
+function laneStamp(candidate: MaintenanceCandidate): string {
+  const lane = getSqlite().prepare('SELECT status, updated_at AS updatedAt, worktree_path AS worktreePath FROM lanes WHERE id = ?')
+    .get(candidate.id) as { status: string; updatedAt: string; worktreePath: string | null } | undefined;
+  return lane ? `${lane.status}:${lane.updatedAt}:${lane.worktreePath ?? ''}` : '-';
+}
+
+function refusalStamp(phase: MaintenancePhase, candidate: MaintenanceCandidate): string {
+  return phase === 'claims' ? claimStamp(candidate) : laneStamp(candidate);
+}
+
 function refusalDeferred(phase: MaintenancePhase, candidate: MaintenanceCandidate, now: number): boolean {
-  if (phase !== 'claims') return false;
+  if (!REFUSED_OUTCOME[phase]) return false;
   const row = refusalStore().prepare(`SELECT stamp, retry_after AS retryAfter FROM worktree_maintenance_refusals
     WHERE phase = ? AND candidate_key = ?`).get(phase, candidate.key) as { stamp: string; retryAfter: number } | undefined;
-  return Boolean(row && row.stamp === claimStamp(candidate) && row.retryAfter > now);
+  return Boolean(row && row.stamp === refusalStamp(phase, candidate) && row.retryAfter > now);
 }
 
 function recordRefusalOutcome(phase: MaintenancePhase, candidate: MaintenanceCandidate, outcome: string, now: number): void {
-  if (phase !== 'claims') return;
+  const refused = REFUSED_OUTCOME[phase];
+  if (!refused) return;
   const sqlite = refusalStore();
-  if (outcome !== JOURNAL_REFUSED) {
+  if (outcome !== refused) {
     sqlite.prepare('DELETE FROM worktree_maintenance_refusals WHERE phase = ? AND candidate_key = ?').run(phase, candidate.key);
     return;
   }
-  // The claim after the refused attempt: only a later change retries early.
-  const stamp = claimStamp(candidate);
+  // The row after the refused attempt: only a later change retries early.
+  const stamp = refusalStamp(phase, candidate);
   const prior = sqlite.prepare(`SELECT stamp, refusals FROM worktree_maintenance_refusals
     WHERE phase = ? AND candidate_key = ?`).get(phase, candidate.key) as { stamp: string; refusals: number } | undefined;
   const refusals = prior?.stamp === stamp ? prior.refusals + 1 : 1;
@@ -156,7 +178,7 @@ async function retireTerminalLane(lane: Lane): Promise<string> {
       updateLane(lane.id, { worktreePath: null }, 'system', { phase: 'bounded_maintenance', worktreeRemoved: true });
     }
   }
-  return removed ? 'removed' : 'held: preservation, owner, identity or retention policy refused';
+  return removed ? 'removed' : LANE_REFUSED;
 }
 
 async function attemptCandidate(
