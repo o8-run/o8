@@ -84,7 +84,7 @@ export { hasClaudeEnvCredential } from '@/lib/claude-code/oauth-credential';
  *
  * Deliberately does not read the macOS Keychain: `security find-generic-password`
  * can raise an ACL prompt, and readiness is polled. A live token in the config dir
- * or the account email Claude writes to ~/.claude.json is sufficient evidence.
+ * or the account record Claude writes to ~/.claude.json is sufficient evidence.
  * Required worker credentials are checked separately before this fallback.
  */
 export async function hasStoredClaudeOAuthCredential(): Promise<boolean> {
@@ -96,10 +96,10 @@ export async function hasStoredClaudeOAuthCredential(): Promise<boolean> {
   if (hasLiveClaudeOAuth(credentialRaw)) return true;
   try {
     const parsed = JSON.parse(userConfigRaw) as { oauthAccount?: unknown };
+    // The account object's presence is the evidence; none of its values are read.
     const account = parsed?.oauthAccount;
-    if (!account || typeof account !== 'object' || Array.isArray(account)) return false;
-    const emailAddress = (account as Record<string, unknown>).emailAddress;
-    return typeof emailAddress === 'string' && emailAddress.trim().length > 0;
+    return Boolean(account) && typeof account === 'object' && !Array.isArray(account)
+      && Object.keys(account as object).length > 0;
   } catch {
     return false;
   }

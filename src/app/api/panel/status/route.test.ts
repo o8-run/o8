@@ -56,6 +56,13 @@ vi.mock('@/lib/terminal/persistence-health', () => ({
 
 const { GET } = await import('./route');
 
+const local = () => new NextRequest('http://127.0.0.1:3001/api/panel/status', {
+  headers: { host: '127.0.0.1:3001', 'x-o8-client-addr': '127.0.0.1' },
+});
+const lan = (headers: Record<string, string> = {}) => new NextRequest('http://192.168.1.20:3001/api/panel/status', {
+  headers: { host: '192.168.1.20:3001', 'x-o8-client-addr': '192.168.1.50', ...headers },
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -80,7 +87,7 @@ describe('GET /api/panel/status', () => {
       ensureShippedDarkAuditBootHookMock,
     ];
     try {
-      const response = await GET();
+      const response = await GET(local());
       expect(response.status).toBe(200);
       for (const hook of hooks) expect(hook).not.toHaveBeenCalled();
       const { getOrCreateWsToken } = await import('@/lib/ws-auth');
@@ -98,7 +105,7 @@ describe('GET /api/panel/status', () => {
   });
 
   it('identifies the unauthenticated liveness responder as o8', async () => {
-    const response = await GET();
+    const response = await GET(local());
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       product: 'o8',
@@ -121,11 +128,23 @@ describe('GET /api/panel/status', () => {
     });
   });
 
+  it('tells an unauthenticated network caller only that this is o8', async () => {
+    vi.stubEnv('O8_BUILD_GIT_SHA', 'ABCDEF0123456789ABCDEF0123456789ABCDEF01');
+    const response = await GET(lan());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ product: 'o8' });
+
+    const { getOrCreateWsToken } = await import('@/lib/ws-auth');
+    const authorized = await (await GET(lan({ authorization: `Bearer ${getOrCreateWsToken()}` }))).json();
+    expect(authorized).toMatchObject({ product: 'o8', buildGitSha: 'abcdef0123456789abcdef0123456789abcdef01', platform: process.platform });
+    expect((await (await GET(lan({ authorization: 'Bearer not-a-token' }))).json())).toEqual({ product: 'o8' });
+  });
+
   it('reports the packaged build identity without reading a source checkout', async () => {
     vi.stubEnv('O8_BUILD_GIT_SHA', 'ABCDEF0123456789ABCDEF0123456789ABCDEF01');
     vi.stubEnv('O8_PACKAGED_APP', '1');
 
-    const response = await GET();
+    const response = await GET(local());
     expect(await response.json()).toMatchObject({
       buildGitSha: 'abcdef0123456789abcdef0123456789abcdef01',
       buildMode: 'packaged',

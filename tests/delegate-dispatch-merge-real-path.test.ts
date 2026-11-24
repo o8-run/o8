@@ -318,7 +318,11 @@ describe('isolated dispatch event loop (#3565)', () => {
     git(repoPath, ['clone', '--bare', repoPath, origin]);
     git(repoPath, ['remote', 'add', 'origin', origin]);
     await addRepo(repoPath);
-    const { GET: healthGet } = await import('@/app/api/panel/status/route');
+    const { GET: statusGet } = await import('@/app/api/panel/status/route');
+    const { NextRequest } = await import('next/server');
+    const healthGet = () => statusGet(new NextRequest('http://127.0.0.1/api/panel/status', {
+      headers: { host: '127.0.0.1', 'x-o8-client-addr': '127.0.0.1' },
+    }));
     await healthGet();
     const { upsertBatch } = await import('@/lib/skeleton/store');
     const symbols = Array.from({ length: 200 }, (_, index) => ({
