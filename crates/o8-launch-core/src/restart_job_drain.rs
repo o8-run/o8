@@ -70,8 +70,25 @@ pub fn guard(
     api_port: u16,
     cleanup: impl Fn() + Send + Sync + 'static,
 ) -> o8_restart_safety::RestartSafety {
+    guard_parkable(data_dir, api_port, Default::default(), cleanup)
+}
+
+/// As `guard`. `parked` is true while the launcher has Node parked: Node then
+/// holds no cloud lease or running work, so both drain steps have nothing to do.
+pub fn guard_parkable(
+    data_dir: PathBuf,
+    api_port: u16,
+    parked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cleanup: impl Fn() + Send + Sync + 'static,
+) -> o8_restart_safety::RestartSafety {
+    use std::sync::atomic::Ordering;
     let inspecting = data_dir.clone();
+    let parked_at_inspection = parked.clone();
     o8_restart_safety::RestartSafety::new(data_dir.clone(), move || {
+        if parked.load(Ordering::SeqCst) {
+            cleanup();
+            return;
+        }
         let directory = data_dir.clone();
         // MCP's native entry runs on Tokio; build/drop the blocking client on
         // its own thread. The committed admission remains held across the join.
@@ -89,6 +106,9 @@ pub fn guard(
         cleanup();
     })
     .with_work_inspection(move |id, force| {
+        if parked_at_inspection.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         let directory = inspecting.clone();
         let id = id.to_string();
         std::thread::spawn(move || inspect(&directory, api_port, &id, force))
@@ -189,6 +209,33 @@ mod tests {
             std::fs::read_to_string(root.join("codex-cli-update.lock")).unwrap(),
             "held owner"
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// While Node is parked there is nothing to inspect or drain: the restart
+    /// is admitted with no request to the server, and cleanup still runs.
+    #[test]
+    fn parked_node_restart_skips_inspection_and_drain() {
+        let root = root();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let recorded = calls.clone();
+        let state = guard_parkable(
+            root.clone(),
+            listener.local_addr().unwrap().port(),
+            Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            move || {
+                recorded.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        let id = state.prepare().unwrap();
+        state.before_restart(Some(&id)).unwrap();
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

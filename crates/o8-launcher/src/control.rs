@@ -29,6 +29,11 @@ pub enum Request {
     UpdateCheck,
     UpdateApply,
     UpdateStatus,
+    /// From Node when it may stop: park it until `StartNode` (O8_PARK_NODE=1).
+    ParkNode,
+    /// From o8d when a request needs a parked Node.
+    StartNode,
+    NodeStatus,
 }
 struct Pending {
     request: Request,

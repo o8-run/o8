@@ -327,3 +327,96 @@ fn next_off_window_opens_when_ws_becomes_healthy_after_the_health_window() {
     assert!(f.running());
     f.stop();
 }
+
+const PARKING: [(&str, &str); 3] = [
+    ("O8_API_FRONT_DOOR", "1"),
+    ("O8_NEXT_OFF", "1"),
+    ("O8_PARK_NODE", "1"),
+];
+fn node_state(f: &Fixture) -> serde_json::Value {
+    control(f, serde_json::json!({"op":"node-status"}))["state"].clone()
+}
+
+/// O8_PARK_NODE=1: Node stops on request without counting as a crash, stays
+/// down, and starts again on request. Cycles past the three-restart budget
+/// prove parking never charges it.
+#[test]
+fn parked_node_stops_cleanly_and_starts_on_request_without_restart_budget() {
+    let mut f = Fixture::new();
+    f.start_with(&PARKING);
+    f.ready();
+    assert_eq!(env(&f, "ws-env")["O8_PARK_NODE"], "1");
+    assert_eq!(node_state(&f), "running");
+    for cycle in 1..=4 {
+        let node = *f.starts("ws-starts").last().unwrap();
+        assert_eq!(
+            control(&f, serde_json::json!({"op":"park-node"}))["state"],
+            "parking"
+        );
+        until(|| gone(node));
+        until(|| node_state(&f) == "parked");
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            f.starts("ws-starts").len(),
+            cycle,
+            "a parked Node is not restarted"
+        );
+        assert_eq!(
+            control(&f, serde_json::json!({"op":"park-node"}))["error"],
+            "Node is not running"
+        );
+        assert_eq!(
+            control(&f, serde_json::json!({"op":"start-node"}))["state"],
+            "starting"
+        );
+        until(|| f.starts("ws-starts").len() == cycle + 1);
+        until(|| node_state(&f) == "running");
+    }
+    let log = fs::read_to_string(f.root.join("logs/ws-server.log")).unwrap_or_default();
+    assert_eq!(log.matches("[o8-sidecar-supervisor] parked").count(), 4);
+    assert!(!log.contains("restart attempt"), "parking is not a crash");
+    assert!(f.running());
+    f.stop();
+}
+
+/// A restart admitted while Node is parked has no Node work to inspect or drain.
+#[test]
+fn restart_while_node_is_parked_skips_the_node_drain() {
+    let mut f = Fixture::new();
+    f.start_with(&PARKING);
+    f.ready();
+    let node = f.starts("ws-starts")[0];
+    control(&f, serde_json::json!({"op":"park-node"}));
+    until(|| gone(node));
+    let receipt = control(&f, serde_json::json!({"op":"prepare-restart"}));
+    assert_eq!(receipt["ok"], true);
+    let result = control(
+        &f,
+        serde_json::json!({"op":"restart","reservation":receipt["reservation"]}),
+    );
+    assert_eq!(result["admitted"], true);
+    let child = f.launcher.as_mut().unwrap();
+    until(|| child.try_wait().unwrap().is_some());
+    f.launcher = None;
+    let events = fs::read_to_string(f.root.join("events")).unwrap_or_default();
+    assert!(
+        !events.contains("inspect") && !events.contains("drain"),
+        "{events}"
+    );
+}
+
+/// Without the switch, nothing changes: Node is never parked.
+#[test]
+fn without_the_switch_node_refuses_to_park() {
+    let mut f = Fixture::new();
+    f.start_with(&[("O8_API_FRONT_DOOR", "1"), ("O8_NEXT_OFF", "1")]);
+    f.ready();
+    assert_eq!(env(&f, "ws-env")["O8_PARK_NODE"], serde_json::Value::Null);
+    assert_eq!(
+        control(&f, serde_json::json!({"op":"park-node"}))["error"],
+        "Parking is off"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!gone(f.starts("ws-starts")[0]));
+    f.stop();
+}

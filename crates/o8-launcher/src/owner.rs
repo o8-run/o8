@@ -115,6 +115,7 @@ pub(super) fn command(config: &Config, boot: &str, instance: &str) -> Result<Com
         .env("O8_BOOT_ID", boot)
         .env("O8_INSTANCE_ID", instance)
         .env("O8D_SESSION_DATA_DIR", &config.data_dir)
+        .env("O8_PARK_NODE", if config.park_node { "1" } else { "0" })
         .env(
             "O8D_REQUEST_COUNTS_PATH",
             config.data_dir.join("o8d-request-counts.jsonl"),
