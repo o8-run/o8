@@ -117,7 +117,7 @@ impl Editor {
                     .as_ref()
                     .filter(|(n, _)| n == &id)
                     .map(|(_, kind)| match kind.as_str() {
-                        "reply" => "o8 is replying…",
+                        "reply" => "Replying…",
                         "act" => "Starting…",
                         _ => "One moment…",
                     });

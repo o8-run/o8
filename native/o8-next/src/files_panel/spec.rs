@@ -50,9 +50,7 @@ pub(super) struct Spec {
     active: bool,
     generation: u64,
     edits: u64,
-    reviewing: bool,
     mutating: bool,
-    prewarmed: std::collections::HashSet<String>,
     _actions: Subscription,
     _activation: Option<Subscription>,
     _editor: Subscription,
@@ -110,9 +108,7 @@ impl Spec {
             active: true,
             generation: 0,
             edits: 0,
-            reviewing: false,
             mutating: false,
-            prewarmed: Default::default(),
             _actions: actions,
             _activation: None,
             _editor: observed,
@@ -181,7 +177,6 @@ impl Spec {
                 || self.load_task.is_some()
                 || self.pending
                 || self.saving
-                || self.reviewing
                 || self.editor.read(cx).rail.busy.is_some()
                 || self.content != self.server)
         {
@@ -221,7 +216,6 @@ impl Spec {
                     && (!this.active
                         || this.pending
                         || this.saving
-                        || this.reviewing
                         || this.editor.read(cx).rail.busy.is_some()
                         || this.content != this.server)
                 {
@@ -388,7 +382,6 @@ impl Spec {
                 self.loading = false;
             } else if self.started {
                 self.load(self.loaded_once, cx);
-                self.prewarm(cx);
             }
         }
     }
@@ -402,7 +395,6 @@ impl Spec {
                 this.load(true, cx);
             }
         }));
-        self.prewarm(cx);
         self.target._submit = Some(cx.subscribe_in(
             &self.target.input,
             window,
@@ -434,9 +426,6 @@ impl Spec {
         .detach();
     }
     fn status(&self) -> String {
-        if self.reviewing {
-            return "o8 is reading your notes…".into();
-        }
         if self.loading {
             "Loading notes".into()
         } else if let Some(error) = &self.error {

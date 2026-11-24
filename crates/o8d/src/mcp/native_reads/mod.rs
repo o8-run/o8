@@ -12,7 +12,6 @@ mod process_identity;
 mod publisher;
 use publisher::{Bindings, PendingPublisher};
 mod registries;
-mod spec;
 mod tasks;
 type ReadResult<T> = Result<T, ()>;
 
@@ -183,7 +182,6 @@ impl NativeReads {
                         super::projections::projects(registries::projects(self, &tx)?)
                     }
                     "o8_task_list" => tasks::read(self, &tx, &args)?,
-                    "o8_spec_read" => spec::read(&tx, &args, &policy, &self.directory)?,
                     _ => return Err(()),
                 };
                 json!({"isError":data.get("error").is_some(),"content":[{"type":"text","text":data.to_string()}]})

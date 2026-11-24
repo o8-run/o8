@@ -50,11 +50,6 @@ readiness uses the same process's published readiness observations.
 combines JSON metadata with SQLite membership, ordering, active selection, and
 virtual repository projects.
 
-`o8_spec_read` reads an existing canonical repository's `o8.md` directly and
-computes the same SHA-256 content hash. A missing file returns the API's template
-without creating it. Unusual path spellings and read errors retain the original
-handler. Review-index parsing, validation and annotation tools still use TypeScript.
-
 The current mission fast path supports prepared, unbound queued packets.
 Dependency/hold/release reconciliation, runtime bindings, cost and timing retain
 TypeScript ownership. The compact task fast path combines those packets with

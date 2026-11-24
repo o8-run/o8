@@ -1,12 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/mcp/route';
-import * as specRoute from '@/app/api/repo-spec/route';
 
-const repoPath = join(process.env.CORTEX_IDE_DATA_DIR!, 'page-audit');
-mkdirSync(repoPath, { recursive: true });
+const repo = '/fixture/page-audit';
 
 async function call(name: string, args: Record<string, unknown>, profile?: string) {
   const response = await POST(new Request('http://localhost/api/mcp', {
@@ -22,13 +17,10 @@ async function call(name: string, args: Record<string, unknown>, profile?: strin
 afterEach(() => vi.restoreAllMocks());
 
 describe('large results through the MCP HTTP entry point', () => {
-  it('pages a normal large spec losslessly and never repeats its source call', async () => {
-    const content = '# Operator spec\n' + 'Check "quoted" paths \\ and unicode 🧭\n'.repeat(1800);
-    writeFileSync(join(repoPath, 'o8.md'), content);
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      return specRoute.GET(new NextRequest(new Request(input, init)));
-    });
-    let page = await call('o8_spec_read', { repoPath });
+  it('pages a normal large read losslessly and never repeats its source call', async () => {
+    const note = '# Operator note\n' + 'Check "quoted" paths \\ and unicode 🧭\n'.repeat(1800);
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ agents: [], note }));
+    let page = await call('o8_msg_agents', { repo });
     expect(page.bytes).toBeLessThanOrEqual(20_000);
     expect(page.payload.schema).toBe('o8/mcp/result-page/v1');
     expect(page.payload.summary).toContain('saved result');
@@ -45,39 +37,33 @@ describe('large results through the MCP HTTP entry point', () => {
     }
     expect(pages).toBeGreaterThan(1);
     const original = JSON.parse(serialized);
-    expect(JSON.parse(original.content[0].text).content).toBe(content);
+    expect(JSON.parse(original.content[0].text).note).toBe(note);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(readFileSync(join(repoPath, 'o8.md'), 'utf8')).toBe(content);
   });
 
   it('keeps small results in their existing shape', async () => {
-    writeFileSync(join(repoPath, 'o8.md'), '# Small spec\n');
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => specRoute.GET(new NextRequest(new Request(input, init))));
-    const response = await call('o8_spec_read', { repoPath });
-    expect(response.payload).toMatchObject({ ok: true, content: '# Small spec\n' });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ agents: [] }));
+    const response = await call('o8_msg_agents', { repo });
+    expect(response.payload).toMatchObject({ agents: [] });
     expect(response.payload.schema).toBeUndefined();
   });
 
   it('leaves room for the JSON-RPC envelope near the wire-size limit', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ content: 'x'.repeat(19_890) }));
-    const response = await call('o8_spec_read', { repoPath });
+    const response = await call('o8_msg_agents', { repo });
     expect(response.bytes).toBeLessThanOrEqual(20_000);
     expect(response.payload.schema).toBe('o8/mcp/result-page/v1');
   });
 
   it('reads a large mutation receipt without applying the mutation twice', async () => {
-    writeFileSync(join(repoPath, 'o8.md'), '# Spec\n' + 'Preserve this requirement.\n'.repeat(1800));
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const request = new NextRequest(new Request(input, init));
-      return request.method === 'POST' ? specRoute.POST(request) : specRoute.GET(request);
-    });
-    const first = await call('o8_spec_comment', { repoPath, body: 'Check the empty case' });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
+      ok: true, taskId: 'fixture-task', summary: 'Preserve this requirement.\n'.repeat(1800),
+    }));
+    const first = await call('o8_adopt_pr', { repoPath: repo, pullRequest: 7 });
     expect(first.payload.nextArguments).toBeDefined();
-    const persisted = readFileSync(join(repoPath, 'o8.md'), 'utf8');
-    expect(persisted).toContain('Check the empty case');
     await call('o8_result_page', first.payload.nextArguments);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(readFileSync(join(repoPath, 'o8.md'), 'utf8')).toBe(persisted);
+    expect(fetch.mock.calls[0][1]?.method).toBe('POST');
   });
 
   it('rejects an unavailable saved result without invoking a handler', async () => {
@@ -89,9 +75,8 @@ describe('large results through the MCP HTTP entry point', () => {
   });
 
   it('cannot use a saved result to expand a narrowed tool profile', async () => {
-    writeFileSync(join(repoPath, 'o8.md'), 'Long specification.\n'.repeat(2000));
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => specRoute.GET(new NextRequest(new Request(input, init))));
-    const first = await call('o8_spec_read', { repoPath });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ agents: [], note: 'Long note.\n'.repeat(2000) }));
+    const first = await call('o8_msg_agents', { repo });
     expect(first.payload.nextArguments).toBeDefined();
     const response = await call('o8_result_page', first.payload.nextArguments, 'visualizations');
     expect(response.result.isError).toBe(true);
@@ -99,9 +84,8 @@ describe('large results through the MCP HTTP entry point', () => {
   });
 
   it('expires saved results with a corrective error and no source retry', async () => {
-    writeFileSync(join(repoPath, 'o8.md'), 'Specification.\n'.repeat(2000));
-    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => specRoute.GET(new NextRequest(new Request(input, init))));
-    const first = await call('o8_spec_read', { repoPath });
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ agents: [], note: 'Long note.\n'.repeat(2000) }));
+    const first = await call('o8_msg_agents', { repo });
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5 * 60_000 + 1);
     const expired = await call('o8_result_page', first.payload.nextArguments);
     expect(expired.result.isError).toBe(true);

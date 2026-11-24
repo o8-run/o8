@@ -71,7 +71,6 @@ impl Spec {
             .clone()
             .unwrap_or_else(|| self.default_workspace.clone());
         self.client = self.client.in_workspace(&self.workspace);
-        self.reviewing = false;
         self.mutating = false;
         self.editor.update(cx, |e, _| {
             e.assets = super::super::editor::assets::Assets {
@@ -96,7 +95,6 @@ impl Spec {
         self.editor.update(cx, |e, cx| e.initial_text("", cx));
         if self.started {
             self.load(false, cx);
-            self.prewarm(cx);
         }
         cx.notify();
     }

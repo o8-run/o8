@@ -39,11 +39,10 @@ describe('operator help through the executable entry point', () => {
     expect(reference).toContain('o8 mission create --title "Inspect behavior" --repo /path/to/repo');
   });
 
-  it('gives external agents authenticated setup and executable spec syntax', () => {
+  it('gives external agents authenticated setup syntax', () => {
     const external = readFileSync('docs/agents/EXTERNAL_AGENTS.md', 'utf8');
     expect(external).toContain('Loopback API calls require a bearer token');
     expect(external).not.toContain('localhost requests skip auth');
-    expect(external).toContain('o8 spec check --repo /path/to/repo');
     expect(external).toContain('issues: ["495"]');
     expect(external).toContain('status: "deferred"');
     expect(external).toContain('holdMerges:true');

@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -294,101 +294,6 @@ describe('o8d MCP through the real HTTP JSON-RPC entry point', () => {
         expect(seen.filter((entry) => entry.path === '/api/mcp').map((entry) => JSON.parse(entry.body).method)).toEqual(['tools/call']);
       } finally { sqlite.prepare("UPDATE app_state SET value = ? WHERE key = 'o8d/mcp/v1/policy'").run(row.value); }
     }
-  });
-
-  nativeReadTest('reads the spec from disk, including missing files and committed edits, without TypeScript', async () => {
-    const repoPath = realpathSync(join(directory, 'repo'));
-    const path = join(repoPath, 'o8.md');
-    for (const content of [null, '# Fixture spec\n\nRead π and 🦀.\n', '# Edited fixture\r\n']) {
-      if (content === null) { if (existsSync(path)) unlinkSync(path); }
-      else writeFileSync(path, content);
-      const recording = { name: 'spec read', body: { jsonrpc: '2.0', id: 'spec', method: 'tools/call',
-        params: { name: 'o8_spec_read', arguments: { repoPath } } } };
-      const reference = await sendRecordedMcp(base, token, recording);
-      seen.length = 0;
-      compareMcpExchanges(reference, await sendRecordedMcp(nativeRust, token, recording));
-      expect(seen).toHaveLength(0);
-      expect(existsSync(path)).toBe(content !== null);
-      expect(await replayMcp(base, nativeRust, token, [recording])).toBe(1);
-    }
-  });
-
-  nativeReadTest('retains TypeScript path normalization for noncanonical spec paths', async () => {
-    const repo = realpathSync(join(directory, 'repo'));
-    for (const repoPath of [`${repo}/.`, `${repo}//`, `${repo}/../repo`]) {
-      const reference = await call(base, 'o8_spec_read', { repoPath });
-      seen.length = 0;
-      compareMcpExchanges(reference, await call(nativeRust, 'o8_spec_read', { repoPath }));
-      expect(seen.some((entry) => entry.path === '/api/mcp' && JSON.parse(entry.body).method === 'tools/call')).toBe(true);
-    }
-  });
-
-  nativeReadTest('rechecks inspected spec content and live credential files before native reuse', async () => {
-    const path = join(directory, 'repo', 'o8.md');
-    const original = existsSync(path) ? readFileSync(path) : null;
-    const credentialsPath = join(directory, 'mobile-device-tokens');
-    const credentials = readFileSync(credentialsPath);
-    const candidate = 'e'.repeat(64);
-    const target = join(directory, 'spec-link-target');
-    try {
-      writeFileSync(path, `# Inspected fixture\n\n${candidate}\n`);
-      const inspected = await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') });
-      seen.length = 0;
-      compareMcpExchanges(inspected, await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') }));
-      expect(seen).toHaveLength(0);
-
-      writeFileSync(credentialsPath, `${credentials.toString()}${createHash('sha256').update(candidate).digest('hex')}\n`);
-      seen.length = 0;
-      const rotated = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
-      expect(seen.some(entry => entry.path === '/api/mcp')).toBe(true);
-      expect(toolPayload(rotated).content).not.toContain(candidate);
-      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), rotated);
-
-      writeFileSync(path, '# Changed source\n');
-      seen.length = 0;
-      const changed = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
-      expect(seen.some(entry => entry.path === '/api/mcp')).toBe(true);
-      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), changed);
-
-      writeFileSync(target, '# Changed source\n');
-      unlinkSync(path);
-      symlinkSync(target, path);
-      const refused = await call(nativeRust, 'o8_spec_read', { repoPath: join(directory, 'repo') });
-      compareMcpExchanges(await call(base, 'o8_spec_read', { repoPath: join(directory, 'repo') }), refused);
-      expect((refused.body as { result: { isError: boolean } }).result.isError).toBe(true);
-    } finally {
-      writeFileSync(credentialsPath, credentials);
-      if (existsSync(path)) unlinkSync(path);
-      if (existsSync(target)) unlinkSync(target);
-      if (original) writeFileSync(path, original);
-    }
-  });
-
-  nativeReadTest.each([
-    '0009', '000A', '000B', '000C', '000D', '0020', '00A0', '1680',
-    '2000', '2001', '2002', '2003', '2004', '2005', '2006', '2007',
-    '2008', '2009', '200A', '2028', '2029', '202F', '205F', '3000', 'FEFF',
-    // Unicode White_Space and historical whitespace that ECMAScript retains.
-    '0085', '180E', '200B', '001C', '001D', '001E', '001F',
-  ])('matches JavaScript spec-path trim for U+%s through recorded replay', async (code) => {
-    const character = String.fromCodePoint(Number.parseInt(code, 16));
-    const repo = join(directory, `unicode-spec-${code}`);
-    for (const [path, content] of [[repo, '# Base spec\n'], [`${repo}${character}`, '# Distinct Unicode spec\n']]) {
-      mkdirSync(path, { recursive: true });
-      writeFileSync(join(path, 'o8.md'), content);
-    }
-    const repoPath = `${realpathSync(repo)}${character}`;
-    const recording = { name: `spec trim U+${code}`, body: { jsonrpc: '2.0', id: 'unicode-spec',
-      method: 'tools/call', params: { name: 'o8_spec_read', arguments: { repoPath } } } };
-    const reference = await sendRecordedMcp(base, token, recording);
-    expect(toolPayload(reference)).toMatchObject({
-      content: character.trim() ? '# Distinct Unicode spec\n' : '# Base spec\n',
-      path: join(repoPath.trim(), 'o8.md'),
-    });
-    seen.length = 0;
-    compareMcpExchanges(reference, await sendRecordedMcp(nativeRust, token, recording));
-    expect(seen).toHaveLength(0);
-    expect(await replayMcp(base, nativeRust, token, [recording])).toBe(1);
   });
 
   nativeReadTest.each(['o8_status', 'o8_task_list', 'o8_list_repos', 'o8_list_projects'])(

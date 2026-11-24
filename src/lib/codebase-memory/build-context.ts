@@ -359,7 +359,7 @@ function renderPendingSpecSection(repoPath: string): string[] {
 
   const lines = ['## Operator notes (o8.md)'];
   lines.push(
-    '- The operator left these open review threads in this repo\'s o8.md. Address them in your work and respond in-file with `o8 spec reply --to <id> --body "…"` or `o8 spec resolve --id <id> --summary "…"`. Never edit the operator\'s prose — annotate only.',
+    '- The operator left these open review threads in this repo\'s o8.md. Address them in your work. Never edit the operator\'s prose or these notes.',
   );
   for (const item of open.slice(0, 12)) {
     const anchor = item.anchorText ? ` @"${clampLine(item.anchorText, 60)}"` : '';
@@ -367,7 +367,7 @@ function renderPendingSpecSection(repoPath: string): string[] {
     lines.push(`- [${item.id}]${kindTag}${anchor}: ${clampLine(item.text, 200)}`);
   }
   if (open.length > 12) {
-    lines.push(`- …and ${open.length - 12} more (run \`o8 spec pending\`).`);
+    lines.push(`- …and ${open.length - 12} more in o8.md.`);
   }
   return lines;
 }

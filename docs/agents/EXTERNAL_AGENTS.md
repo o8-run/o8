@@ -110,15 +110,7 @@ Never reset a worktree merely to repair an argument error.
 
 ## Repository notes and errors
 
-```text
-o8 spec read --repo /path/to/repo
-o8 spec index --repo /path/to/repo
-o8 spec pending --repo /path/to/repo
-o8 spec check --repo /path/to/repo
-```
-
-Agents annotate the operator's o8.md through comment, reply, resolve, and suggest.
-Use the returned review item ids for subsequent actions and preserve operator prose.
+Agents read the operator's o8.md from the repository and leave its prose and notes unchanged.
 
 CLI output is JSON by default; `--human` selects formatted output. Exit codes are
 0 success, 1 invalid arguments, 2 unreachable API, 3 unauthorized, 4 not found,

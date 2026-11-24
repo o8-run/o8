@@ -403,7 +403,7 @@ device flow and every stateful panel route require the operator bearer.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/repo-spec?repoPath=...` | Read `o8.md` for a repo. |
-| POST | `/api/repo-spec` | Agent-side annotation (comment, suggest, resolve). |
+| POST | `/api/repo-spec` | Operator comment, reply, resolve or apply-suggestion on notes in `o8.md`. |
 | PUT | `/api/repo-spec` | Operator-only spec replacement. |
 | POST | `/api/repo-spec/asset` | Upload inline image assets (stored at `<repoPath>/o8-assets/`). |
 
