@@ -248,6 +248,9 @@ pub(super) async fn serve_http(
         .remove::<crate::http::commit_notice::CommitNotice>()
     {
         global.committed(notice.0, selection, header).await;
+        // A committed change is carried out by Node: start a parked one.
+        #[cfg(unix)]
+        super::wake::nudge(header, selection);
     }
     // A public precommit refusal may still need the original network/visual
     // route. Replay is safe only for the explicit unavailable response.

@@ -24,6 +24,8 @@ mod composer_queue;
 mod native_global;
 #[cfg(unix)]
 pub mod producer;
+#[cfg(unix)]
+mod wake;
 
 pub struct Producer {
     pub bridge_key: String,
@@ -210,7 +212,14 @@ async fn connection(
         if producer.as_ref().is_some_and(|old| !selection.borrow().as_ref().is_some_and(|current| Arc::ptr_eq(old, current))) {
             return unavailable(&mut socket, &count).await;
         }
-        let Some(upstream) = upstream else {
+        // No Node attached: a parked Node is started and this request waits for it.
+        let woken = match upstream {
+            None => wake_producer(header, &mut selection).await,
+            Some(_) => None,
+        };
+        let producer = woken.or(producer);
+        let key = producer.as_ref().map(|p| p.bridge_key.clone()).unwrap_or(key);
+        let Some(upstream) = producer.as_ref().map(|p| p.upstream.as_str()) else {
             return unavailable(&mut socket, &count).await;
         };
         let mut backend = match TcpStream::connect(upstream).await {
@@ -246,17 +255,25 @@ async fn connection(
         result.map_err(|_| ())?;
         return Ok(());
     }
-    let Some(producer) = producer else {
-        #[cfg(feature = "experimental-session-reads")]
-        if front_door && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1") {
-            if let Some(token) = prompt_operator::websocket_token(&socket, header) {
-                return native_global::serve(socket, token, global, selection, shutdown).await;
+    let producer = match producer {
+        Some(producer) => producer,
+        None => {
+            #[cfg(feature = "experimental-session-reads")]
+            if front_door && std::env::var("O8D_NATIVE_OWNED").as_deref() == Ok("1") {
+                if let Some(token) = prompt_operator::websocket_token(&socket, header) {
+                    return native_global::serve(socket, token, global, selection, shutdown).await;
+                }
+            }
+            // Other callers receive no session unless a parked Node starts for
+            // them. Producer-backed upgrades still authenticate with the
+            // unchanged TS gate below.
+            match wake_producer(header, &mut selection).await {
+                Some(woken) => woken,
+                None => return close_unavailable(socket).await,
             }
         }
-        // Other callers receive no session. Producer-backed upgrades still
-        // authenticate with the unchanged TS gate below.
-        return close_unavailable(socket).await;
     };
+    let key = producer.bridge_key.clone();
     let upstream = &producer.upstream;
     let bus = &producer.bus;
     let mut request = format!("ws://{upstream}{path}")
@@ -434,6 +451,16 @@ async fn connection(
             }
         }
     }
+}
+
+#[cfg(unix)]
+async fn wake_producer(header: &str, selection: &mut Selection) -> Option<Arc<Producer>> {
+    wake::producer(header, selection).await
+}
+
+#[cfg(not(unix))]
+async fn wake_producer(_: &str, _: &mut Selection) -> Option<Arc<Producer>> {
+    None
 }
 
 async fn unavailable(socket: &mut TcpStream, count: &request_counts::Count) -> Result<(), ()> {
