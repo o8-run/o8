@@ -571,25 +571,6 @@ export interface OrchestratorPacket {
   /** One dossier can reopen; each accepted remedy attempt gets a stable id. */
   problemRemedyId?: string | null;
   /**
-   * HTML packet explainer + quiz (#1491). Generated fire-and-forget when the
-   * packet reaches review — a self-contained explainer artifact plus a
-   * structured quiz the human-UI approve gate reads. `status` drives the review
-   * surface: 'generating' shows a pending note, 'ready' renders the explainer,
-   * 'failed' degrades to the raw diff. Undefined on legacy packets and whenever
-   * explainer generation is disabled.
-   */
-  explainer?: {
-    status: 'generating' | 'ready' | 'failed';
-    /** Artifact id of the stored HTML report (kind: 'report'). */
-    artifactId?: string | null;
-    /** Structured quiz parsed out of the explainer; drives the approve gate. */
-    quiz?: PacketExplainerQuiz | null;
-    /** Files changed in the reviewed diff — the quiz-gate threshold input. */
-    changedFileCount?: number | null;
-    generatedAt?: string | null;
-    error?: string | null;
-  } | null;
-  /**
    * Auto buy-in doc (#1492). Generated fire-and-forget on a successful merge —
    * a single self-contained, shareable HTML doc (demo-first, plain-language
    * what/why, deviations, verification, objections pre-answered) stored as a
@@ -611,19 +592,6 @@ export type PacketDispatcherSurface = 'orchestrator' | 'operator' | 'agent';
 export interface PacketDispatcherAttribution {
   surface: PacketDispatcherSurface;
   id: string;
-}
-
-/** A single multiple-choice quiz question in a packet explainer (#1491). */
-export interface PacketExplainerQuizQuestion {
-  id: string;
-  prompt: string;
-  options: string[];
-  /** Index into `options` of the correct answer. */
-  answerIndex: number;
-}
-
-export interface PacketExplainerQuiz {
-  questions: PacketExplainerQuizQuestion[];
 }
 
 export interface OrchestratorMissionState {

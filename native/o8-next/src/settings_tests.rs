@@ -164,7 +164,6 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
         "telemetryOptIn",
         "supervisorAutoEscalate",
         "reviewContinuation",
-        "packetExplainerEnabled",
         "buyinDocEnabled",
         "commitAttributionEnabled",
         "codexAppThreads",
@@ -280,9 +279,9 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     // No settings or drafts enter shell view-state persistence.
     let saved = fs::read_to_string(shell.read_with(cx, |s, _| s.file.clone())).unwrap();
     assert!(!saved.contains("desktop-fixture") && !saved.contains("discarded"));
-    assert_eq!(frames.len(), 41);
+    assert_eq!(frames.len(), 40);
     if let Ok(path) = std::env::var("O8_NEXT_SETTINGS_RESULTS") {
-        fs::write(path, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI CPU scene paint", "profile":"debug", "openToFirstFrameMs":open_ms, "interactionToFrameMs":frames, "defaultControls":41})).unwrap()).unwrap();
+        fs::write(path, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI CPU scene paint", "profile":"debug", "openToFirstFrameMs":open_ms, "interactionToFrameMs":frames, "defaultControls":40})).unwrap()).unwrap();
     }
 }
 

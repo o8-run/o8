@@ -405,22 +405,6 @@ export async function submitPacketReview(input: SubmitReviewInput, internal?: { 
       throw new ReviewValidationError('waiver_head_mismatch', 'The missing-contract waiver does not match the packet current HEAD. Review the current commit before waiving.');
     }
   }
-  if (activeReviewTurn?.surface === 'packet-explainer') {
-    log(`Ignored non-authoritative packet-explainer verdict for packet ${packet.id}.`, {
-      approved: input.approved,
-      findings: input.findings.length,
-      reviewTurnId: activeReviewTurn.id,
-    });
-    return {
-      recorded: false,
-      findingsCount: 0,
-      reviewedHeadSha: null,
-      warning: undefined,
-      auditEventType: null,
-      auditApprovalId: null,
-      ignoredReason: 'packet_explainer_non_authoritative',
-    };
-  }
   if (!input.approved && input.findings.length === 0 && hasApprovedVerdict(packet, verdictLane)) {
     log(`Ignored finding-free rejection that would replace an approved verdict for packet ${packet.id}.`, {
       reviewTurnId: activeReviewTurn?.id ?? null,

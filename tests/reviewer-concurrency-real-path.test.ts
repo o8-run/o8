@@ -102,12 +102,6 @@ vi.mock('@/lib/lane/orchestrator-backends/registry', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/lane/packet-explainer-queue', () => ({
-  drainPacketExplainerQueue: vi.fn(async () => {}),
-  enqueuePacketExplainer: vi.fn(async () => {}),
-  notifyCorrectnessReviewQueued: vi.fn(),
-  startPacketExplainerQueueDrain: vi.fn(() => () => {}),
-}));
 vi.mock('@/lib/mcp/o8-webview-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/mcp/o8-webview-client')>();
   return {

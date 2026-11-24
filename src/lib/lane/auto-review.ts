@@ -65,7 +65,6 @@ import {
   isReviewAttemptCancelled,
 } from './review-cancellation';
 import { dispatchSecondPassMerge } from './second-pass-merge-dispatch';
-import { drainPacketExplainerQueue, enqueuePacketExplainer, startPacketExplainerQueueDrain } from './packet-explainer-queue';
 import { resolvePacketTaskContractGate } from './task-contract-gate';
 import type { Lane } from './types';
 import { recurring } from '@/lib/background-work/ledger';
@@ -78,7 +77,6 @@ const REVIEW_DIFF_LINES = {
 } as const;
 
 let drainTimer: ReturnType<typeof setInterval> | null = null;
-let stopExplainerDrain: (() => void) | null = null;
 
 export { isLaneAutoReviewActive, cancelAutoReviewForLane };
 
@@ -114,7 +112,6 @@ export function startReviewQueueDrain(): () => void {
       console.error('[auto-review] Drain error:', err);
     });
   }, DRAIN_INTERVAL_MS, { busy: hasQueuedReviews });
-  stopExplainerDrain = startPacketExplainerQueueDrain();
 
   console.log(`[auto-review] Started review queue drain (${DRAIN_INTERVAL_MS}ms interval)`);
 
@@ -125,8 +122,6 @@ export function startReviewQueueDrain(): () => void {
     if (drainTimer) {
       clearInterval(drainTimer);
       drainTimer = null;
-      stopExplainerDrain?.();
-      stopExplainerDrain = null;
       console.log('[auto-review] Stopped review queue drain');
     }
   };
@@ -205,7 +200,6 @@ async function processClaimedReview(slot: number, review: QueuedReview): Promise
   } finally {
     releaseReviewSlot(slot, review);
     clearReviewAttemptCancellation(review.id, review.claim_owner);
-    void drainPacketExplainerQueue().catch(() => {});
   }
 }
 
@@ -586,25 +580,6 @@ async function performAutoReview(review: QueuedReview, reviewerSlot: number): Pr
       console.warn(`[auto-review] Codex review unavailable for lane ${lane.id} (${recorded.verdict.parseWarning}); existing verdict left untouched`);
     } else if (recorded?.verdict.parseWarning) {
       console.warn(`[auto-review] Codex verdict for lane ${lane.id} needed parser fallback: ${recorded.verdict.parseWarning}`);
-    }
-  }
-
-  // The current review row stays in_progress through any blind pass, so the
-  // independent explainer queue cannot claim capacity until correctness settles.
-  if (lane.packetId) {
-    try {
-      await enqueuePacketExplainer({
-        lane,
-        packetId: lane.packetId,
-        packetTitle: lane.label || lane.branch,
-        packetSummary: completionContext?.summary ?? '',
-        diffSummary: diffSummary.summary,
-        changedFileCount: diffSummary.changedFiles.length,
-        deviationsRaw: deviations?.raw ?? null,
-        reviewContext: mechanicalChecks.summary || '',
-      });
-    } catch (error) {
-      console.warn(`[auto-review] Failed to enqueue explainer for lane ${lane.id}:`, error);
     }
   }
 

@@ -288,11 +288,6 @@ export type LaneEventVerb =
   | 'merge_head_drift'
   | 'review_invalidated'
   | 'review_risk_classified'
-  | 'explainer_queued'
-  | 'explainer_started'
-  | 'explainer_deferred'
-  | 'explainer_completed'
-  | 'explainer_failed'
   | 'runtime_drift'
   | 'execution_carrier_preflight'
   // A packet-scoped worker attempted an input mutation against an o8-owned

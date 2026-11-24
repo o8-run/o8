@@ -8,7 +8,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
  * packet is a no-op, mirroring submitPacketReview's missionPacket guard.
  *
  * Used by the review pipeline to stamp packet-scoped review artifacts
- * (deviations #1490, explainer #1491) that the surfaces read back.
+ * (deviations #1490) that the surfaces read back.
  */
 export async function patchMissionPacket(
   packetId: string,

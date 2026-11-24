@@ -9,7 +9,6 @@ import {
   settleSupersededReviewAttempts,
 } from './review-attempt-head';
 import { REVIEW_CONCURRENCY_LIMIT } from './review-concurrency';
-import { notifyCorrectnessReviewQueued } from './packet-explainer-queue';
 import { assertCorrectionReviewOwner, bindCorrectionReview, CorrectionReviewBlocked, prepareCorrectionReview, settledCorrectionReplay } from '@/lib/orchestrator/correction-review';
 import { getLane } from './registry';
 import { surfaceReviewQueueBlocker } from './review-queue-blocker';
@@ -78,10 +77,6 @@ export function enqueueLaneReview(
   lane: Lane,
   options: EnqueueLaneReviewOptions = {},
 ): EnqueueLaneReviewResult {
-  // Optional explainers yield before any correctness claim is inspected or
-  // created. Existing pending/in-progress reviews deserve the same priority as
-  // a brand-new row.
-  notifyCorrectnessReviewQueued();
   const db = getSqlite();
   const currentHeadSha = normalizeAttemptHeadSha(options.headSha) ?? laneReviewHeadSha(lane);
   const replay = settledCorrectionReplay(lane, currentHeadSha);

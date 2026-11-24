@@ -8,9 +8,9 @@ restart retains its existing mode and refuses an explicitly different or invalid
 mode before signaling. Stop the profile, then start it again to change its mode.
 
 Manual mode does not reclaim abandoned review attempts, claim queued reviews,
-start packet explainers, or enqueue review continuations. The headless children
+or enqueue review continuations. The headless children
 also receive per-run overrides disabling the heal bot, supervisor escalation,
-packet explainer, and Brain warmup. Background sprint ticks from the WebSocket
+and Brain warmup. Background sprint ticks from the WebSocket
 bridge are held. Saved operator defaults and existing review claims are preserved.
 
 The hold is a startup recovery control. It does not cancel already-running turns

@@ -107,16 +107,6 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
     lifecycle: 'deliberate-default-off',
     rationale: 'Optional merge-gate test replay; kept off because repository test commands can be slow.',
   },
-  packetExplainerEnabled: {
-    landedRelease: '0.1.560',
-    lifecycle: 'deliberate-default-off',
-    rationale: 'Optional AI report and quiz consume a separate model turn; generation requires operator opt-in.',
-  },
-  quizGateEnabled: {
-    landedRelease: '0.1.681',
-    lifecycle: 'deliberate-default-off',
-    rationale: 'Optional human quiz speed bump before the merge button; opt-in per operator.',
-  },
   buyinDocEnabled: {
     landedRelease: '0.1.681',
     lifecycle: 'deliberate-default-off',

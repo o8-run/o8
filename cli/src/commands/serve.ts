@@ -637,7 +637,6 @@ async function runDaemon(): Promise<number> {
   if (validateReviewMode() === 'manual') {
     env.O8_HEAL_BOT_ENABLED = '0';
     env.O8_SUPERVISOR_AUTO_ESCALATE = '0';
-    env.O8_EXPLAINER = '0';
     env.O8_BRAIN_WARMUP = '0';
   }
   if (plan.mode === 'packaged') {

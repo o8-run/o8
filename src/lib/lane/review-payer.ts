@@ -96,7 +96,7 @@ function hasReviewCallRows(reviewTurnId: string): boolean {
 export interface MissionReviewCost {
   packetId: string;
   reviewTurnId: string;
-  /** The reviewer surface: auto-review, merge-gate-review, packet-explainer or buyin-doc. */
+  /** The reviewer surface: auto-review, merge-gate-review or buyin-doc. */
   surface: string | null;
   model: string | null;
   payer: ReviewPayer;

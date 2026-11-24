@@ -3933,15 +3933,6 @@
       ]
     },
     {
-      "path": "tests/lane-lifecycle-1810-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "real-path",
-        "worktree-api"
-      ]
-    },
-    {
       "path": "tests/lane-list-native-rows-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -6618,20 +6609,6 @@
         "git-cli",
         "real-path",
         "worktree-api"
-      ]
-    },
-    {
-      "path": "tests/packet-explainer-priority-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/packet-explainer-restart-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
       ]
     },
     {

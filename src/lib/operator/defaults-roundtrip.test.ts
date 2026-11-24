@@ -81,8 +81,6 @@ const NON_DEFAULT_UPDATE = {
   crossHouseWorkerFallback: true,
   orchestratorBackend: 'collide',
   reviewerBackend: 'codex',
-  packetExplainerEnabled: true,
-  quizGateEnabled: true,
   buyinDocEnabled: true,
   updateAutoApply: 'idle',
   collideAggregator: 'claude',
@@ -103,12 +101,6 @@ const NON_DEFAULT_UPDATE = {
 } as const;
 
 describe('updateOperatorDefaults round-trip', () => {
-  it('defaults optional explainers and quiz gates off without disabling explicit opt-in', async () => {
-    expect((await getOperatorDefaults()).values).toMatchObject({
-      packetExplainerEnabled: false,
-      quizGateEnabled: false,
-    });
-  });
   it('migrates the legacy autoApplyUpdates value to updateAutoApply', async () => {
     writeFileSync(join(dataDir, 'operator-defaults.json'), JSON.stringify({
       autoApplyUpdates: 'when-idle',
