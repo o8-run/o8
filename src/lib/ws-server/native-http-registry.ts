@@ -39,7 +39,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/workspace/output-disposition', 'GET', () => import('@/app/api/orchestrator/workspace/output-disposition/route')),
     route('/api/orchestrator/workspace/preservation', 'GET POST', () => import('@/app/api/orchestrator/workspace/preservation/route')),
     route('/api/runtime/session-transform', 'GET POST', () => import('@/lib/runtime/session-transform-route')),
-    route('/api/task-artifacts', 'GET POST', () => import('@/app/api/task-artifacts/route')),
 
     // POST is `o8 task create`. The gate grants workers GET only on this path, so a POST needs the
     // operator bearer. The new packet is written through the file-locked control plane, which the
@@ -110,8 +109,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/orchestrator/lead', 'GET POST', () => import('@/lib/orchestrator/http/lead')),
     route('/api/orchestrator/status', 'GET', () => import('@/app/api/orchestrator/status/route')),
     route('/api/orchestrator/archive', 'GET', () => import('@/app/api/orchestrator/archive/route')),
-    route('/api/task-artifacts/[id]/actions', 'GET', () => import('@/app/api/task-artifacts/[id]/actions/route')),
-    route('/api/task-artifacts/[id]/decision', 'GET POST', () => import('@/app/api/task-artifacts/[id]/decision/route')),
     route('/api/mobile/orchestrator/threads', 'GET POST', () => import('@/app/api/mobile/orchestrator/threads/route')),
     route('/api/orchestrator/state', 'GET PATCH', () => import('@/app/api/orchestrator/state/route')),
     route('/api/orchestrator/shared-team/active', 'GET', () => import('@/app/api/orchestrator/shared-team/active/route')),

@@ -51,7 +51,6 @@ For contributors who are reading the code, extending o8, or maintaining a cross-
 | [Execution carriers](internals/execution-carriers.md) | Typed argv and credential wrappers that preserve the underlying runtime identity. |
 | [Local-model coverage](internals/local-model-coverage.md) | Which orchestrators, workers, and support surfaces can use local inference today. |
 | [Task-pool control plane](internals/agent-task-pool-control-plane.md) | How tasks project onto packets, lanes, locks, CLI commands, and MCP tools. |
-| [Interactive task artifacts](internals/task-artifacts.md) | How an agent hands the operator a sandboxed form whose exact payload returns to the session that asked. |
 | [Fleet state model](internals/fleet-state-model.md) | The canonical status vocabulary for agents, packets, squads, and review. |
 | [Cortex memory integration](internals/cortex-memory-integration.md) | How session outcomes become searchable organizational memory. |
 | [Codebase-memory build](internals/codebase-memory-build.md) | How the codebase-memory helper is sourced, packaged, and verified. |

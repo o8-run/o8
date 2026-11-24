@@ -41,7 +41,6 @@ import { runConversationPrs } from './commands/conversation-prs.js';
 import { runHistory } from './commands/history.js';
 import { runLead } from './commands/lead.js';
 import { runLaneTouches } from './commands/lane.js';
-import { runArtifact } from './commands/artifact.js';
 import { runVerifyReceipt } from './commands/verify-receipt.js';
 import { runTruth } from './commands/truth.js';
 import { runMission } from './commands/mission.js';
@@ -276,8 +275,6 @@ commands:
   brain sources        manage read-only markdown knowledge folders
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
-  artifact create      attach an interactive task artifact to this packet or a thread (--title --html <file> --actions <file.json>)
-  artifact status|receipts <id>  writability + last receipt, or every submission
   worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--model m] [--effort adaptive|low|medium|high|max|xhigh|ultra] [--caller label] [--read-only])
   worker login         connect an encrypted native worker token from an operator terminal (macOS; no source checkout needed)
   mission create       stage a mission from an inline task; --dispatch launches it (--title --body [--dispatch] [--model m] [--effort adaptive|low|medium|high|max|xhigh|ultra] [--carrier native|openrouter|codex-subscription] [--caller label] [--read-only] [--existingBranchPolicy auto|reset|continue|error] [--compare m1,m2] [--quality-search-contract file])
@@ -470,8 +467,6 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);
     }
-    case 'artifact':
-      return runArtifact(args.mode, secondary, args.rest);
     case 'lane': {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);

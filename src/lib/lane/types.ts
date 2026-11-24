@@ -378,10 +378,6 @@ export type LaneEventVerb =
   // Payload: { step, commandId?, error, state }
   | 'workspace_manifest_failed'
   | 'ui_loop_preview_ready'
-  // Interactive task artifacts (#1699). created: { artifactId, title, actions }
-  // action: { artifactId, actionId, action, payloadHash, actor, delivery, note? }
-  | 'task_artifact_created'
-  | 'task_artifact_action'
   | 'ui_loop_preview_failed'
   | 'ui_loop_proof'
   // Discard could not prove its preserved branch exists. Payload:

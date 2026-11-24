@@ -620,15 +620,6 @@ and Codex rollout discovery runs on the read-only child boundary (#5652). The
 handler and its workspace check are unchanged; the native gate requires the
 bearer.
 
-## Mission card decision
-
-`GET` and `POST /api/task-artifacts/[id]/decision` (session; `mission_card.rs`)
-are registered on the native transport with the route's exports. The handler's
-own principal check (operator or enrolled device, never a worker) is unchanged
-and reads the bearer, which the native gate requires. Delivery stays on durable
-paths: a packet steer (its route is already native), the lead's composer queue,
-or the operator's own turn.
-
 ## Folder picker
 
 `POST /api/panel/browse-folder` (session; `files_panel/spec_target.rs`) is

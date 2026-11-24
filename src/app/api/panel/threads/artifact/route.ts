@@ -1,5 +1,3 @@
-import { redactOutputText } from '@/lib/acp/output-redaction';
-import { viewerRedactionPolicy } from '@/lib/viewers/policy';
 import { redactThreadText } from '@/lib/threads/redaction';
 import { viewerBytes } from '@/lib/viewers/bytes';
 import { isVerifiableRasterType, viewerImageBytes } from '@/lib/viewers/image-bytes';
@@ -8,8 +6,6 @@ import { type NextRequest } from 'next/server';
 import { join, relative } from 'node:path';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { getArtifact } from '@/lib/artifacts/store';
-import { getTaskArtifactById } from '@/lib/task-artifacts/store';
-import { TASK_ARTIFACT_LIMITS } from '@/lib/task-artifacts/types';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { openWorkspaceFile } from '@/lib/fs/workspace-file';
 import { createThreadProjectScope, type ThreadTarget } from '@/lib/threads/project-scope';
@@ -29,14 +25,6 @@ export async function GET(request: NextRequest) {
     const scope = await createThreadProjectScope();
     return threadProjectMatches(scope.targetProject(target), projectId);
   };
-  if (id && request.nextUrl.searchParams.get('source') === 'interactive') {
-    const artifact = getTaskArtifactById(id);
-    if (!artifact || !await inScope(artifact.target)) return viewerJson({ error: 'Artifact not found.' }, { status: 404 });
-    if (Buffer.byteLength(artifact.html) > TASK_ARTIFACT_LIMITS.htmlMaxBytes) return viewerJson({ error: 'Artifact too large.' }, { status: 413 });
-    return viewerJson({ ok: true, result: { artifact: {
-      id: artifact.id, title: redactThreadText(redactOutputText(artifact.title, viewerRedactionPolicy()).text), html: redactThreadText(redactOutputText(artifact.html, viewerRedactionPolicy()).text),
-    } } }, { headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
-  }
   const record = id ? getArtifact(id) : null;
   if (!record || !await inScope(record)) return viewerJson({ error: 'Artifact not found.' }, { status: 404 });
   const mime = record.mimeType.toLowerCase().split(';')[0].trim();

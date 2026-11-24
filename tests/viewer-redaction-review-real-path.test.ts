@@ -223,29 +223,7 @@ describe('security review regressions through persisted viewer routes', () => {
     const { POST } = await import('@/app/api/v2/context/files/route');
     const req = request('/api/v2/context/files', {}, { method: 'POST', headers: { 'x-cortex-repo-path': root }, body: JSON.stringify({ paths: ['README.md'] }) });
     await inspect(await POST(new NextRequest(req.clone())), item.clear); await inspect(await fetch(req), item.clear);
-    const { insertTaskArtifact } = await import('@/lib/task-artifacts/store');
-    const artifactId = `tart-00000000-0000-4000-8000-${String(1000 + viewerCredentialCorpus.indexOf(item)).padStart(12, '0')}`;
-    const at = new Date().toISOString();
-    insertTaskArtifact({ id: artifactId, schemaVersion: 1, title: 'fixture', html: `<pre>${item.text}</pre>`,
-      target: { kind: 'packet', repoPath: root, packetId: 'fixture-packet', laneId: null, sessionKey: 'fixture:session', threadId: null },
-      originHead: git('rev-parse', 'HEAD'), headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
-    const { GET } = await import('@/app/api/task-artifacts/[id]/route'); const artifactRequest = request(`/api/task-artifacts/${artifactId}`);
-    await inspect(await GET(artifactRequest, { params: Promise.resolve({ id: artifactId }) }), item.clear);
-    await inspect(await fetch(artifactRequest), item.clear);
 
-  });
-
-  it('redacts persisted interactive HTML at its direct read alias', async () => {
-    const { insertTaskArtifact, getTaskArtifactById } = await import('@/lib/task-artifacts/store');
-    const id = 'tart-00000000-0000-4000-8000-000000004759';
-    const html = `<pre>${operator}</pre>`; const at = new Date().toISOString();
-    insertTaskArtifact({ id, schemaVersion: 1, title: 'fixture', html,
-      target: { kind: 'packet', repoPath: root, packetId: 'fixture-packet', laneId: null, sessionKey: 'fixture:session', threadId: null },
-      originHead: git('rev-parse', 'HEAD'), headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
-    const route = `/api/task-artifacts/${id}`; const req = request(route);
-    const { GET } = await import('@/app/api/task-artifacts/[id]/route');
-    await inspect(await GET(req, { params: Promise.resolve({ id }) }), operator);
-    await inspect(await fetch(req), operator); expect(getTaskArtifactById(id)?.html).toBe(html);
   });
 
   it.each([false, true])('keeps old masked reads read-only after token rotation, force=%s', async force => {

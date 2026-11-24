@@ -4641,14 +4641,6 @@
       ]
     },
     {
-      "path": "tests/mission-cards-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/mission-cost-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5382,14 +5374,6 @@
       ]
     },
     {
-      "path": "tests/o8d-artifacts-native-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/o8d-backend-models-native-real-path.test.ts",
       "reasons": [
         "executable-fixture",
@@ -5439,14 +5423,6 @@
       "path": "tests/o8d-canvas-intent-unavailable-real-path.test.ts",
       "reasons": [
         "child-process",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/o8d-card-decision-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
         "real-path"
       ]
     },
@@ -8508,21 +8484,6 @@
       "reasons": [
         "child-process",
         "process-signal",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/task-artifact-receipts-socket-real-path.test.ts",
-      "reasons": [
-        "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/task-artifacts-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli",
         "real-path"
       ]
     },

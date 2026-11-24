@@ -17,7 +17,6 @@ import { createO8WebviewBrowserHandlers, O8_WEBVIEW_BROWSER_TOOLS } from '@/lib/
 import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview, handleReject } from '@/lib/mcp/operator-handlers/approve';
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageAgents, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
-import { TASK_ARTIFACT_TOOLS, handleTaskArtifact } from '@/lib/mcp/operator-handlers/task-artifact';
 import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender, handleVisualizationRead } from '@/lib/mcp/operator-handlers/visualization';
 import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
@@ -208,7 +207,6 @@ const TOOLS: McpTool[] = [
   ...O8_WEBVIEW_BROWSER_TOOLS,
   ...DEVICE_TOOLS,
   ...CANVAS_TOOLS,
-  ...TASK_ARTIFACT_TOOLS,
   ...VISUALIZATION_TOOLS,
   ...MISSION_TOOLS.filter((tool) => tool.name === 'create_mission'),
   ...MISSION_TOOLS.filter((tool) => tool.name === 'dispatch_mission'),
@@ -297,7 +295,6 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   ...createO8WebviewBrowserHandlers(),
   o8_canvas: handleCanvas,
   o8_render: handleRender,
-  o8_task_artifact: handleTaskArtifact,
   o8_html_preview: handleHtmlPreview,
   o8_html_render: handleHtmlRender,
   o8_visualization_read: handleVisualizationRead,

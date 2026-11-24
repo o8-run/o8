@@ -344,7 +344,6 @@ pub(crate) fn saved_time(entry: &Entry) -> Option<u64> {
 }
 pub(crate) fn retain_saved(entry: &Entry, complete: bool, first: Option<u64>) -> bool {
     entry.role == "user"
-        || entry.extra.get("type").is_some_and(|t| t == "card")
         || (!complete
             && saved_time(entry)
                 .zip(first)

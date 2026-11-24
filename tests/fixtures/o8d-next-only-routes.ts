@@ -19,7 +19,6 @@ export interface NextOnlyEntry {
 export type NextOnlyTable = Readonly<Record<string, NextOnlyEntry>>;
 
 const security = (reason: string): NextOnlyEntry => ({ owner: 'security', reason });
-const seek = (reason: string): NextOnlyEntry => ({ owner: 'seek', reason });
 
 // Entries in these tables are separated by blank lines so that PRs removing neighbouring
 // entries merge without conflicts. When you register a route, delete only its entry line (and
@@ -49,7 +48,6 @@ export const NEXT_ONLY_MCP_PATHS: NextOnlyTable = {
 
 
 
-  '/api/task-artifacts/[id]/actions': seek('operator MCP tool'),
 };
 export const NEXT_ONLY_MCP_METHODS: NextOnlyTable = {
 };
@@ -85,7 +83,6 @@ export const NEXT_ONLY_CLI_PATHS: NextOnlyTable = {
 
 
 
-  '/api/task-artifacts/[id]/actions': seek('operator task artifact actions'),
 
 
 };

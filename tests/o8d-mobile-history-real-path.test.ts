@@ -68,7 +68,7 @@ it.skipIf(process.platform !== 'linux')('serves admitted phone transcripts throu
     save('rich', { messages: [{ id: 'partial', role: 'assistant', content: 'hidden partial', isPartial: true }, { id: 'truthy-partial', role: 'assistant', content: 'also hidden', isPartial: 'yes' }, { id: 'user', role: 'user', content: 'question', timestamp: 0, mentions: [{ kind: 'file', path: 'src/main.rs', label: 'main.rs' }], steerAnchor: { messageId: 'anchor' } }, { id: 'assistant', role: 'assistant', content: 'reply', timestamp: 1700000000000, receipt, costUsd: 0.000001, thinking: 'detail', thinkingDurationMs: 12, sources: [{ title: 'source', path: 'file' }], toolCalls: [{ id: 'tool-1', name: 'read', args: { path: 'file', nested: { value: 1 } }, status: 'done', result: 'exact output', preview: 'preview', startedAt: 2, finishedAt: 3, launchLink: null }], media: [{ type: 'image', path: 'fixture.png' }] }, { role: 'assistant', content: 'legacy', compaction: { summary: 'summary' }, timestampLabel: 'saved clock' }], pendingTurnWorkers: { assistant: [{ packetId: 'same', runtime: 'codex', model: 'new' }, { packetId: 'new', runtime: 'claude', model: 'new' }] } });
     save('source-network', { source: 'bot-network', messages: [{ id: 'network', role: 'assistant', content: 'projected source' }] });
     save('bound-network', { source: 'bot-network', messages: [{ id: 'network', role: 'assistant', content: 'locked projected record' }] }); writeFileSync(file('bound-network') + '.lock', 'fixture-held-lock');
-    for (const id of ['mission', 'lane']) save(id, { messages: [{ id: 'turn', role: 'user', content: id + ' ordinary turn', timestamp: 1700000000000 }] });
+    for (const id of ['lane']) save(id, { messages: [{ id: 'turn', role: 'user', content: id + ' ordinary turn', timestamp: 1700000000000 }] });
     writeFileSync(file('malformed'), '{"messages":['); save('bad-tool', { messages: [{ id: 'tool', role: 'assistant', content: '', toolCalls: 'unsupported' }] });
     save('bad-pending', { messages: [{ id: 'constructor', role: 'assistant', content: 'prototype worker id', receipt: {} }], pendingTurnWorkers: { ordinary: [] } });
     const db = new Database(join(directory, 'cortex-ide.db'));
@@ -76,7 +76,6 @@ it.skipIf(process.platform !== 'linux')('serves admitted phone transcripts throu
       ensureMobileDeviceSchema(db); db.prepare('INSERT INTO mobile_devices (id,token_hash,identity_public_key) VALUES (?,?,?)').run('history-device', hash(device), 'fixture-identity');
       db.prepare('INSERT INTO bot_network_threads (thread_id,repo_path,conversation_id,participants_json,title,created_at) VALUES (?,?,NULL,?,?,?)').run('bound-network', directory, '[]', 'Network fixture', '2026-01-01T00:00:00.000Z');
       db.prepare(`INSERT INTO lanes (id,label,repo_path,worktree_path,branch,base_branch,runtime,session_key,status,ownership,created_at,updated_at) VALUES ('mobile-lane','Mobile fixture',?,?,'fixture','HEAD','claude','llm-chat:lane','running','attached','2026-01-01','2026-01-01')`).run(directory, directory);
-      db.prepare(`INSERT INTO task_artifacts (id,schema_version,title,html,target_kind,repo_path,thread_id,packet_id,lane_id,session_key,origin_head,head_policy,actions_json,card_json,state,state_reason,created_by,created_at,updated_at) VALUES ('mobile-card',1,'Approve fixture?','','thread',?,'mission',NULL,NULL,'llm-chat:mission',NULL,'any','[]',?,'live',NULL,'operator','2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z')`).run(directory, JSON.stringify({ kind: 'approve', body: 'Mission fixture', entityIds: [], actions: [{ id: 'approve', label: 'Approve' }, { id: 'deny', label: 'Deny' }], expiresAt: '2099-01-01T00:00:00.000Z' }));
     } finally { db.close(); }
     mkdirSync(join(directory, 'subagent-transcripts')); writeFileSync(join(directory, 'subagent-transcripts/fixture.jsonl'), JSON.stringify({ type: 'assistant', uuid: 'subagent-turn', timestamp: '2026-01-01T00:00:00.000Z', message: { content: [{ type: 'text', text: 'subagent stays on Node' }] } }) + '\n');
     const reference = await startParityReference({ directory, nativeHttp: true, o8d: false }); await reference.stopNext(); server = { ...reference, origin: reference.url.replace('ws:', 'http:').replace('/ws', '') };
@@ -85,12 +84,11 @@ it.skipIf(process.platform !== 'linux')('serves admitted phone transcripts throu
     const stale = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(cursor, 'base64url').toString()), revision: 'stale' })).toString('base64url');
     const cases = [pathFor('llm-chat:ordinary'), pathFor('llm-chat:ordinary', { page: '1' }), pathFor('llm-chat:ordinary', { page: '1', before: cursor }), pathFor('llm-chat:ordinary', { page: '1', before: stale }), pathFor('llm-chat:rich'), pathFor('llm-chat:rich', { page: '1' }), pathFor('llm-chat:missing'), pathFor('llm-chat:missing', { page: '1' }), ...['', '0', '2.5', 'bad', '0x2', '1000'].map(limit => pathFor('llm-chat:ordinary', { limit })), pathFor(' \ufeffllm-chat:rich\u00a0 ', { page: '1', limit: '2' })];
     cases.push(pathFor('llm-chat:lane'), pathFor('llm-chat:lane', { page: '1' }));
-    const fallbacks = ['llm-chat:source-network', 'llm-chat:bound-network', 'llm-chat:mission', 'subagent:fixture', 'codex-owned:unknown', 'llm-chat:malformed', 'llm-chat:bad-tool', 'llm-chat:bad-pending'].flatMap(key => [pathFor(key), pathFor(key, { page: '1' })]);
+    const fallbacks = ['llm-chat:source-network', 'llm-chat:bound-network', 'subagent:fixture', 'codex-owned:unknown', 'llm-chat:malformed', 'llm-chat:bad-tool', 'llm-chat:bad-pending'].flatMap(key => [pathFor(key), pathFor(key, { page: '1' })]);
     const expected = []; for (const path of cases) expected.push(await snapshot(await call(path)));
     expect(expected[0].body.transcript).toHaveLength(6); expect(expected[1].body.transcript).toHaveLength(100); expect(expected[2].body.transcript).toHaveLength(5); expect(expected[3].status).toBe(409); expect(expected[3].body.ok).toBe(false);
     expect((expected[5].body.transcript as { id: string }[]).some(row => row.id === 'partial')).toBe(false);
     const deferred = []; for (const path of fallbacks) deferred.push(await snapshot(await call(path)));
-    expect((deferred[5].body.transcript as { type: string }[]).some(row => row.type === 'card')).toBe(true);
     const auth = ['', 'invalid-phone-history', worker, device]; const authExpected = []; for (const bearer of auth) authExpected.push(await snapshot(await call(cases[0], bearer)));
     expect(authExpected[0].status).toBe(401); expect(authExpected[2].status).not.toBe(200); expect(authExpected[3].status).toBe(200);
     await server.stop(); server = undefined;
@@ -107,13 +105,6 @@ it.skipIf(process.platform !== 'linux')('serves admitted phone transcripts throu
       const expected = await typescript(server!.origin, token, path); const response = await call(path);
       expect(response.headers.get('x-o8d-native')).toBeNull(); expect(await snapshot(response)).toEqual(expected);
     };
-    // The classification is fresh for each admission, with no card cache.
-    mutate("UPDATE task_artifacts SET thread_id = 'detached-fixture' WHERE id = 'mobile-card'");
-    const noCard = await call(pathFor('llm-chat:mission', { page: '1' })); expect(noCard.headers.get('x-o8d-native')).toBe('1'); expect((await noCard.json()).transcript).toHaveLength(1);
-    mutate("UPDATE task_artifacts SET thread_id = 'mission' WHERE id = 'mobile-card'");
-    await compareFallback(pathFor('llm-chat:mission', { page: '1' }));
-    mutate('ALTER TABLE task_artifacts RENAME COLUMN card_json TO unavailable_card_json');
-    try { await compareFallback(cases[0]); await compareFallback(cases[1]); } finally { mutate('ALTER TABLE task_artifacts RENAME COLUMN unavailable_card_json TO card_json'); }
     mutate('ALTER TABLE lanes RENAME TO unavailable_lanes');
     try { await compareFallback(cases[0]); await compareFallback(cases[1]); } finally { mutate('ALTER TABLE unavailable_lanes RENAME TO lanes'); }
     const logs = readFileSync(stderr, 'utf8') + readFileSync(join(directory, 'o8d-request-counts.jsonl'), 'utf8'); for (const secret of [token, device, worker]) expect(logs).not.toContain(secret);

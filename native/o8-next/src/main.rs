@@ -38,7 +38,6 @@ mod issues;
 mod lineage;
 mod login_item;
 mod merge;
-mod mission_card;
 mod model;
 mod motion;
 #[cfg(test)]
