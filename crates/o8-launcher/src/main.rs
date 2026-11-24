@@ -625,6 +625,9 @@ fn run(config: &mut Config, relaunch: &update::Relaunch) -> Result<(), Option<St
         &config.data_dir,
         config.update.as_ref(),
     ));
+    if updates.turn_off_for_run(std::env::var("O8_NO_PHONE_HOME").ok().as_deref()) {
+        o8_launcher::note!("Updates: off for this run (O8_NO_PHONE_HOME=1)");
+    }
     updates.on_finish(native::wake);
     let mut install: Option<update::Staged> = None;
     // Finish launching first, then keep the main thread answering events through

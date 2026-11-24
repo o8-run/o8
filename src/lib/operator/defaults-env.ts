@@ -342,7 +342,17 @@ export function envCollideAggregator(): CollideAggregator | null {
   return null;
 }
 
+/**
+ * `O8_NO_PHONE_HOME=1` turns off automatic updates, crash-log upload and crash
+ * reports for one run, over the saved settings. The launcher reads the same
+ * variable and skips its update checks.
+ */
+export function envNoPhoneHome(): boolean {
+  return process.env.O8_NO_PHONE_HOME === '1';
+}
+
 export function envUpdateAutoApply(): UpdateAutoApply | null {
+  if (envNoPhoneHome()) return 'off';
   const raw = process.env.O8_UPDATE_AUTO_APPLY?.trim()
     ?? process.env.O8_AUTO_APPLY_UPDATES?.trim();
   if (raw === 'off' || raw === 'idle') return raw;
@@ -351,6 +361,7 @@ export function envUpdateAutoApply(): UpdateAutoApply | null {
 }
 
 export function envTelemetryOptIn(): boolean | null {
+  if (envNoPhoneHome()) return false;
   const raw = process.env.O8_TELEMETRY_OPT_IN;
   if (raw === '1') return true;
   if (raw === '0') return false;
@@ -362,6 +373,7 @@ export function envTelemetryIngestUrl(): string | null {
 }
 
 export function envCrashReports(): boolean | null {
+  if (envNoPhoneHome()) return false;
   const raw = process.env.O8_CRASH_REPORTS;
   if (raw === '1') return true;
   if (raw === '0') return false;

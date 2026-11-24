@@ -625,6 +625,17 @@ impl Controller {
         }
     }
 
+    /// `O8_NO_PHONE_HOME=1` turns update checks off for this run. An
+    /// interrupted install is still settled first, by `new`.
+    pub fn turn_off_for_run(&mut self, value: Option<&str>) -> bool {
+        if value != Some("1") {
+            return false;
+        }
+        self.updater = Err("Updates are off for this run (O8_NO_PHONE_HOME=1)".into());
+        self.state = "unsupported";
+        true
+    }
+
     /// Runs `wake` on the worker thread each time a job ends.
     pub fn on_finish(&mut self, wake: fn()) {
         self.finished = wake;
@@ -1336,6 +1347,34 @@ fn fault(point: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_no_phone_home_switch_stops_update_checks() {
+        let root = std::env::temp_dir().join(format!("o8-no-phone-home-{}", std::process::id()));
+        fs::create_dir_all(root.join("data")).unwrap();
+        let config = UpdateConfig {
+            settings: Some(root.join("update-ping.json")),
+            bundle: Some(root.join("o8.app")),
+            endpoints: Some(vec![
+                "https://127.0.0.1:1/a".into(),
+                "https://127.0.0.1:1/b".into(),
+            ]),
+            ..Default::default()
+        };
+        let updater = || Updater::new("1.0.0", &root.join("data"), Some(&config));
+        let mut on = Controller::new(updater());
+        assert!(on.next_due().is_some());
+        assert!(!on.turn_off_for_run(None) && !on.turn_off_for_run(Some("0")));
+        assert!(on.next_due().is_some());
+        let mut off = Controller::new(updater());
+        assert!(off.turn_off_for_run(Some("1")));
+        assert!(off.next_due().is_none());
+        assert_eq!(off.status()["state"], "unsupported");
+        assert!(off.check().is_some_and(|answer| answer["ok"] == false));
+        assert!(off.poll().is_none() && off.job.is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn key_and_feeds_match_the_classic_shell() {
