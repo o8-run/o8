@@ -89,6 +89,8 @@ function deps(calls: string[][] = []): ComputerJobsDeps {
       if (target === 'system/com.example.daemon') return service('running', '\tpid = 101\n').replace('runs = 14', 'runs = 1');
       return null;
     },
+    change: async () => { throw new Error('the read path never changes anything'); },
+    logPath: '/nonexistent/scheduled-job-actions.jsonl',
     listDir: async (path) => Object.keys(plists).filter((file) => file.startsWith(`${path}/`)).map((file) => file.slice(path.length + 1)),
     home: HOME,
     uid: 501,
@@ -127,6 +129,16 @@ describe('everything scheduled on this Mac', () => {
     expect(byLabel['com.example.daemon']).toMatchObject({ triggers: ['keep alive (conditional)'], maker: { kind: 'system', name: '/Library/Example' } });
     expect(byLabel['com.example.helper']).toMatchObject({ plist: null, triggers: ['registered by an app'], maker: { kind: 'app', name: 'Example' } });
     expect(byLabel.backup).toMatchObject({ program: '/usr/local/bin/backup', triggers: ['cron */15 * * * *'], runsPerDay: 96, maker: { kind: 'user', name: 'crontab' } });
+
+    // Only the user's own jobs can be changed, and o8's own go through o8.
+    expect(byLabel['com.example.syncer']).toMatchObject({ actions: ['stop', 'disable'], readOnlyReason: null, undoEntryId: null });
+    expect(byLabel['com.example.nightly']).toMatchObject({ actions: ['stop'] });
+    expect(byLabel['com.example.helper']).toMatchObject({ actions: ['disable'] });
+    expect(byLabel['ai.o8.bench']!.actions).toEqual([]);
+    expect(byLabel['ai.o8.bench']!.readOnlyReason).toContain("o8's own");
+    expect(byLabel['com.example.daemon']!.actions).toEqual([]);
+    expect(byLabel['com.example.agent']!.readOnlyReason).toContain('System job');
+    expect(byLabel.backup).toMatchObject({ actions: ['disable'] });
 
     // Arguments and environment values never leave the collector.
     expect(JSON.stringify(report)).not.toContain(SECRET);

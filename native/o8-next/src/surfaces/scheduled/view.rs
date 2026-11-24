@@ -35,6 +35,9 @@ pub(crate) struct Scheduled {
     /// Every scheduled job on this Mac, read on open and on Refresh only.
     computer: Option<Result<Value, String>>,
     computer_in_flight: bool,
+    /// The row whose stop or disable waits for confirmation.
+    computer_confirm: Option<(String, &'static str)>,
+    computer_error: Option<String>,
     /// Registered repositories as (local path, default branch).
     pub(super) repos: Vec<(String, String)>,
     fetched: Option<Instant>,
@@ -60,6 +63,8 @@ impl Scheduled {
             connected_at: None,
             computer: None,
             computer_in_flight: false,
+            computer_confirm: None,
+            computer_error: None,
             repos: vec![],
             fetched: None,
             in_flight: false,

@@ -6,10 +6,13 @@
  */
 import { execFile } from '@/lib/providers/child-process';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+
+import { getDataDir } from '@/lib/data-dir-migration';
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 5_000;
@@ -20,6 +23,7 @@ const ALWAYS = 86_400;
 
 export type ComputerJobScope = 'user' | 'system-agent' | 'system-daemon' | 'cron';
 export type ComputerJobMakerKind = 'o8' | 'app' | 'user' | 'system';
+export type ComputerJobAction = 'stop' | 'disable';
 
 export interface ComputerJob {
   id: string;
@@ -41,7 +45,50 @@ export interface ComputerJob {
   lastExit: string | null;
   disabled: boolean;
   maker: { kind: ComputerJobMakerKind; name: string };
+  /** What o8 may do to it: only the user's own launchd jobs and crontab lines. */
+  actions: ComputerJobAction[];
+  /** Why it has no actions, when that needs saying. */
+  readOnlyReason: string | null;
+  /** The latest stop or disable o8 made that is not undone yet. */
+  undoEntryId: string | null;
 }
+
+export interface ComputerJobLogEntry {
+  entryId: string;
+  at: number;
+  jobId: string;
+  label: string;
+  scope: ComputerJobScope;
+  program: string | null;
+  action: ComputerJobAction | 'undo';
+  /** For an undo: the entry it reverses. */
+  undoes?: string;
+  /** What reverses this entry. */
+  undo?: { command: string; args: string[] } | { crontabLineId: string };
+}
+
+/** Every stop, disable and undo o8 made, one JSON line each. */
+export function computerJobsLogPath(): string {
+  return join(getDataDir(), 'scheduled-job-actions.jsonl');
+}
+
+export function readComputerJobsLog(path: string = computerJobsLogPath()): ComputerJobLogEntry[] {
+  try {
+    return readFileSync(path, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
+      try { return [JSON.parse(line) as ComputerJobLogEntry]; } catch { return []; }
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** A crontab row's id: the hash of its own line, so an action names that exact line. */
+export function crontabLineId(line: string): string {
+  return `cron:${createHash('sha256').update(line).digest('hex').slice(0, 16)}`;
+}
+
+/** Crontab lines o8 disabled stay in the crontab behind this marker. */
+export const CRON_DISABLED_MARKER = '# o8 disabled: ';
 
 export interface ComputerJobsReport {
   jobs: ComputerJob[];
@@ -56,6 +103,10 @@ export interface ComputerJobsReport {
 export interface ComputerJobsDeps {
   /** Runs a read-only command; null when it fails. */
   run: (command: string, args: string[]) => Promise<string | null>;
+  /** Runs a command that changes state; throws when it fails. Only the control path uses it. */
+  change: (command: string, args: string[]) => Promise<void>;
+  /** The stop, disable and undo log. */
+  logPath: string;
   listDir: (path: string) => Promise<string[]>;
   home: string;
   uid: number | null;
@@ -235,7 +286,8 @@ const SPECIAL_PER_DAY: Record<string, number | null> = {
 export function crontabJobs(table: string): ComputerJob[] {
   const rows: ComputerJob[] = [];
   for (const raw of table.split('\n')) {
-    const line = raw.trim();
+    const disabledByO8 = raw.startsWith(CRON_DISABLED_MARKER);
+    const line = (disabledByO8 ? raw.slice(CRON_DISABLED_MARKER.length) : raw).trim();
     if (!line || line.startsWith('#') || /^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) continue;
     const special = /^(@\w+)\s+(.+)$/.exec(line);
     const fields = special ? null : /^((?:\S+\s+){4}\S+)\s+(.+)$/.exec(line);
@@ -246,15 +298,42 @@ export function crontabJobs(table: string): ComputerJob[] {
     const program = command.split(/\s+/).find((word) => !word.includes('=')) ?? null;
     const label = program ? basename(program) : 'cron job';
     rows.push({
-      // The line's own hash: a later action must name this exact line, not a position.
-      id: `cron:${createHash('sha256').update(line).digest('hex').slice(0, 16)}`, label, scope: 'cron', program, plist: null,
+      id: crontabLineId(line), label, scope: 'cron', program, plist: null,
       triggers: [special ? when : `cron ${when}`],
       runsPerDay: special ? SPECIAL_PER_DAY[when] ?? null : cronRunsPerDay(when!),
-      loaded: null, running: false, pid: null, runs: null, lastExit: null, disabled: false,
-      maker: { kind: 'user', name: 'crontab' },
+      loaded: null, running: false, pid: null, runs: null, lastExit: null, disabled: disabledByO8,
+      maker: { kind: 'user', name: 'crontab' }, actions: [], readOnlyReason: null, undoEntryId: null,
     });
   }
   return rows;
+}
+
+/**
+ * What o8 may do to a job. System agents and daemons stay read-only, and
+ * o8's own jobs are changed through o8's own controls. Stop needs the plist,
+ * because its undo loads the job again from it.
+ */
+export function jobControls(job: ComputerJob): Pick<ComputerJob, 'actions' | 'readOnlyReason'> {
+  if (job.scope === 'system-agent' || job.scope === 'system-daemon') {
+    return { actions: [], readOnlyReason: 'System job: installed for every user, so o8 only shows it.' };
+  }
+  if (job.maker.kind === 'o8') return { actions: [], readOnlyReason: "o8's own job: change it in o8." };
+  if (job.scope === 'cron') return { actions: job.disabled ? [] : ['disable'], readOnlyReason: null };
+  const actions: ComputerJobAction[] = [];
+  if (job.loaded && job.plist) actions.push('stop');
+  if (!job.disabled) actions.push('disable');
+  return { actions, readOnlyReason: null };
+}
+
+/** The latest change o8 made to each job that has not been undone. */
+export function openUndos(log: ComputerJobLogEntry[]): Map<string, string> {
+  const undone = new Set(log.flatMap((entry) => entry.undoes ? [entry.undoes] : []));
+  const open = new Map<string, string>();
+  for (const entry of log) {
+    if (entry.action === 'undo' || undone.has(entry.entryId)) continue;
+    open.set(`${entry.scope}:${entry.label}`, entry.entryId);
+  }
+  return open;
 }
 
 /** Running now first, then the jobs whose schedule runs them most often, then by runs so far. */
@@ -283,13 +362,13 @@ const FOLDERS: Array<{ scope: ComputerJobScope; path: (home: string) => string }
   { scope: 'system-daemon', path: () => '/Library/LaunchDaemons' },
 ];
 
-export async function readComputerJobs(deps: ComputerJobsDeps = defaultDeps()): Promise<ComputerJobsReport> {
+export async function readComputerJobs(deps: ComputerJobsDeps = defaultComputerJobsDeps()): Promise<ComputerJobsReport> {
   const report: ComputerJobsReport = {
     jobs: [], hiddenMacosJobs: 0, hiddenOpenApps: 0, collectedAt: deps.now(),
     loginItems: { readable: false, note: 'macOS asks for a new permission before listing login items, so they are not read.' },
   };
   if (deps.platform !== 'darwin') {
-    report.jobs = sortComputerJobs(crontabJobs(await deps.run('crontab', ['-l']) ?? ''));
+    report.jobs = withControls(sortComputerJobs(crontabJobs(await deps.run('crontab', ['-l']) ?? '')), deps.logPath);
     return report;
   }
   const user = deps.uid === null ? null : `gui/${deps.uid}`;
@@ -334,6 +413,7 @@ export async function readComputerJobs(deps: ComputerJobsDeps = defaultDeps()): 
         label, program, scope: file.scope, home: deps.home,
         bundle: typeof bundles[0] === 'string' ? bundles[0] : service?.parentBundle ?? null,
       }),
+      actions: [], readOnlyReason: null, undoEntryId: null,
     };
   });
 
@@ -356,18 +436,24 @@ export async function readComputerJobs(deps: ComputerJobsDeps = defaultDeps()): 
         runs: service?.runs ?? null, lastExit: service?.lastExit ?? listed.lastExit,
         disabled: domains.user.disabled.get(label) === true,
         maker: jobMaker({ label, program: service?.program ?? null, scope: 'user', home: deps.home, bundle: service?.parentBundle }),
+        actions: [], readOnlyReason: null, undoEntryId: null,
       };
     });
 
-  report.jobs = sortComputerJobs([
+  report.jobs = withControls(sortComputerJobs([
     ...fromFiles.filter((job): job is ComputerJob => job !== null),
     ...registered,
     ...crontabJobs(crontab ?? ''),
-  ]);
+  ]), deps.logPath);
   return report;
 }
 
-function defaultDeps(): ComputerJobsDeps {
+function withControls(jobs: ComputerJob[], logPath: string): ComputerJob[] {
+  const undos = openUndos(readComputerJobsLog(logPath));
+  return jobs.map((job) => ({ ...job, ...jobControls(job), undoEntryId: undos.get(`${job.scope}:${job.label}`) ?? null }));
+}
+
+export function defaultComputerJobsDeps(): ComputerJobsDeps {
   return {
     run: async (command, args) => {
       try {
@@ -377,6 +463,10 @@ function defaultDeps(): ComputerJobsDeps {
         return null;
       }
     },
+    change: async (command, args) => {
+      await execFileAsync(command, args, { timeout: TIMEOUT_MS, maxBuffer: 1_000_000 });
+    },
+    logPath: computerJobsLogPath(),
     listDir: (path) => readdir(path),
     home: homedir(),
     uid: process.getuid?.() ?? null,

@@ -2703,6 +2703,13 @@
       ]
     },
     {
+      "path": "tests/computer-job-control-real-path.test.ts",
+      "reasons": [
+        "child-process",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/confirmed-kill.test.ts",
       "reasons": [
         "child-process",

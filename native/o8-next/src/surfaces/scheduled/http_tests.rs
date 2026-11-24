@@ -6,7 +6,7 @@ fn settle(view: &Entity<Scheduled>, cx: &mut VisualTestContext) {
     while Instant::now() < deadline {
         cx.run_until_parked();
         draw(cx);
-        if !view.read_with(cx, |view, _| view.in_flight || view.computer_in_flight) {
+        if !view.read_with(cx, |view, _| view.in_flight || view.computer_in_flight || !view.busy.is_empty()) {
             return;
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -61,6 +61,47 @@ fn scheduled_reads_this_macs_jobs_on_open_and_refresh_but_not_on_the_tick(cx: &m
     view.update(cx, |view, cx| view.refresh(cx));
     settle(&view, cx);
     assert_eq!(fixture_state(&fixture)["computer"], 2, "Refresh reads them again");
+}
+
+#[gpui::test]
+fn stopping_a_job_on_this_mac_names_it_first_and_offers_an_undo(cx: &mut TestAppContext) {
+    let fixture = Fixture::start_mode(false, "--scheduled");
+    let (view, cx) =
+        cx.add_window_view(|window, cx| Scheduled::new(fixture.client.clone(), window, cx));
+    settle(&view, cx);
+    draw(cx);
+    assert!(
+        cx.debug_bounds("scheduled-computer-stop-backup").is_none(),
+        "a job without the stop action shows no Stop"
+    );
+    let stop = cx.debug_bounds("scheduled-computer-stop-com.example.syncer").unwrap();
+    cx.simulate_click(stop.center(), gpui::Modifiers::default());
+    draw(cx);
+    assert!(cx.debug_bounds("scheduled-computer-confirm-com.example.syncer").is_some());
+    assert_eq!(fixture_state(&fixture)["changes"], json!([]), "nothing runs before the confirmation");
+    let confirm = cx
+        .debug_bounds("scheduled-computer-confirm-stop-com.example.syncer")
+        .unwrap();
+    cx.simulate_click(confirm.center(), gpui::Modifiers::default());
+    settle(&view, cx);
+    draw(cx);
+    assert_eq!(
+        fixture_state(&fixture)["changes"],
+        json!([{ "id": "user:com.example.syncer", "action": "stop", "confirm": "com.example.syncer" }])
+    );
+    let undo = cx.debug_bounds("scheduled-computer-undo-com.example.syncer").unwrap();
+    cx.simulate_click(undo.center(), gpui::Modifiers::default());
+    settle(&view, cx);
+    assert_eq!(fixture_state(&fixture)["changes"][1], json!({ "undo": "00000000-0000-4000-8000-000000000001" }));
+}
+
+#[test]
+fn the_confirmation_names_the_job_and_what_it_runs() {
+    let job = json!({ "label": "com.example.syncer", "scope": "user", "program": "/opt/tools/bin/syncer" });
+    let text = computer::confirm_text(&job, "stop");
+    assert!(text.starts_with("Stop com.example.syncer? It runs /opt/tools/bin/syncer."));
+    let cron = json!({ "label": "backup", "scope": "cron", "program": "/usr/local/bin/backup" });
+    assert!(computer::confirm_text(&cron, "disable").contains("commented out, not removed"));
 }
 
 #[test]
