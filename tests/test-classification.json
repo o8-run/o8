@@ -1987,21 +1987,9 @@
       ]
     },
     {
-      "path": "tests/broadcast-speaker-real-path.test.ts",
-      "reasons": [
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/broadcast-static-real-path.test.ts",
       "reasons": [
         "network-listener",
-        "real-path"
-      ]
-    },
-    {
-      "path": "tests/broadcast-voice-repetition-real-path.test.ts",
-      "reasons": [
         "real-path"
       ]
     },
@@ -5761,7 +5749,7 @@
       ]
     },
     {
-      "path": "tests/o8d-pr-context-say-native-real-path.test.ts",
+      "path": "tests/o8d-pr-context-native-real-path.test.ts",
       "reasons": [
         "real-path"
       ]

@@ -87,10 +87,6 @@ describe('panelGateMiddleware — Broadcast spectator capability', () => {
       method: 'POST',
       headers: { authorization },
     })).status).toBe(403);
-    expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/broadcast/say', {
-      method: 'POST',
-      headers: { authorization },
-    })).status).toBe(403);
     expect(panelGateMiddleware(gatedRequest('http://localhost:3001/api/lanes', {
       method: 'POST',
       headers: { authorization },
@@ -435,7 +431,6 @@ describe('panelGateMiddleware — worker capability scope', () => {
 
   it('keeps operator mutations closed to workers', () => {
     expect(workerRequest('/api/orchestrator/merge', 'POST').status).toBe(403);
-    expect(workerRequest('/api/broadcast/say', 'POST').status).toBe(403);
   });
 
   it('admits only the bounded scheduled-speech route for handler-level automation proof', () => {

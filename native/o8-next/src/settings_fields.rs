@@ -35,7 +35,6 @@ pub enum Kind {
     Toggle,
     ReadOnly,
     WordToggle(&'static str),
-    Time,
     TierEffort,
     Choice(&'static [(&'static str, &'static str)]),
     Number(f64, &'static str),
@@ -149,29 +148,17 @@ impl Field {
         }
         if matches!(
             self.id,
-            "broadcastVoiceAttention"
-                | "broadcastVoiceApprovals"
-                | "broadcastVoiceReviews"
-                | "broadcastVoiceFailures"
-                | "broadcastVoiceCompletions"
-                | "broadcastVoiceCalendar"
+            "broadcastVoiceCalendar"
                 | "broadcastVoiceTimeCheckins"
                 | "broadcastVoiceCalendarLeadMinutes"
         ) && value("broadcastVoice").as_str() != Some("on")
         {
-            return Some("Turn on Spoken updates to change this notification.");
+            return Some("Turn on Automation and Calendar posts to change this.");
         }
         if self.id == "broadcastVoiceCalendarLeadMinutes"
             && value("broadcastVoiceCalendar") != &Value::Bool(true)
         {
             return Some("Turn on Calendar events to change the lead time.");
-        }
-        if matches!(
-            self.id,
-            "broadcastVoiceQuietStart" | "broadcastVoiceQuietEnd"
-        ) && value("broadcastVoiceQuietHours").as_str() != Some("on")
-        {
-            return Some("Turn on Quiet hours to change this window.");
         }
         None
     }
@@ -212,7 +199,7 @@ impl Field {
                 .unwrap_or("Unavailable")
                 .into(),
             Kind::Bots => format!("{} selected", value.as_array().map_or(0, Vec::len)),
-            Kind::Text | Kind::Time => value.as_str().unwrap_or("Unavailable").into(),
+            Kind::Text => value.as_str().unwrap_or("Unavailable").into(),
         }
     }
     pub fn parse(&self, text: &str) -> Result<Value, String> {
@@ -224,18 +211,6 @@ impl Field {
                 .filter(|n| n.is_finite())
                 .map(|n| Value::from(n / scale))
                 .ok_or("Enter a finite number.".into()),
-            Kind::Time => {
-                let text = text.trim();
-                let valid = text.len() == 5
-                    && text.as_bytes()[2] == b':'
-                    && text[..2].parse::<u8>().is_ok_and(|h| h < 24)
-                    && text[3..].parse::<u8>().is_ok_and(|m| m < 60);
-                if valid {
-                    Ok(Value::from(text))
-                } else {
-                    Err("Enter a time in HH:MM format (00:00–23:59).".into())
-                }
-            }
             _ => Ok(Value::from(text.trim())),
         }
     }

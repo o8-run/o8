@@ -265,7 +265,6 @@ import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
 import { startBroadcastDirectorLoop } from './lib/broadcast/director';
-import { startBroadcastSpeakerLoop } from './lib/broadcast/speaker';
 import type {
   RealtimeBatchMessage,
   RealtimeEventEnvelope,
@@ -2481,7 +2480,6 @@ let stopHealBotLoop: (() => void) | null = null;
 let stopDossierReconcile: (() => void) | null = null;
 let stopSilentExitDetectorLoop: (() => void) | null = null;
 let stopDocWatcherLoop: (() => void) | null = null;
-let stopBroadcastSpeakerLoop: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -8819,7 +8817,6 @@ async function runStartupMaintenance() {
     bootCompactorScheduler();
     bootAutomationsScheduler();
     startBroadcastDirectorLoop();
-    stopBroadcastSpeakerLoop = startBroadcastSpeakerLoop();
 
     void (async () => {
       try {
@@ -8868,8 +8865,6 @@ async function shutdown(signal: string, exitCode = 0) {
   stopSilentExitDetectorLoop = null;
   stopDocWatcherLoop?.();
   stopDocWatcherLoop = null;
-  stopBroadcastSpeakerLoop?.();
-  stopBroadcastSpeakerLoop = null;
   stopRelayConnector();
   stopMachineAttachSupervisor();
   stopWorktreeReaper();

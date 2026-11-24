@@ -97,27 +97,6 @@ export async function runBroadcast(
   group: string | undefined,
   rest: string[],
 ): Promise<number> {
-  if (group === 'say') {
-    const textArgs = positional(rest, new Set());
-    if (textArgs.length !== 1 || rest.some((value) => value.startsWith('--'))) {
-      throw new CliError('invalid_args', 'Use `o8 broadcast say "<text>"`.', EXIT.INVALID_ARGS);
-    }
-    const cfg = resolveConfig();
-    const response = await apiFetch<PostResponse>(cfg, '/api/broadcast/say', {
-      method: 'POST',
-      body: { text: textArgs[0] },
-    });
-    if (!response.data) throw new CliError('invalid_response', 'Broadcast say returned no data.', EXIT.INVALID_ARGS);
-    const payload = { schema: 'o8/cli/broadcast.say/v1', ok: true, event: response.data.event };
-    if (mode.human) {
-      printHumanHeading('Broadcast speech queued');
-      printHumanKv([['id', payload.event.id], ['text', payload.event.text ?? '']]);
-    } else {
-      printJson(payload);
-    }
-    return EXIT.OK;
-  }
-
   if (group === 'automation-say') {
     const textArgs = positional(rest, new Set());
     if (textArgs.length !== 1 || rest.some((value) => value.startsWith('--'))) {
@@ -248,7 +227,7 @@ export async function runBroadcast(
       'unknown_broadcast_subcommand',
       `Unknown broadcast subcommand: ${group ?? '(none)'}`,
       EXIT.INVALID_ARGS,
-      'Use `o8 broadcast say ...`, `o8 broadcast automation-say ...`, `o8 broadcast focus ...`, `o8 broadcast post ...`, or `o8 broadcast token mint|revoke ...`.',
+      'Use `o8 broadcast automation-say ...`, `o8 broadcast focus ...`, `o8 broadcast post ...`, or `o8 broadcast token mint|revoke ...`.',
     );
   }
   const [action, ...args] = positional(rest, new Set(['--label', '--repo']));

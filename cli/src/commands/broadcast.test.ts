@@ -20,27 +20,6 @@ afterEach(() => {
 });
 
 describe('Broadcast CLI commands', () => {
-  it('posts on-demand speech through the operator-only say endpoint', async () => {
-    process.env.O8_API_PORT = '40123';
-    process.env.O8_API_TOKEN = 'operator-token';
-    delete process.env.O8_WORKER_TOKEN;
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-      schema: 'o8/broadcast.say/v1',
-      ok: true,
-      event: {
-        id: 'say-one', kind: 'commentary', actor: 'symon', text: 'We are live.',
-        timestamp: '2026-08-21T00:00:00.000Z',
-      },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-
-    await expect(runBroadcast({ human: false, verbose: false }, 'say', ['We are live.']))
-      .resolves.toBe(0);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe('http://127.0.0.1:40123/api/broadcast/say');
-    expect(JSON.parse(String(init?.body))).toEqual({ text: 'We are live.' });
-  });
-
   it('posts a scheduled line through the packet-bound automation endpoint', async () => {
     process.env.O8_API_PORT = '40123';
     delete process.env.O8_API_TOKEN;

@@ -242,31 +242,23 @@ fn settings_parity_model_defaults_persist(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn settings_parity_spoken_notifications_persist_and_gate_controls(cx: &mut TestAppContext) {
+fn settings_parity_broadcast_posts_persist_and_gate_controls(cx: &mut TestAppContext) {
     let (fixture, shell, mut visual, _) = start(cx);
     let cx = &mut visual;
-    search(cx, "broadcastVoiceAttention");
-    let before = values(&fixture)["broadcastVoiceAttention"].clone();
-    click(cx, "setting-broadcastVoiceAttention");
+    search(cx, "broadcastVoiceTimeCheckins");
+    let before = values(&fixture)["broadcastVoiceTimeCheckins"].clone();
+    click(cx, "setting-broadcastVoiceTimeCheckins");
     frame(&shell, cx);
     assert_eq!(
-        values(&fixture)["broadcastVoiceAttention"],
+        values(&fixture)["broadcastVoiceTimeCheckins"],
         before,
-        "voice is off"
+        "posts are off"
     );
     search(cx, "broadcastVoice");
     click(cx, "setting-broadcastVoice");
     frame(&shell, cx);
     assert_eq!(values(&fixture)["broadcastVoice"], "on");
-    for field in [
-        "broadcastVoiceAttention",
-        "broadcastVoiceApprovals",
-        "broadcastVoiceReviews",
-        "broadcastVoiceFailures",
-        "broadcastVoiceCompletions",
-        "broadcastVoiceCalendar",
-        "broadcastVoiceTimeCheckins",
-    ] {
+    for field in ["broadcastVoiceCalendar", "broadcastVoiceTimeCheckins"] {
         search(cx, field);
         let before = values(&fixture)[field] == true;
         click(cx, &format!("setting-{field}"));
@@ -288,19 +280,6 @@ fn settings_parity_spoken_notifications_persist_and_gate_controls(cx: &mut TestA
     click(cx, "settings-save");
     frame(&shell, cx);
     assert_eq!(values(&fixture)["broadcastCommentaryMaxPerHour"], 7);
-    edit(cx, "broadcastVoiceQuietStart", "21:30");
-    click(cx, "settings-save");
-    frame(&shell, cx);
-    assert_eq!(error(&shell, cx), None);
-    assert_eq!(values(&fixture)["broadcastVoiceQuietStart"], "21:30");
-    edit(cx, "broadcastVoiceQuietEnd", "28:90");
-    click(cx, "settings-save");
-    frame(&shell, cx);
-    assert!(
-        error(&shell, cx).is_some(),
-        "invalid clock times are refused"
-    );
-    assert_eq!(values(&fixture)["broadcastVoiceQuietEnd"], "08:00");
 }
 
 #[gpui::test]

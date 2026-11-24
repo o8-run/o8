@@ -15,7 +15,6 @@
   "/api/broadcast/commentary",
   "/api/broadcast/events",
   "/api/broadcast/post",
-  "/api/broadcast/say",
   "/api/broadcast/snapshot",
   "/api/broadcast/tokens",
   "/api/broadcast/why",

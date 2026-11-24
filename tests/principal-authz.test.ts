@@ -76,7 +76,6 @@ const laneEvents = await import('@/app/api/lanes/[id]/events/route');
 const broadcastEvents = await import('@/app/api/broadcast/events/route');
 const broadcastCommentary = await import('@/app/api/broadcast/commentary/route');
 const broadcastPost = await import('@/app/api/broadcast/post/route');
-const broadcastSay = await import('@/app/api/broadcast/say/route');
 const broadcastCalendar = await import('@/app/api/broadcast/calendar/route');
 const broadcastAutomationSay = await import('@/app/api/broadcast/automation-say/route');
 const broadcastWhy = await import('@/app/api/broadcast/why/route');
@@ -239,33 +238,6 @@ describe('principal-authz — Broadcast spectator is read-only through the real 
       body: { kind: 'commentary', actor: 'worker', text: 'Unbound.' },
     }));
     expect(legacyWorkerResponse.status).toBe(403);
-  });
-
-  it('queues on-demand speech only for the operator principal', async () => {
-    const operatorRequest = req('http://localhost:3001/api/broadcast/say', {
-      principal: 'operator',
-      body: { text: 'Review is ready.' },
-    });
-    expect(panelGateMiddleware(operatorRequest).status).toBe(200);
-    const operatorResponse = await broadcastSay.POST(operatorRequest);
-    expect(operatorResponse.status).toBe(200);
-    await expect(operatorResponse.json()).resolves.toMatchObject({
-      event: { kind: 'commentary', actor: 'symon', text: 'Review is ready.' },
-    });
-
-    const workerRequest = req('http://localhost:3001/api/broadcast/say', {
-      principal: 'worker',
-      body: { text: 'Worker cannot speak.' },
-    });
-    expect(panelGateMiddleware(workerRequest).status).toBe(403);
-    expect((await broadcastSay.POST(workerRequest)).status).toBe(403);
-
-    const spectatorRequest = req('http://localhost:3001/api/broadcast/say', {
-      principal: 'spectator',
-      body: { text: 'Spectator cannot speak.' },
-    });
-    expect(panelGateMiddleware(spectatorRequest).status).toBe(403);
-    expect((await broadcastSay.POST(spectatorRequest)).status).toBe(403);
   });
 
   it('keeps Calendar ingestion and attention provenance operator-only', async () => {

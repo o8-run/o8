@@ -24,8 +24,6 @@ import {
 } from '@/lib/operator/defaults';
 import {
   isBroadcastCommentaryMode,
-  isBroadcastVoiceClockTime,
-  isBroadcastVoiceQuietHoursMode,
 } from '@/lib/operator/broadcast-commentary-defaults';
 import { botRailUpdate, isNativeKeybindings, isReviewReadyNotifications } from '@/lib/operator/presentation-defaults';
 import { isJudgmentProvider, JUDGMENT_PROVIDER_VALUES_MESSAGE } from '@/lib/operator/judgment-default';
@@ -233,27 +231,7 @@ export function normalizeUpdate(body: Record<string, unknown>): Partial<Operator
     update.broadcastVoice = body.broadcastVoice;
   }
 
-  if (body.broadcastVoiceQuietHours !== undefined) {
-    if (!isBroadcastVoiceQuietHoursMode(body.broadcastVoiceQuietHours)) {
-      throw new Error('broadcastVoiceQuietHours must be "off" or "on".');
-    }
-    update.broadcastVoiceQuietHours = body.broadcastVoiceQuietHours;
-  }
-
-  for (const field of ['broadcastVoiceQuietStart', 'broadcastVoiceQuietEnd'] as const) {
-    if (body[field] === undefined) continue;
-    if (!isBroadcastVoiceClockTime(body[field])) {
-      throw new Error(`${field} must be a local time in HH:MM format.`);
-    }
-    update[field] = body[field];
-  }
-
   for (const field of [
-    'broadcastVoiceAttention',
-    'broadcastVoiceApprovals',
-    'broadcastVoiceReviews',
-    'broadcastVoiceFailures',
-    'broadcastVoiceCompletions',
     'broadcastVoiceCalendar',
     'broadcastVoiceTimeCheckins',
   ] as const) {
@@ -266,7 +244,6 @@ export function normalizeUpdate(body: Record<string, unknown>): Partial<Operator
     ['broadcastCommentaryIntervalMinutes', 1_440],
     ['broadcastCommentaryMinNewEvents', 100],
     ['broadcastCommentaryMaxPerHour', 60],
-    ['broadcastVoiceLullMinutes', 1_440],
     ['broadcastVoiceCalendarLeadMinutes', 1_440],
   ] as const) {
     if (body[field] === undefined) continue;
