@@ -56,8 +56,6 @@ pub enum Row {
         #[serde(skip)]
         trace: Trace,
     },
-    /// A mission card (#5468) and its server-derived state; see `mission_card`.
-    Card { id: String, card: Value },
 }
 
 /// When a block of steps ran and whether it is still running, for the trace.
@@ -128,8 +126,7 @@ impl Row {
         match self {
             Self::Message { id, .. }
             | Self::Activity { id, .. }
-            | Self::PacketHeader { id, .. }
-            | Self::Card { id, .. } => id,
+            | Self::PacketHeader { id, .. } => id,
         }
     }
 }
@@ -332,15 +329,6 @@ pub fn render_tree_cached(entries: &[Entry], previous: &[Entry], old_rows: &[Row
                 && let Some(row @ Row::Message { .. }) = cached.get(entry.id.as_str())
             {
                 rows.push((*row).clone());
-                continue;
-            }
-            if entry.extra.get("type").and_then(Value::as_str) == Some("card")
-                && let Some(card) = entry.extra.get("card").filter(|c| c.is_object())
-            {
-                rows.push(Row::Card {
-                    id: entry.id.clone(),
-                    card: card.clone(),
-                });
                 continue;
             }
             if entry_index == 0

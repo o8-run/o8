@@ -1,4 +1,3 @@
-import type { TaskArtifactActionStamp } from '@/lib/task-artifacts/types';
 import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorExecutionMode } from '@/lib/orchestrator/types';
@@ -24,7 +23,6 @@ export function buildOrchestratorSendPayload(input: {
   collideBaseBackend?: OrchestratorBackendId;
   handoffMode?: 'handoff';
   attachments?: Array<{ dataUri: string; name?: string }>;
-  taskArtifactAction?: TaskArtifactActionStamp;
 }): string {
   return JSON.stringify({
     type: 'orchestrator-send',
@@ -47,6 +45,5 @@ export function buildOrchestratorSendPayload(input: {
     ...(input.collideBaseBackend ? { collideBaseBackend: input.collideBaseBackend } : {}),
     ...(input.handoffMode ? { handoffMode: input.handoffMode } : {}),
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-    ...(input.taskArtifactAction ? { taskArtifactAction: input.taskArtifactAction } : {}),
   });
 }

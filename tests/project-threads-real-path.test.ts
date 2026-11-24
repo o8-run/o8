@@ -311,27 +311,6 @@ it('inspects text evidence and refuses opaque or structurally masked evidence at
   }
 });
 
-it('redacts interactive evidence at its emitted read URL without modifying the saved artifact', async () => {
-  const { insertTaskArtifact, getTaskArtifactById } = await import('@/lib/task-artifacts/store');
-  const id = 'tart-00000000-0000-4000-8000-000000004703';
-  const html = `<pre>${displayCanary} ${JSON.stringify({ password: displaySecret })}</pre>`;
-  const at = new Date().toISOString();
-  insertTaskArtifact({ id, schemaVersion: 1, title: `Bearer ${displaySecret}`, html,
-    target: { kind: 'packet', repoPath, packetId, laneId, sessionKey: 'codex:parser', threadId: null },
-    originHead: initialHead, headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
-  const detail = await (await route.GET(request('&taskId=' + packetId))).json() as { task: ProjectThread };
-  const artifact = detail.task.thread.artifacts.find(item => item.id === id)!;
-  const url = new URL(artifact.href, 'http://localhost');
-  const modulePath = url.pathname.startsWith('/api/task-artifacts/') ? '@/app/api/task-artifacts/[id]/route' : '@/app/api/panel/threads/artifact/route';
-  const reader = await import(modulePath);
-  const response = await reader.GET(new NextRequest(url, { headers: { authorization: `Bearer ${token}` } }), { params: Promise.resolve({ id }) });
-  expect(response.status).toBe(200);
-  const body = await response.text();
-  expect(body).not.toContain(displaySecret); expect(body).not.toContain(displayHome);
-  expect(body).toContain('[redacted]');
-  expect(getTaskArtifactById(id)?.html).toBe(html);
-});
-
 it('authenticates artifact reads and refuses recorded paths outside the artifact root', async () => {
   const reader = await import('@/app/api/panel/threads/artifact/route');
   const { recordArtifact } = await import('@/lib/artifacts/store');
@@ -427,27 +406,17 @@ it('keeps projectless sessions out of shared-project reads and uses saved chat i
   } finally { fixture.agents = fixture.agents.filter(agent => agent !== unknown); }
 }, 60_000);
 
-it.each(['file', 'interactive'] as const)('refuses another shared project\'s %s artifact without exposing its existence', async kind => {
-  const projects = await sharedThreadProjects(kind);
+it('refuses another shared project\'s file artifact without exposing its existence', async () => {
+  const projects = await sharedThreadProjects('file');
   const reader = await import('@/app/api/panel/threads/artifact/route');
   const { recordArtifact } = await import('@/lib/artifacts/store');
-  const { insertTaskArtifact } = await import('@/lib/task-artifacts/store');
   const ids: string[] = [];
   for (const [index, project] of projects.entries()) {
-    if (kind === 'file') {
-      const relPath = `artifacts/shared-${kind}-${index}.json`;
-      mkdirSync(join(root, 'artifacts'), { recursive: true }); writeFileSync(join(root, relPath), JSON.stringify({ note: project.marker }));
-      ids.push(recordArtifact({ source: 'manual', kind: 'report', packetId: project.packetId, laneId: project.laneId, repoPath, relPath, mimeType: 'application/json' })!.id);
-    } else {
-      const id = `tart-00000000-0000-4000-8000-00000000470${index}`;
-      const at = new Date().toISOString();
-      insertTaskArtifact({ id, schemaVersion: 1, title: project.marker, html: `<p>${project.marker}</p>`,
-        target: { kind: 'packet', repoPath, packetId: project.packetId, laneId: project.laneId, sessionKey: project.sessionKey, threadId: null },
-        originHead: initialHead, headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
-      ids.push(id);
-    }
+    const relPath = `artifacts/shared-file-${index}.json`;
+    mkdirSync(join(root, 'artifacts'), { recursive: true }); writeFileSync(join(root, relPath), JSON.stringify({ note: project.marker }));
+    ids.push(recordArtifact({ source: 'manual', kind: 'report', packetId: project.packetId, laneId: project.laneId, repoPath, relPath, mimeType: 'application/json' })!.id);
   }
-  const read = (id: string, projectId: string) => reader.GET(new NextRequest(`http://localhost/api/panel/threads/artifact?${new URLSearchParams({ id, projectId, ...(kind === 'interactive' ? { source: 'interactive' } : {}) })}`, { headers: { authorization: `Bearer ${token}` } }));
+  const read = (id: string, projectId: string) => reader.GET(new NextRequest(`http://localhost/api/panel/threads/artifact?${new URLSearchParams({ id, projectId })}`, { headers: { authorization: `Bearer ${token}` } }));
   for (const [index, own] of projects.entries()) {
     const foreign = projects[1 - index];
     const ownResponse = await read(ids[index], own.projectId);
@@ -468,7 +437,6 @@ it('refuses contradictory or unowned evidence identities before exposing metadat
   const [a, b] = await sharedThreadProjects('conflicts');
   const { writePersistedLlmChat } = await import('@/lib/llm/chat-history-store');
   const { recordArtifact } = await import('@/lib/artifacts/store');
-  const { insertTaskArtifact } = await import('@/lib/task-artifacts/store');
   const reader = await import('@/app/api/panel/threads/artifact/route');
   const foreignChat = 'thoughts-foreign-evidence';
   const unownedChat = 'thoughts-unowned-evidence';
@@ -481,12 +449,7 @@ it('refuses contradictory or unowned evidence identities before exposing metadat
     const relPath = `artifacts/conflicting-${index}.json`;
     writeFileSync(join(root, relPath), JSON.stringify({ note: marker }));
     const file = recordArtifact({ source: 'manual', kind: 'report', label: marker, repoPath, packetId: a.packetId, laneId: a.laneId, threadId, relPath, mimeType: 'application/json' })!;
-    const id = `tart-00000000-0000-4000-8000-00000000471${index}`;
-    const at = new Date().toISOString();
-    insertTaskArtifact({ id, schemaVersion: 1, title: marker, html: `<p>${marker}</p>`,
-      target: { kind: 'packet', repoPath, packetId: a.packetId, laneId: a.laneId, sessionKey: a.sessionKey, threadId },
-      originHead: initialHead, headPolicy: 'any', actions: [], state: 'live', stateReason: null, createdBy: 'operator', createdAt: at, updatedAt: at });
-    reads.push({ id: file.id }, { id, source: 'interactive' });
+    reads.push({ id: file.id });
   }
   for (const target of reads) {
     const response = await reader.GET(new NextRequest(`http://localhost/api/panel/threads/artifact?${new URLSearchParams({ ...target, projectId: a.projectId })}`, { headers: { authorization: `Bearer ${token}` } }));

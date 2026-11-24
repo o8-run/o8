@@ -109,18 +109,6 @@ it('routes the UI-loop caller to WS', async () => {
   const leases = (await import('@/lib/leases/resource-lease-default-store')).getResourceLeaseStore();
   await vi.waitFor(async () => expect((await leases.status(`ui-loop:${repo}`)).holder).toBeNull(), { timeout: 10000 });
 }, 30000);
-it('routes task-artifact delivery to WS', async () => {
-  const f = await fixture(); flag('steer-busy');
-  const { createTaskArtifact, submitTaskArtifactAction } = await import('@/lib/task-artifacts/service');
-  const artifact = await createTaskArtifact({ title: 'Fixture', html: '<p>Fixture</p>', packetId: f.id,
-    actions: [{ name: 'submit', label: 'Submit', schema: { fields: { note: { type: 'string' } } } }] }, { role: 'operator' });
-  const result = await submitTaskArtifactAction(artifact.id, { action: 'submit', nonce: 'owner-artifact-nonce', payload: { note: 'fixture' }, target: artifact.target, actor: 'operator' });
-  expect(result).toMatchObject({ accepted: true, deliverVia: 'packet', action: { delivery: 'delivered' } });
-  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(0);
-  flag('steer-busy', false);
-  await fetch(origin + '/api/orchestrator/headless-tick', { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });
-  expect(read().delivered.filter(row => row.surfaceId === f.surfaceId)).toHaveLength(1);
-}, 30000);
 it('routes exact-run worker correction through its WS admission', async () => {
   const f = await fixture();
   const { correctWorkers } = await import('@/lib/orchestrator/worker-corrections');

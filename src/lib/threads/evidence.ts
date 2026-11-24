@@ -5,7 +5,6 @@ import { setTimeout, clearTimeout } from 'node:timers';
 import { getSqlite } from '@/lib/db';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import { listArtifacts } from '@/lib/artifacts/store';
-import { listTaskArtifactsByPacket } from '@/lib/task-artifacts/store';
 import { getLane, getLaneEvents } from '@/lib/lane/registry';
 import { evaluateContractCoverage, readCoverageEvidence } from '@/lib/orchestrator/task-contract-coverage';
 import { getRuntime } from '@/lib/runtimes/registry';
@@ -39,14 +38,11 @@ export async function attachThreadEvidence(task: ProjectThread, packet: Orchestr
   }));
   const projectId = task.project?.panelProjectId;
   const inProject = (target: ThreadTarget) => !task.project || threadProjectMatches(scope.targetProject(target), projectId ?? task.project.id);
-  const artifactHref = (id: string, interactive = false) => `/api/panel/threads/artifact?${new URLSearchParams({ id,
-    ...(projectId ? { projectId } : {}), ...(interactive ? { source: 'interactive' } : {}) })}`;
+  const artifactHref = (id: string) => `/api/panel/threads/artifact?${new URLSearchParams({ id,
+    ...(projectId ? { projectId } : {}) })}`;
   task.thread.artifacts = lane || packet ? listArtifacts(packet ? { packetId: packet.id } : { laneId: lane!.id })
     .filter(record => record.repoPath === task.repoPath && (!record.laneId || record.laneId === task.laneId) && inProject(record))
     .slice(-50).map(record => ({ id: record.id, title: record.label || record.kind, kind: record.kind, href: artifactHref(record.id) })) : [];
-  if (packet) task.thread.artifacts.push(...listTaskArtifactsByPacket(packet.id, 50).filter(record => record.target.repoPath === task.repoPath
-    && record.target.laneId === task.laneId && record.target.sessionKey === task.thread.sessionKey && inProject(record.target))
-    .map(record => ({ id: record.id, title: record.title, kind: 'interactive', href: artifactHref(record.id, true), interactive: true })));
   if (packet && lane) {
     const completion = db.prepare(`SELECT changed_files_json AS files FROM session_outcomes
       WHERE packet_id = ? AND lane_id = ? AND session_key IS ? AND repo_path = ? ORDER BY completed_at DESC LIMIT 1`)

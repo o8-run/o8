@@ -380,9 +380,7 @@ export interface MobileTranscriptEntry {
   /** Monotonic server persistence revision for this message. */
   persistedVersion?: number;
   pinned?: boolean;
-  type?: 'message' | 'compaction' | 'command' | 'handoff' | 'card';
-  /** Mission card (#5468) state; present when `type` is `card`. */
-  card?: import('@/lib/task-artifacts/types').MissionCardView;
+  type?: 'message' | 'compaction' | 'command' | 'handoff';
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;

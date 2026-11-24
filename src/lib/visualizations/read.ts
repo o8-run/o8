@@ -4,12 +4,13 @@ import path from 'node:path';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import { resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 import { readPersistedLlmChat } from '@/lib/llm/chat-history-store';
-import { ORCHESTRATOR_THREAD_ID_PATTERN } from '@/lib/task-artifacts/types';
 import { visualizationFailure, visualizationResponse } from './http';
 import { getVisualization, getVisualizationMetadata, listVisualizations } from './store';
 import type { VisualizationDocument } from './types';
 import { VISUALIZATION_ID } from './types';
 import { VisualizationError } from './errors';
+
+const ORCHESTRATOR_THREAD_ID_PATTERN = /^thoughts-[A-Za-z0-9_-]{1,80}$/;
 
 // Reads retain packet ownership checks without loading publication/preview code.
 function validateRead(id: string, principal: RequestPrincipalContext): void {

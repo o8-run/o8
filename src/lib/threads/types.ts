@@ -9,7 +9,7 @@ export interface ThreadEvidence {
   kind: 'packet' | 'lane' | 'session' | 'mission' | 'inbox' | 'approval' | 'handoff'; state: ThreadState;
   sessionKey: string | null; childIds: string[]; observedAt: string;
   requirements: Array<{ id: string; text: string; covered: boolean; verification: string; head: string | null }>;
-  artifacts: Array<{ id: string; title: string; kind: string; href: string; interactive?: boolean }>;
+  artifacts: Array<{ id: string; title: string; kind: string; href: string }>;
   merges: Array<{ id: string; title: string; url: string; state: string; checks: 'pass' | 'fail' | 'running' | 'unknown'; head: string | null }>;
   workers: ThreadWorker[]; stages: Array<{ name: string; done: number; total: number }>;
   history: Array<{ id: string; at: string; label: string }>;

@@ -445,22 +445,6 @@ device flow and every stateful panel route require the operator bearer.
 | PATCH | `/api/setup/mcp-servers` | Toggle enabled state for an external MCP server. |
 | DELETE | `/api/setup/mcp-servers` | Remove an external MCP server. |
 
-### `/api/task-artifacts/*` — Interactive task artifacts (gated)
-
-An orchestrator or packet worker attaches a sandboxed, agent-authored form to a
-thread or packet; the operator edits it and its exact validated payload returns
-to the originating session with a receipt. Contract: [Interactive task artifacts](task-artifacts.md).
-Creating needs the operator credential or a packet-bound worker token; submitting
-needs the operator credential or an enrolled device, never a worker.
-
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/task-artifacts` | Create: `{ title, html, actions, headPolicy?, threadId + repoPath \| packetId }`. A worker is pinned to its own packet. Returns the artifact without its html. |
-| GET | `/api/task-artifacts?threadId=...&repoPath=...` or `?packetId=...` | List artifacts with writability and last receipt. A worker may list only its own packet. |
-| GET | `/api/task-artifacts/[id]` | One artifact with its html, writability verdict, last receipt, and accepted count. |
-| POST | `/api/task-artifacts/[id]/actions` | Submit `{ action, payload, nonce, target }`. Accepted → 200 with the receipt and delivery; refused → 422 with `error.code` in `target_mismatch`, `read_only`, `undeclared_action`, `invalid_payload`, `payload_too_large`, `schema_violation`, `replayed`, `suspended`, `rate_limited`. |
-| GET | `/api/task-artifacts/[id]/actions` | The receipt ledger for one artifact. |
-
 ### `/api/tasks/*` — Task pool mutation surface (gated)
 
 The global middleware requires an affirmative operator, paired-device, or

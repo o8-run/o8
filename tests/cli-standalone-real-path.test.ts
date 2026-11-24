@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -11,12 +11,6 @@ const root = process.cwd();
 let server: Server;
 let dataDir: string;
 let port: number;
-const artifact = {
-  id: 'artifact-fixture', title: 'Fixture artifact',
-  target: { kind: 'thread', repoPath: '.', threadId: 'fixture-thread', packetId: null },
-  originHead: null, actions: [{ name: 'accept' }],
-};
-
 async function cli(...args: string[]) {
   const env = { ...process.env };
   delete env.O8_WORKER_TOKEN;
@@ -32,8 +26,6 @@ async function cli(...args: string[]) {
 
 beforeAll(async () => {
   dataDir = mkdtempSync(path.join(tmpdir(), 'o8-cli-standalone-'));
-  writeFileSync(path.join(dataDir, 'artifact.html'), '<p>Fixture</p>');
-  writeFileSync(path.join(dataDir, 'actions.json'), JSON.stringify([{ name: 'accept' }]));
   await exec(process.execPath, [path.join(root, 'cli/esbuild.config.mjs')], { timeout: 60_000 });
   // A protocol peer isolates CLI argument/output contracts from server admission.
   server = createServer((request, response) => {
@@ -45,12 +37,6 @@ beforeAll(async () => {
     response.setHeader('Content-Type', 'application/json');
     if (request.url === '/api/setup/agent') {
       response.end(JSON.stringify({ ok: true, status: 'ready' }));
-    } else if (request.url === '/api/task-artifacts') {
-      response.end(JSON.stringify({ ok: true, result: { artifact } }));
-    } else if (request.url === `/api/task-artifacts/${artifact.id}`) {
-      response.end(JSON.stringify({ ok: true, result: { artifact: { ...artifact, html: '<p>private body</p>' }, acceptedActionCount: 0 } }));
-    } else if (request.url === `/api/task-artifacts/${artifact.id}/actions`) {
-      response.end(JSON.stringify({ ok: true, result: { actions: [] } }));
     } else {
       response.writeHead(404).end('{}');
     }
@@ -79,29 +65,6 @@ describe('standalone CLI completion gates', () => {
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
   }, 190_000);
-
-  it('creates artifacts with the default machine-readable output', async () => {
-    const result = await cli('artifact', 'create', '--title', artifact.title,
-      '--html', 'artifact.html', '--actions', 'actions.json', '--thread', 'fixture-thread', '--repo', '.');
-    expect(JSON.parse(result.stdout)).toEqual({ ok: true, artifact });
-    expect(result.stderr).toBe('');
-  });
-
-  it.each(['status', 'receipts'])('reads artifact %s as JSON by default', async command => {
-    const result = await cli('artifact', command, artifact.id);
-    const payload = JSON.parse(result.stdout);
-    expect(payload.ok).toBe(true);
-    if (command === 'status') {
-      expect(payload.artifact).toEqual(artifact);
-      expect(payload.artifact).not.toHaveProperty('html');
-    } else expect(payload.actions).toEqual([]);
-  });
-
-  it('keeps explicit human artifact output', async () => {
-    const result = await cli('--human', 'artifact', 'status', artifact.id);
-    expect(result.stdout).toContain('artifact status');
-    expect(result.stdout).toContain('accepted');
-  });
 
   it('returns success through the bundled setup dispatcher', async () => {
     const result = await cli('setup', 'status');

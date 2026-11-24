@@ -47,8 +47,6 @@ pub struct RowState {
     diagram_list: Option<(gpui::ListState, usize)>,
     pub(crate) images: crate::ui::images::Cache,
     pub cards: crate::visualizations::Cards,
-    /// A mission card row's decision state (#5468).
-    pub(crate) mission_card: Option<Rc<RefCell<crate::mission_card::CardState>>>,
     /// The workspace a transcript row belongs to, so its file pills can say
     /// where they point.
     pub(crate) file_root: Option<gpui::SharedString>,
@@ -96,7 +94,6 @@ impl RowState {
             diagram_list: None,
             images: Default::default(),
             cards: Default::default(),
-            mission_card: None,
             file_root: None,
             peeks: None,
             subagents: None,
@@ -185,36 +182,9 @@ impl RowState {
         }
         self.cards.retain(|id, _| keep.contains(id));
     }
-    /// A card row decides through the transcript's client; a lead chat also
-    /// hands over its routing so the decision queues as the lead's next turn.
-    pub fn attach_mission_card(
-        &mut self,
-        client: &crate::client::Client,
-        routing: Option<serde_json::Value>,
-    ) {
-        if !matches!(self.row, Row::Card { .. }) {
-            return;
-        }
-        match &self.mission_card {
-            // A transcript without routing never clears one another view supplied.
-            Some(card) => {
-                if routing.is_some() {
-                    card.borrow_mut().set_routing(routing)
-                }
-            }
-            None => {
-                self.mission_card = Some(Rc::new(RefCell::new(
-                    crate::mission_card::CardState::new(client.clone(), routing),
-                )))
-            }
-        }
-    }
     pub fn poll_visualizations(&mut self) -> bool {
         let mut changed = false;
         for card in self.cards.values() {
-            changed |= card.borrow_mut().poll();
-        }
-        if let Some(card) = &self.mission_card {
             changed |= card.borrow_mut().poll();
         }
         if changed {
@@ -900,15 +870,6 @@ fn layout(
                 }
             }
         }
-        // Drawn by `mission_card::element`; this is the plain fallback.
-        Row::Card { card, .. } => {
-            b.plain(
-                crate::text::sanitize(&crate::mission_card::receipt_line(card)),
-                12.,
-                18.,
-                window,
-            );
-        }
     }
     Layout {
         size: size(width, b.y + px(8.)),
@@ -1021,9 +982,6 @@ impl RetainedRow {
         self.state.borrow_mut().diagram_list = Some((list.clone(), self.index));
         if matches!(self.state.borrow().row, Row::Activity { .. }) {
             return crate::trace::element(self.state.clone(), self.index, list);
-        }
-        if matches!(self.state.borrow().row, Row::Card { .. }) {
-            return crate::mission_card::element(self.state.clone(), self.index, list);
         }
         if !self.state.borrow().cards.is_empty() {
             let state = self.state.clone();

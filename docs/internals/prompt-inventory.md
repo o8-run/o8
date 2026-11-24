@@ -462,7 +462,6 @@ escaped source characters and format slots make them conservative source estimat
 | [src/lib/mcp/operator-handlers/status.ts](../../src/lib/mcp/operator-handlers/status.ts) | tool:o8_status | Tool selection, arguments and authority | 225 | 225 | 0 |
 | [src/lib/mcp/operator-handlers/status.ts](../../src/lib/mcp/operator-handlers/status.ts) | tool:steer_packet | Tool selection, arguments and authority | 114 | 114 | 0 |
 | [src/lib/mcp/operator-handlers/targeting.ts](../../src/lib/mcp/operator-handlers/targeting.ts) | tool:o8_targets | Tool selection, arguments and authority | 166 | 166 | 0 |
-| [src/lib/mcp/operator-handlers/task-artifact.ts](../../src/lib/mcp/operator-handlers/task-artifact.ts) | tool:o8_task_artifact | Tool selection, arguments and authority | 374 | 374 | 0 |
 | [src/lib/mcp/operator-handlers/task-list.ts](../../src/lib/mcp/operator-handlers/task-list.ts) | tool:o8_task_list | Tool selection, arguments and authority | 145 | 145 | 0 |
 | [src/lib/mcp/operator-handlers/truth.ts](../../src/lib/mcp/operator-handlers/truth.ts) | tool:o8_truth_query | Tool selection, arguments and authority | 47 | 47 | 0 |
 | [src/lib/mcp/operator-handlers/update.ts](../../src/lib/mcp/operator-handlers/update.ts) | tool:o8_update_apply | Tool selection, arguments and authority | 125 | 125 | 0 |
