@@ -14,6 +14,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { mobileE2eeEnabled } from '@/lib/mobile/e2ee-flag';
 import { consumeEnrollCode, enrollDevice } from '@/lib/mobile/device-registry';
 import { ServerIdentityUnavailableError, getServerIdentityPublicKey } from '@/lib/mobile/e2ee-identity';
+import { notifyMobileDevicesChanged } from '@/lib/mobile/relay-connector-sync';
 
 interface EnrollBody {
   enroll?: unknown;
@@ -49,6 +50,8 @@ export async function POST(req: NextRequest) {
   try {
     const serverIdentityPublicKey = getServerIdentityPublicKey();
     const { deviceToken } = enrollDevice({ identityPublicKey, deviceLabel });
+    // The first enrolled phone starts the off-network connector.
+    await notifyMobileDevicesChanged();
     return NextResponse.json({
       deviceToken,
       serverIdentityPublicKey,

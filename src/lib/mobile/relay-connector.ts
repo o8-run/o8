@@ -14,7 +14,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame, type EncryptedFrame } from './e2ee-crypto';
 import { getServerIdentity } from './e2ee-identity';
-import { listDevices, resolveDeviceByToken, type MobileDevice } from './device-registry';
+import { hasPairedMobileDevice, listDevices, resolveDeviceByToken, type MobileDevice } from './device-registry';
 import { listRemoteNotificationTokens } from './live-activity-push';
 import {
   deriveRoutingId,
@@ -29,6 +29,7 @@ import {
 import { replayRelayHttpRequest } from './relay-http-replay';
 import { RelayReconnectPolicy } from './relay-reconnect';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { envNoPhoneHome } from '@/lib/operator/defaults-env';
 import { recurring } from '@/lib/background-work/ledger';
 
 /**
@@ -540,8 +541,22 @@ export function resolveRelayConnectorEnabled(): boolean {
 
 let activeConnector: RelayConnector | null = null;
 
+/**
+ * The relay only carries traffic for an enrolled phone, so it is not dialed
+ * until one is enrolled, and never while `O8_NO_PHONE_HOME=1`.
+ */
+export function relayConnectorWanted(): boolean {
+  if (envNoPhoneHome()) return false;
+  try {
+    return hasPairedMobileDevice();
+  } catch {
+    return false;
+  }
+}
+
 /** Read current persisted credentials and the same eligibility gates on every dial. */
 function readRelayEntitlement(): { plan: Plan; licenseToken: string } | null {
+  if (!relayConnectorWanted()) return null;
   const plan = getEntitlementSync().plan;
   if (!relayConnectorEligible(plan, resolveRelayConnectorEnabled())) return null;
   const licenseToken = readCachedEntitlement()?.licenseKey?.trim();
@@ -549,8 +564,8 @@ function readRelayEntitlement(): { plan: Plan; licenseToken: string } | null {
 }
 
 /**
- * Start the off-network connector IFF entitled + toggled on + a license token is
- * cached. Fully guarded: any failure logs and returns null — the LAN path is never
+ * Start the off-network connector IFF a phone is enrolled + phone-home is
+ * allowed + entitled + toggled on + a license token is cached. Fully guarded: any failure logs and returns null — the LAN path is never
  * affected. Called once from the ws-server bootstrap.
  */
 export function startRelayConnectorIfEnabled(
@@ -562,7 +577,8 @@ export function startRelayConnectorIfEnabled(
     const connector = new RelayConnector({
       // Resolve at dial time, including retries, instead of capturing startup values.
       get plan() { return getEntitlementSync().plan; },
-      get settingEnabled() { return resolveRelayConnectorEnabled(); },
+      // Each dial re-checks for an enrolled phone, in case a revoke's notice was missed.
+      get settingEnabled() { return resolveRelayConnectorEnabled() && relayConnectorWanted(); },
       get licenseToken() { return readCachedEntitlement()?.licenseKey ?? null; },
       blockedApprovalCount: () => {
         try {
@@ -581,6 +597,22 @@ export function startRelayConnectorIfEnabled(
     console.warn(`${P} connector bootstrap failed (LAN unaffected): ${errMsg(err)}`);
     return null;
   }
+}
+
+/**
+ * Start or stop the connector to match the enrolled phones: called at boot and
+ * whenever a phone is enrolled or revoked. The last revoke stops it.
+ */
+export function syncRelayConnector(): boolean {
+  if (!relayConnectorWanted()) {
+    if (activeConnector) {
+      stopRelayConnector();
+      console.log(`${P} off-network connector stopped: no enrolled phone`);
+    }
+    return false;
+  }
+  if (!activeConnector) startRelayConnectorIfEnabled();
+  return activeConnector !== null;
 }
 
 /** Whether the off-network connector was started and not stopped. */

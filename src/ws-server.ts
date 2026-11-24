@@ -1,6 +1,7 @@
 import { apiFrontDoorEnabled } from './lib/ws-server/api-front-door-config';
 import { initiateE2eeHandshake } from './lib/ws-server/device-e2ee-handshake';
 import { handleTokenProjectionRequest } from './lib/mobile/token-projection-http';
+import { handleRelayConnectorSyncRequest } from './lib/mobile/relay-connector-sync';
 import { isPathReachable } from '@/lib/fs/protected-folders';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { mobileModelError } from './lib/mobile/model-catalog';
@@ -251,7 +252,7 @@ import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-rea
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { listDashTmuxSessionsWithAge, reapOrphanDashTmuxSessions, signalOwnedDashTmuxSession } from './lib/ws-server/dash-terminal-gc';
 import { syncTokenFile, resolveDeviceByToken, hasPairedMobileDevice, isDeviceActive, isDeviceRevoked, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
-import { startRelayConnectorIfEnabled, stopRelayConnector } from './lib/mobile/relay-connector';
+import { stopRelayConnector, syncRelayConnector } from './lib/mobile/relay-connector';
 import {
   startMachineAttachSupervisor,
   stopMachineAttachSupervisor,
@@ -6612,6 +6613,9 @@ function resolvePacketWorkerRequest(req: import('http').IncomingMessage) {
 const httpServer = createServer(async (req, res) => {
   noteRequest(req.headers, req.method, req.url);
   if (handleTokenProjectionRequest(req, res, isAuthorizedInternalRequest)) return;
+  if (handleRelayConnectorSyncRequest(req, res, isAuthorizedInternalRequest, () => (
+    ownsDataDirRelayIdentity(WS_PORT) ? syncRelayConnector() : false
+  ))) return;
   // Rust classifies and stamps only the first request on a connection. End each
   // relayed response so the next request is classified and stamped on a fresh socket.
   if (o8dBridge && (API_FRONT_DOOR || process.env.O8_NEXT_O8D === '1')) res.setHeader('Connection', 'close');
@@ -8649,11 +8653,12 @@ async function runStartupMaintenance() {
     wsWatchdog.start();
 
     // Off-network connector (docs/internals/connect-contract.md). Fully
-    // isolated + gated (entitlement + operator toggle + license token); dials OUT
-    // to the relay and bridges relayed phones into THIS ws-server. A failure here
-    // NEVER affects the LAN path — the call is self-guarded and returns null.
+    // isolated + gated (an enrolled phone + phone-home allowed + entitlement +
+    // operator toggle + license token); dials OUT to the relay and bridges
+    // relayed phones into THIS ws-server. Enroll and revoke start and stop it.
+    // A failure here NEVER affects the LAN path — the call is self-guarded.
     if (ownsDataDirRelayIdentity(WS_PORT)) {
-      startRelayConnectorIfEnabled();
+      syncRelayConnector();
       startMachineAttachSupervisor();
     } else {
       console.log(`[relay] not started: port ${WS_PORT} is not the server this data folder names`);

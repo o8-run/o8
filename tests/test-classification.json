@@ -7389,6 +7389,13 @@
       ]
     },
     {
+      "path": "tests/relay-connector-enrolled-real-path.test.ts",
+      "reasons": [
+        "network-listener",
+        "real-path"
+      ]
+    },
+    {
       "path": "tests/release-broadcast-real-path.test.ts",
       "reasons": [
         "child-process",

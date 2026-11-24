@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { revokeDevice } from '@/lib/mobile/device-registry';
+import { notifyMobileDevicesChanged } from '@/lib/mobile/relay-connector-sync';
 
 interface RevokeBody {
   deviceId?: unknown;
@@ -34,6 +35,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const revoked = revokeDevice(deviceId);
+    // The last revoked phone stops the off-network connector.
+    if (revoked) await notifyMobileDevicesChanged();
     return NextResponse.json({ revoked });
   } catch (error) {
     return NextResponse.json(

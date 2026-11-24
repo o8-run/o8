@@ -22,6 +22,7 @@ import {
   relayConnectorEligible,
   RELAY_FORWARD_MARKER,
 } from './relay-connector-protocol';
+import { enrollDevice } from './device-registry';
 import { startRelayConnectorIfEnabled, type RelayConnector } from './relay-connector';
 
 const connectors: RelayConnector[] = [];
@@ -122,7 +123,10 @@ function cacheLicense(licenseKey: string | undefined = 'fixture-license', plan: 
 beforeEach(() => {
   vi.stubEnv('O8_PLAN', '');
   vi.stubEnv('O8_RELAY_CONNECTOR', 'on');
+  vi.stubEnv('O8_NO_PHONE_HOME', undefined);
   cacheLicense();
+  // The connector only runs while a phone is enrolled.
+  enrollDevice({ identityPublicKey: 'relay-connector-fixture-phone' });
 });
 
 afterEach(async () => {

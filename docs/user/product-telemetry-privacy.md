@@ -130,10 +130,22 @@ Each control above has its own switch in the app's environment:
 | Automatic update install | `O8_UPDATE_AUTO_APPLY` | `off` |
 | Crash-log upload | `O8_TELEMETRY_OPT_IN` | `0` |
 | Crash and error reports | `O8_CRASH_REPORTS` | `0` |
+| Phone access away from your network | `O8_RELAY_CONNECTOR` | `off` |
 
-`O8_NO_PHONE_HOME=1` turns all of these off at once, together with usage
-analytics and the launcher's own update check, for as long as it is set. It
-wins over the saved settings and over the variables in the table, and it
+The connection to the hosted relay is only made while at least one phone is
+paired, and it closes when the last paired phone is removed.
+
+`O8_NO_PHONE_HOME=1` turns off, for as long as it is set:
+
+- automatic update install;
+- crash-log upload;
+- crash and error reports;
+- usage analytics;
+- the launcher's own update check;
+- the connection to the hosted relay that reaches your phone away from your
+  network. Your phone still works on the same network.
+
+It wins over the saved settings and over the variables in the table, and it
 changes nothing that is saved. The launcher still finishes an interrupted
 update install before it stops checking. Settings shows the three values in
 the table as set by the environment.
