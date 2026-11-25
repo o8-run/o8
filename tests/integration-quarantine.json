@@ -2,7 +2,7 @@
   "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). Only the full-suite lane reads this list: a listed file still runs and its failure is reported, not gating. The per-pull-request lane does not read it. Remove a file when it passes; tracked in #6761.",
   "sourceRun": 45536677599,
   "issue": 6761,
-  "count": 128,
+  "count": 126,
   "files": [
     {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
@@ -295,11 +295,6 @@
       "reason": "Error: ENOENT: no such file or directory, open '<tmp>"
     },
     {
-      "path": "tests/o8d-cloud-drain-native-real-path.test.ts",
-      "issue": 6761,
-      "reason": "After token seeding was fixed, the native cloud drain answers 503 where the TypeScript handler answers 200."
-    },
-    {
       "path": "tests/o8d-composer-admission-real-path.test.ts",
       "issue": 6761,
       "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
@@ -328,11 +323,6 @@
       "path": "tests/o8d-mcp-receipts-corrections-native-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected [ 'GET', \u2026(2) ] to deeply equal [ 'GET', \u2026(2) ]"
-    },
-    {
-      "path": "tests/o8d-operator-status-setup-native-real-path.test.ts",
-      "issue": 6761,
-      "reason": "After token seeding was fixed, native GET /api/setup/agent answers 500 where the TypeScript handler answers 200."
     },
     {
       "path": "tests/o8d-parity-real-path.test.ts",

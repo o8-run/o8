@@ -16,9 +16,10 @@ it.skipIf(process.platform === 'win32')('drains cloud jobs natively for claims m
   const saved = { ...process.env };
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
-    // The shell gives both processes the same boot id; the WS child inherits it from here.
-    Object.assign(process.env, { O8_BOOT_ID: `fixture-boot-${randomUUID()}` });
-    server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // The shell gives both processes the same boot id; the fixture passes it to the WS child.
+    const boot = `fixture-boot-${randomUUID()}`;
+    Object.assign(process.env, { O8_BOOT_ID: boot });
+    server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000, identityEnv: { O8_BOOT_ID: boot } });
     // Boot rebuilds the device projection and the local worker token, so seed both after it.
     writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
     writeFileSync(join(directory, 'worker-token'), worker);
