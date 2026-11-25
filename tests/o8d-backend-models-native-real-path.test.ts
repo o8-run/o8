@@ -44,8 +44,6 @@ it.skipIf(process.platform === 'win32')('serves the model catalogue with Next st
   const key = `sk-or-v1-fixture-${randomBytes(16).toString('hex')}`;
   const device = 'backend-models-fixture-device-0123456789abcdef';
   const worker = 'backend-models-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   // The operator's API-billing opt-in for opencode: the only way a launched agent receives a provider key.
   mkdirSync(join(directory, 'runtime-billing'), { mode: 0o700 });
   writeFileSync(join(directory, 'runtime-billing', 'opencode.json'), JSON.stringify({ mode: 'api' }));
@@ -54,6 +52,9 @@ it.skipIf(process.platform === 'win32')('serves the model catalogue with Next st
   try {
     Object.assign(process.env, { OPENROUTER_API_KEY: key, O8_OPENCODE_BIN: bin });
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const read = (bearer?: string) => fetch(`${origin}/api/orchestrator/backend-models?backend=opencode&refresh=1`,

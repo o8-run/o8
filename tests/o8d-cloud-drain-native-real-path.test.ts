@@ -13,14 +13,15 @@ it.skipIf(process.platform === 'win32')('drains cloud jobs natively for claims m
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-cloud-drain-')));
   const device = 'cloud-drain-fixture-device-0123456789abcdef';
   const worker = 'cloud-drain-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   const saved = { ...process.env };
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     // The shell gives both processes the same boot id; the WS child inherits it from here.
     Object.assign(process.env, { O8_BOOT_ID: `fixture-boot-${randomUUID()}` });
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const path = '/api/panel/cloud-jobs/drain';

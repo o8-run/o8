@@ -3666,6 +3666,12 @@
       ]
     },
     {
+      "path": "tests/integration-quarantine.test.ts",
+      "reasons": [
+        "integration"
+      ]
+    },
+    {
       "path": "tests/integration-queue-real-path.test.ts",
       "reasons": [
         "child-process",

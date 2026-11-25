@@ -426,7 +426,9 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
     'integration step needs a verify:ci equivalent');
   }
   const full = jobs['integration-weekly'];
-  requireCondition(full.if === "(github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')"
+  // The explicit result check keeps the always-skipped reuse job upstream of
+  // test from skipping the full suite through the implicit success().
+  requireCondition(full.if === "cancelled() == false && needs.test.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == ''))"
     && full.needs === 'test' && !full['continue-on-error'] && full['runs-on'] === 'ubuntu-24.04'
     && Number.isFinite(full['timeout-minutes']) && full['timeout-minutes'] > 0
     && isDeepStrictEqual(full.strategy, { 'fail-fast': false, matrix: { shard: [1, 2, 3, 4, 5, 6] } }),
@@ -448,7 +450,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const fullClassification = full.steps.find(step => step.run === 'npm run test:classification:check');
   requireCondition(fullRun && !fullRun.if && fullBrowser && !fullBrowser.if
     && fullClassification?.if === 'matrix.shard == 1'
-    && isDeepStrictEqual(fullRun.env, { O8_INTEGRATION_SHARD: '${{ matrix.shard }}/6', O8_INTEGRATION_BASELINE: 'tests/integration-linux-baseline.json' }),
+    && isDeepStrictEqual(fullRun.env, { O8_INTEGRATION_SHARD: '${{ matrix.shard }}/6', O8_INTEGRATION_BASELINE: 'tests/integration-quarantine.json' }),
   'full integration commands and prerequisites need a verify:ci equivalent');
   for (const step of full.steps.filter(step => step.run)) {
     requireCondition(!step['continue-on-error'] && !step.shell && !step['working-directory']

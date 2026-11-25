@@ -15,13 +15,14 @@ it.skipIf(process.platform === 'win32')('serves the agent bus natively with Next
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-agent-bus-')));
   const device = 'agent-bus-fixture-device-0123456789abcdef';
   const unbound = 'agent-bus-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), unbound);
   const repo = join(directory, 'repo-shared');
   const otherRepo = join(directory, 'repo-other');
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), unbound);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const env = { ...process.env, O8_DATA_DIR: directory, CORTEX_IDE_DATA_DIR: directory,

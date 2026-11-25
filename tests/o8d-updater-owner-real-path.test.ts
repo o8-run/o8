@@ -17,8 +17,6 @@ it('keeps updater state in one process across both ports with Next stopped', asy
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-updater-owner-')));
   const device = 'updater-owner-fixture-device-0123456789abcdef';
   const worker = 'updater-owner-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   const saved = { ...process.env };
   // The packaged shell passes this to the WS process too: o8 next is the window.
   process.env.O8_NEXT_MAIN_WINDOW = '1';
@@ -27,6 +25,9 @@ it('keeps updater state in one process across both ports with Next stopped', asy
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ o8d: true, binary, nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const operator = { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' };
