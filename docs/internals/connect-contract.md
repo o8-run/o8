@@ -243,29 +243,30 @@ No relay client or relay-server code is part of phase 1a because none of those i
 
 The account-authenticated `/web/machine/:machineId` socket is one virtual browser
 session. The relay allocates one `sid` for it and sends `mux-open` to the
-registered machine. The desktop opens one loopback `/ws` connection for that
-`sid`, using the local operator token only on the loopback URL. After the local
-socket opens, the desktop returns `mux-ready`.
+registered machine, and the desktop answers `mux-ready`.
 
-The web edge uses that single session in two ways:
+Relay frames are not end-to-end encrypted, so the desktop limits what a
+web-machine stream can reach:
 
-1. HTTP requests use the existing
-   `http-req { rid, method, path, headers, bodyB64 }` control frame. Documents,
-   Next.js chunks, CSS, fonts, images, and API responses all return through
-   `http-res` plus ordered `http-res-part` frames. Response bodies are base64,
-   split at 256 KiB of encoded data per frame, and include the decoded
-   `content-length` plus the safe content, cache, range, and validator headers.
-2. Every non-HTTP frame is a raw `/ws` application frame. The desktop forwards
-   it unchanged to the loopback realtime socket, and returns each loopback frame
-   unchanged on the web session. This mirrors the phone connector's inner
-   realtime shape without sharing its routing map, device credential, E2EE
-   handshake, or `/mac` code path.
+1. HTTP requests use the `http-req { rid, method, path, headers, bodyB64 }`
+   control frame. Only `GET` and `HEAD` of the desktop-app notice pages (`/`,
+   `/mobile`, `/dashboard`), `/icon.png`, `/favicon.ico` and `/_next/static/*`
+   are replayed (`webMachineRouteAllowed` in
+   `src/lib/connect/web-machine-surface.ts`). Any other route or method gets
+   `403 web_machine_route_forbidden` and never reaches the local server.
+   Responses return through `http-res` plus ordered `http-res-part` frames,
+   base64 bodies split at 256 KiB of encoded data per frame.
+2. A replay carries no credential. Any `Authorization` in the frame is dropped,
+   and the local operator token is never attached. The allowlisted pages need
+   none.
+3. Realtime (non-HTTP) frames are dropped. The desktop opens no loopback `/ws`
+   connection for a relayed stream.
 
-The browser host exposes this session to the loaded mobile application as
-`window.__O8_WEB_MACHINE_TRANSPORT__`: `fetch` maps same-origin page/API requests
-to HTTP control frames, while `openWebSocket('/ws')` maps the mobile realtime
-hook to raw frames on the same session. The web host owns the authenticated
-account handshake; browser code never supplies an account ID.
+A `mux-open` with `surface: "plugin"` is refused with
+`mux-close 4403 plugin_grant_unverifiable`. The relay sends plugin grants as
+plain claims, which the desktop cannot verify. Plugin streams stay off until the
+account service signs each grant with a key the desktop pins, binding the
+account, machine, client, scopes, stream and expiry.
 
 ### Local credential exclusion
 
@@ -285,19 +286,14 @@ requires all three canonical facts before emitting the safe
 must not contain the local `ws-token` meta value.
 
 On that safe browser surface, `#tk=` is scrubbed without being read or stored,
-the paired-phone localStorage credential is ignored, API fetches use the web
-machine transport, and `/ws` never falls back to a direct local URL. The local
-operator token exists only in the desktop's server-side HTTP Authorization
-override and loopback WebSocket URL; no relay frame or remote document contains
-it. As a final fail-closed boundary, the machine replay scans each decoded local
-response for the exact operator token and returns
-`502 local_credential_exposure_blocked` with an empty body if any page, asset,
-credential-export endpoint, or reflected response contains it.
-Outbound loopback realtime frames receive the same exact-value check; a match
-closes that web stream with `4403 local_credential_exposure_blocked`.
+the paired-phone localStorage credential is ignored, and `/ws` never falls back
+to a direct local URL. No relay replay carries the local operator token. As a
+final fail-closed boundary, the machine replay scans each decoded local response
+for the exact operator token and returns `502 local_credential_exposure_blocked`
+with an empty body if any page or asset contains it.
 
-Closing the web session sends `mux-close` and closes its loopback HTTP/realtime
-state. Dropping the active machine socket without a replacement closes its
+Closing the web session sends `mux-close` and aborts its in-flight local HTTP
+requests. Dropping the active machine socket without a replacement closes its
 local streams and every attached web session with
 `1012 machine_disconnected`. Ticket refresh supersedes the machine socket
 in-place and reopens the existing `sid` on the replacement. Any browser
@@ -403,9 +399,9 @@ and account-token `/web/machine/:machineId` paths are unchanged.
 Surface CORS responses are emitted only for `https://o8.run` and
 `https://www.o8.run`. HTML sets `frame-ancestors` to those two origins. A ticket
 for machine A receives `403 machine_mismatch` when presented to machine B. The
-desktop's cut 3a token-free render marker, `#tk=` scrubbing, server-side
-Authorization override, response byte scan, and realtime byte scan remain the
-credential boundary; the relay never receives or forwards the local ws-token.
+desktop's cut 3a route allowlist, credential-free replay, token-free render
+marker, `#tk=` scrubbing and response byte scan remain the credential boundary;
+the relay never receives or forwards the local ws-token.
 
 The prompt-launch path must:
 
@@ -415,14 +411,15 @@ The prompt-launch path must:
 4. Forward the prompt to the selected machine's existing local orchestrator API through the relay.
 5. Return the existing thread/turn identity so the website can show progress without inventing a second orchestration model.
 
-The Cut 2 desktop mux carries the existing generic `http-req` frames and
-replays them through the local operator gate. Phase 3 can therefore use
+Relay replay does not reach these routes today. A web-machine stream replays
+only the notice pages and static files, with no local credential (see cut 3a).
+Prompt launch over the relay waits for end-to-end encryption between the
+browser and the desktop. When it lands, it would use
 `GET /api/panel/repos` for repository discovery,
 `POST /api/orchestrator/spawn-prompt` for prompt submission, and
 `GET /api/orchestrator/lane-events` plus
-`GET /api/mobile/orchestrator/threads` for progress and thread summaries. The
-machine connector replaces any web-supplied authorization with the local
-operator token before replay, so these routes do not gain a second auth path.
+`GET /api/mobile/orchestrator/threads` for progress and thread summaries, each
+under a credential scoped to that encrypted session.
 
 `spawn-prompt` preserves an explicit positive safe-integer `count`, including
 counts above five. An omitted count defaults to one. Null, strings, fractions,

@@ -16,7 +16,6 @@ vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface: launches }));
 import { POST } from '@/app/api/plugins/mcp/route';
 import { GET as inspectDrafts } from '@/app/api/plugins/task-drafts/route';
 import { mintPluginToken, PLUGIN_PREPARE_TASK_SCOPE, resolvePluginToken } from '@/lib/auth/plugin-token';
-import { parsePluginRelayGrant, pluginReplayAuthorization } from '@/lib/connect/plugin-relay';
 import { publishReadyAccountState, withAccountStateLease } from '@/lib/auth/account-state';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { bumpSignInEpoch, readSignInEpoch, writeActiveIdentity } from '@/lib/github-broker/managed';
@@ -475,12 +474,10 @@ describe('plugin task drafts through the actual authenticated route and persiste
     expect(launches).not.toHaveBeenCalled();
   });
 
-  it('requires relay account binding for draft grants and caps local credentials to OAuth expiry', () => {
-    expect(parsePluginRelayGrant({ clientId: 'draft-client', scopes: [PLUGIN_PREPARE_TASK_SCOPE], expiresAt: Date.now() + 60000 })).toBeNull();
+  it('requires account binding for draft credentials and caps local credentials to the grant expiry', () => {
     const expiry = Date.now() + 1000;
-    const grant = parsePluginRelayGrant({ accountId, clientId: 'draft-client', scopes: [PLUGIN_PREPARE_TASK_SCOPE], expiresAt: expiry })!;
-    const auth = pluginReplayAuthorization('draft-machine', grant, { rid: 'test', path: '/api/plugins/mcp', method: 'POST' });
-    expect(resolvePluginToken(auth!.slice(7))).toMatchObject({ accountId, expiresAt: expiry });
+    const auth = mintPluginToken({ machineId: 'draft-machine', accountId, clientId: 'draft-client', scopes: [PLUGIN_PREPARE_TASK_SCOPE] }, { expiresAt: expiry });
+    expect(resolvePluginToken(auth)).toMatchObject({ accountId, expiresAt: expiry });
     expect(() => mintPluginToken({ machineId: 'm', clientId: 'c', scopes: [PLUGIN_PREPARE_TASK_SCOPE] })).toThrow();
   });
 });

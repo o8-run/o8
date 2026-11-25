@@ -16,7 +16,7 @@ import { resolvePortInfo } from '@/lib/panel/api-port';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 import type { MachineRelayTicket } from './machine-registry';
-import { parsePluginRelayGrant, pluginReplayAuthorization, type PluginRelayGrant } from './plugin-relay';
+import { O8_WEB_MACHINE_SURFACE, webMachineRouteAllowed } from './web-machine-surface';
 
 const P = '[connect]';
 const DEFAULT_HTTP_TIMEOUT_MS = 55_000;
@@ -32,11 +32,7 @@ type ConnectReason = 'attach' | 'reconnect' | 'ticket-refresh';
 
 interface MachineStreamState {
   sid: string;
-  bridge: WebSocket | null;
-  pendingFrames: string[];
-  pendingBytes: number;
   closing: boolean;
-  pluginGrant?: PluginRelayGrant;
 }
 
 export interface MachineRelayConnectorConfig {
@@ -44,7 +40,7 @@ export interface MachineRelayConnectorConfig {
   ticketProvider: () => Promise<MachineRelayTicket>;
   relayUrl?: string;
   apiBase?: string;
-  localWebSocketUrl?: string;
+  /** Only to block responses that would carry it; never sent on a replay. */
   operatorToken?: () => string;
   fetchImpl?: typeof fetch;
   maxTunnelBytes?: number;
@@ -319,13 +315,18 @@ export class MachineRelayConnector {
     );
     if (!frame) return;
     if (frame.t === 'mux-open' && typeof frame.sid === 'string') {
-      if (frame.surface === 'plugin') {
-        const grant = parsePluginRelayGrant(frame.grant);
-        if (!grant) return;
-        this.openStream(frame.sid, grant);
-      } else if (frame.surface === undefined) {
+      if (frame.surface === undefined) {
         this.openStream(frame.sid);
+        return;
       }
+      // A plugin grant arrives as plain claims the Mac cannot verify, so a
+      // plugin stream is refused until the account service signs its grants.
+      this.sendControl({
+        t: 'mux-close',
+        sid: frame.sid,
+        code: 4403,
+        reason: frame.surface === 'plugin' ? 'plugin_grant_unverifiable' : 'surface_not_supported',
+      });
       return;
     }
     if (frame.t === 'mux-close' && typeof frame.sid === 'string') {
@@ -353,48 +354,28 @@ export class MachineRelayConnector {
       if (rid) this.httpRequests.cancel(sid, rid);
       return;
     }
-    if (message.t === 'http-req') {
-      const apiBase = this.config.apiBase ?? localApiBase();
-      const authorization = state.pluginGrant
-        ? pluginReplayAuthorization(this.config.machineId, state.pluginGrant, message as HttpReqFrame)
-        : `Bearer ${this.localOperatorToken()}`;
-      if (!authorization) {
-        this.sendMux(sid, { t: 'http-res', rid: message.rid, status: 403, error: 'plugin_route_forbidden', last: true });
-        return;
-      }
-      void replayRelayHttpRequest({
-        sid,
-        request: message as HttpReqFrame,
-        apiBase,
-        requestRegistry: this.httpRequests,
-        timeoutMs: this.httpRequestTimeoutMs,
-        maxTunnelBytes: state.pluginGrant ? 65_536 : this.maxTunnelBytes,
-        isStreamActive: () => this.streams.get(sid) === state,
-        send: (response) => this.sendMux(sid, response),
-        authorizationOverride: authorization,
-        relaySurface: state.pluginGrant ? undefined : 'web-machine',
-        blockedResponseValues: [authorization.slice(7), this.localOperatorToken()],
-        fetchImpl: this.config.fetchImpl,
-      });
+    // Only HTTP reads of the notice pages and their static files are replayed.
+    // Realtime frames are dropped: no local operator socket is opened for a
+    // relayed stream.
+    if (message.t !== 'http-req') return;
+    if (!webMachineRouteAllowed(message.method, message.path)) {
+      this.sendMux(sid, { t: 'http-res', rid: message.rid, status: 403, error: 'web_machine_route_forbidden', bodyB64: '', last: true });
       return;
     }
-
-    if (state.pluginGrant) return;
-
-    if (state.bridge?.readyState === WebSocket.OPEN) {
-      try {
-        state.bridge.send(plaintext);
-      } catch {
-        // The bridge close handler owns cleanup.
-      }
-      return;
-    }
-    if (state.pendingFrames.length >= 128 || state.pendingBytes + plaintext.length > 1024 * 1024) {
-      this.closeStream(sid, 1009, 'websocket_backlog_exceeded');
-      return;
-    }
-    state.pendingFrames.push(plaintext);
-    state.pendingBytes += plaintext.length;
+    const operatorToken = this.localOperatorToken();
+    void replayRelayHttpRequest({
+      sid,
+      request: withoutAuthorization(message as HttpReqFrame),
+      apiBase: this.config.apiBase ?? localApiBase(),
+      requestRegistry: this.httpRequests,
+      timeoutMs: this.httpRequestTimeoutMs,
+      maxTunnelBytes: this.maxTunnelBytes,
+      isStreamActive: () => this.streams.get(sid) === state,
+      send: (response) => this.sendMux(sid, response),
+      relaySurface: O8_WEB_MACHINE_SURFACE,
+      blockedResponseValues: operatorToken ? [operatorToken] : [],
+      fetchImpl: this.config.fetchImpl,
+    });
   }
 
   private sendMux(sid: string, frame: Record<string, unknown>): void {
@@ -420,97 +401,13 @@ export class MachineRelayConnector {
     }
   }
 
-  private openStream(sid: string, pluginGrant?: PluginRelayGrant): void {
-    const existing = this.streams.get(sid);
-    if (existing) {
-      if (existing.bridge?.readyState === WebSocket.OPEN) {
-        this.sendControl({ t: 'mux-ready', sid });
-      }
-      return;
-    }
-
-    const state: MachineStreamState = {
-      sid,
-      bridge: null,
-      pendingFrames: [],
-      pendingBytes: 0,
-      closing: false,
-      pluginGrant,
-    };
-    if (pluginGrant) {
-      this.streams.set(sid, state);
-      this.sendControl({ t: 'mux-ready', sid });
-      return;
-    }
-    this.streams.set(sid, state);
-
-    let bridge: WebSocket;
-    try {
-      bridge = new WebSocket(this.localWebSocketUrl());
-    } catch (error) {
-      console.warn(`${P} local websocket dial failed sid=${shortId(sid)}: ${errorMessage(error)}`);
-      this.closeStream(sid, 1011, 'local_websocket_unavailable');
-      return;
-    }
-    state.bridge = bridge;
-    bridge.on('open', () => {
-      if (this.streams.get(sid) !== state || state.closing) {
-        closeSocket(bridge, 'stale web-machine stream');
-        return;
-      }
-      this.sendControl({ t: 'mux-ready', sid });
-      for (const frame of state.pendingFrames.splice(0)) {
-        try {
-          bridge.send(frame);
-        } catch {
-          break;
-        }
-      }
-      state.pendingBytes = 0;
-    });
-    bridge.on('message', (raw) => {
-      if (this.streams.get(sid) !== state || state.closing) return;
-      const plaintext = typeof raw === 'string'
-        ? raw
-        : (raw as Buffer).toString('utf8');
-      const operatorToken = this.localOperatorToken();
-      if (operatorToken && plaintext.includes(operatorToken)) {
-        console.warn(
-          `${P} blocked local credential on realtime stream sid=${shortId(sid)}`,
-        );
-        this.closeStream(sid, 4403, 'local_credential_exposure_blocked');
-        return;
-      }
-      this.sendMuxPayload(sid, plaintext);
-    });
-    bridge.on('close', (code, rawReason) => {
-      if (state.closing || this.streams.get(sid) !== state) return;
-      this.closeStream(
-        sid,
-        code === 1000 || code === 1001 ? code : 1011,
-        rawReason.toString('utf8') || 'local_websocket_closed',
-      );
-    });
-    bridge.on('error', (error) => {
-      console.warn(`${P} local websocket error sid=${shortId(sid)}: ${errorMessage(error)}`);
-    });
-  }
-
-  private localWebSocketUrl(): string {
-    const base = this.config.localWebSocketUrl ?? localWsBase();
-    const url = new URL(base);
-    url.searchParams.set('token', this.localOperatorToken());
-    return url.toString();
+  private openStream(sid: string): void {
+    if (!this.streams.has(sid)) this.streams.set(sid, { sid, closing: false });
+    this.sendControl({ t: 'mux-ready', sid });
   }
 
   private localOperatorToken(): string {
     return (this.config.operatorToken ?? getOrCreateWsToken)().trim();
-  }
-
-  private closeStream(sid: string, code: number, reason: string): void {
-    if (!this.streams.has(sid)) return;
-    this.sendControl({ t: 'mux-close', sid, code, reason });
-    this.teardownStream(sid);
   }
 
   private teardownStream(sid: string): void {
@@ -519,15 +416,11 @@ export class MachineRelayConnector {
     state.closing = true;
     this.httpRequests.abortStream(sid);
     this.streams.delete(sid);
-    closeSocket(state.bridge, 'web-machine stream closed');
   }
 
   private teardownStreams(reason: 'connector-stop' | 'stream-teardown'): void {
     this.httpRequests.abortAll(reason);
-    for (const state of this.streams.values()) {
-      state.closing = true;
-      closeSocket(state.bridge, 'web-machine streams closed');
-    }
+    for (const state of this.streams.values()) state.closing = true;
     this.streams.clear();
   }
 
@@ -624,9 +517,15 @@ function localApiBase(): string {
   return `http://127.0.0.1:${apiPort}`;
 }
 
-function localWsBase(): string {
-  const { wsPort } = resolvePortInfo();
-  return `ws://127.0.0.1:${wsPort}/ws`;
+/** The relay's frame never chooses the local credential: replays carry none. */
+function withoutAuthorization(request: HttpReqFrame): HttpReqFrame {
+  const headers: Record<string, unknown> = {};
+  if (request.headers && typeof request.headers === 'object') {
+    for (const [name, value] of Object.entries(request.headers as Record<string, unknown>)) {
+      if (name.toLowerCase() !== 'authorization') headers[name] = value;
+    }
+  }
+  return { ...request, authorization: undefined, headers };
 }
 
 function nonNegativeInteger(value: number | undefined, fallback: number): number {

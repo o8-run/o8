@@ -19,12 +19,6 @@ export interface RelayHttpReplayOptions {
   maxTunnelBytes: number;
   isStreamActive: () => boolean;
   send: (frame: Record<string, unknown>) => void;
-  /**
-   * Machine web sessions are authenticated by the relay ticket and ownership
-   * check, then replayed locally as the desktop operator. Supplying this value
-   * replaces any authorization sent by the remote web client.
-   */
-  authorizationOverride?: string;
   relaySurface?: typeof O8_WEB_MACHINE_SURFACE;
   blockedResponseValues?: readonly string[];
   fetchImpl?: typeof fetch;
@@ -47,10 +41,6 @@ export async function replayRelayHttpRequest(options: RelayHttpReplayOptions): P
     options.send({ t: 'http-res', rid, status: plan.status, error: plan.error, bodyB64: '' });
     return;
   }
-  if (options.authorizationOverride) {
-    plan.headers.authorization = options.authorizationOverride;
-  }
-
   const controller = options.requestRegistry.begin(options.sid, rid);
   const timeout = setTimeout(() => {
     options.requestRegistry.timeout(options.sid, rid, controller);

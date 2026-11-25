@@ -2,7 +2,6 @@ import { createServer, type Server } from 'node:http';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { handleNativeHttp } from '@/lib/ws-server/native-http-routes';
 import { forwardToNext, registeredFrontDoorRoute } from '@/lib/ws-server/api-front-door';
-import { pluginReplayAuthorization, type PluginRelayGrant } from '@/lib/connect/plugin-relay';
 import { replayRelayHttpRequest } from '@/lib/mobile/relay-http-replay';
 import { RelayHttpRequestRegistry, type HttpReqFrame } from '@/lib/mobile/relay-connector-protocol';
 import { mintPluginToken } from '@/lib/auth/plugin-token';
@@ -22,18 +21,19 @@ let server: Server;
 let origin: string;
 let received: Array<{ principal: ReturnType<typeof resolveRequestPrincipalContext>; marker: string | undefined }>;
 const selected = { machineId: 'machine-plugin', missionId: 'mission-plugin', packetId: 'packet-plugin' };
-const grant = (scopes = ['o8:read']): PluginRelayGrant => ({ clientId: 'client-plugin', scopes, expiresAt: Date.now() + 60_000 });
+type PluginGrant = { clientId: string; scopes: string[]; expiresAt: number };
+const grant = (scopes = ['o8:read']): PluginGrant => ({ clientId: 'client-plugin', scopes, expiresAt: Date.now() + 60_000 });
 function frame(name = 'o8_attention', args: Record<string, unknown> = { machineId: selected.machineId }): HttpReqFrame {
   return { rid: 'fixture-call', path: '/api/plugins/mcp', method: 'POST',
     headers: { 'content-type': 'application/json' }, authorization: 'Bearer remote-caller-must-not-win',
     bodyB64: Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } })).toString('base64') };
 }
 async function relay(request = frame(), permission = grant()) {
-  const authorization = pluginReplayAuthorization(selected.machineId, permission, request);
-  if (!authorization) throw new Error('Fixture grant refused before replay');
+  // A local plugin capability, as the Mac mints it for a verified grant.
+  const authorization = `Bearer ${mintPluginToken({ machineId: selected.machineId, clientId: permission.clientId, scopes: permission.scopes }, { expiresAt: permission.expiresAt })}`;
   const replies: Record<string, unknown>[] = [];
-  await replayRelayHttpRequest({ sid: 'plugin-stream', request, apiBase: origin,
-    authorizationOverride: authorization, requestRegistry: new RelayHttpRequestRegistry(),
+  await replayRelayHttpRequest({ sid: 'plugin-stream', request: { ...request, authorization }, apiBase: origin,
+    requestRegistry: new RelayHttpRequestRegistry(),
     timeoutMs: 5000, maxTunnelBytes: 1024 * 1024, isStreamActive: () => true,
     send: reply => { replies.push(reply); } });
   return { status: replies[0].status, body: JSON.parse(Buffer.from(String(replies[0].bodyB64), 'base64').toString()) };
@@ -87,8 +87,6 @@ it('refuses the wrong scope, wrong machine and expired grants without worker del
   const follow = frame('o8_follow_up', { ...selected, message: 'Fixture follow-up', idempotencyKey: 'refused' });
   expect((await relay(follow)).status).toBe(403);
   expect((await relay(frame('o8_attention', { machineId: 'other-machine' }))).status).toBe(403);
-  expect(pluginReplayAuthorization(selected.machineId, { ...grant(), expiresAt: Date.now() - 1 }, frame())).toBeNull();
-  expect(pluginReplayAuthorization(selected.machineId, grant(), { ...frame(), path: '/api/panel/approvals' })).toBeNull();
   const expired = mintPluginToken({ ...selected, clientId: 'client-plugin', scopes: ['o8:read'] }, { now: Date.now() - 120_000 });
   const response = await fetch(origin + '/api/plugins/mcp', { method: 'POST', headers: { authorization: `Bearer ${expired}`, 'content-type': 'application/json' }, body: '{}' });
   expect(response.status).toBe(401);
