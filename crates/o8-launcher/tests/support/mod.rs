@@ -55,7 +55,7 @@ if Path(sys.argv[0]).name=='focus':
  (root/'focus-shows').open('a').write(sys.argv[1]+'\n'); sys.exit(0)
 if Path(sys.argv[0]).name=='window':
  (root/'window-args').write_text(json.dumps(sys.argv[1:]))
- (root/'window-env').write_text(json.dumps({k:os.environ.get(k) for k in ['O8_NEXT_API_TOKEN','O8_NEXT_PARENT_PIPE','O8_NEXT_QUIT_VIA_PARENT','O8_DATA_DIR','O8_API_FRONT_DOOR','O8_BOOT_ID']}))
+ (root/'window-env').write_text(json.dumps({k:os.environ.get(k) for k in ['O8_NEXT_API_TOKEN','O8_NEXT_PARENT_PIPE','O8_NEXT_QUIT_VIA_PARENT','O8_DATA_DIR','O8_API_FRONT_DOOR','O8_BOOT_ID','MallocSpaceEfficient']}))
  (root/'window-starts').open('a').write(str(os.getpid())+'\n')
  (root/'window-ready').write_text(str(os.getpid()))
  if os.environ.get('O8_NEXT_PARENT_PIPE')=='1': print('o8-next-ready',flush=True)

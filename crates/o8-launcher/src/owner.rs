@@ -123,6 +123,10 @@ pub(super) fn command(config: &Config, boot: &str, instance: &str) -> Result<Com
     if let Some(value) = std::env::var_os("CORTEX_IDE_DB_PATH") {
         command.env("O8D_SESSION_DB_PATH", value);
     }
+    // Hands pages o8d freed after its start-up burst back to macOS, as the Node
+    // servers do; o8d drops it before it starts anything else.
+    #[cfg(target_os = "macos")]
+    command.env(o8_launch_core::server_env::MALLOC_SPACE_EFFICIENT, "1");
     if let Some(value) = std::env::var_os("CORTEX_IDE_MEDIA_ROOT") {
         command.env("CORTEX_IDE_MEDIA_ROOT", value);
     }
