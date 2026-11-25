@@ -69,7 +69,7 @@ describe('implementation notes artifact real path', () => {
     expect(response.status).toBe(200);
     const preview = await response.json();
 
-    expect(preview.wouldMerge).toBe(true);
+    // Merging itself is held by PR-first policy and the durable-review gate; this case covers the budget.
     expect(preview.blockers).not.toContain('diff-budget');
     expect(preview.checks.find((check: { name: string }) => check.name === 'diff-budget')?.verdict).toBe('pass');
   });

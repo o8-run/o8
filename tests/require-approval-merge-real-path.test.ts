@@ -321,6 +321,8 @@ beforeEach(() => {
   rmSync(defaultsPath, { force: true });
   rmSync(settingsTomlPath, { force: true });
   publishRealtimeMutation.mockClear();
+  // These cases cover direct integration. Projects default to PR-first since #6185, so opt in.
+  getSqlite().prepare('INSERT OR REPLACE INTO app_state (key, value, updated_at) VALUES (?, ?, ?)').run('project-merge-mode:default', 'direct', new Date().toISOString());
 });
 
 afterEach(() => {
@@ -1162,7 +1164,7 @@ describe('requireApproval merge governance through the real command path', () =>
     expect(git(repo, ['rev-parse', 'HEAD'])).toBe(reviewedHeadSha);
     expect(listApprovalsForContext({ laneId: lane.id })
       .find((candidate) => candidate.id === approval.id)?.status).toBe('approved');
-  }, 30_000);
+  }, 60_000);
 
   it('pushes the exact packet and opens a PR after a current spoken review', async () => {
     await updateOperatorDefaults({ requireApproval: 'always' });

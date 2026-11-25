@@ -102,6 +102,13 @@ it('counts base-branch lines for the merge gate and leaves new files out', async
   git(['switch', '-q', 'main']);
 });
 
+it('gives the merge gate no count, so no budget, when the base lookup misses or runs out of time', async () => {
+  // The outline database had no row for an unscanned file, and the gate skipped its budget.
+  expect((await lineCountsAt(repoPath, 'no-such-branch', ['src/lib/store.ts'])).size).toBe(0);
+  expect((await lineCountsAt(repoPath, 'main', ['src/lib/store.ts'], Date.now() - 1)).size).toBe(0);
+  expect((await lineCountsAt(join(repoPath, 'missing'), 'main', ['src/lib/store.ts'])).size).toBe(0);
+});
+
 it('returns no facts instead of throwing outside a repository', async () => {
   const outside = realpathSync(mkdtempSync(join(tmpdir(), 'o8-dispatch-no-repo-')));
   try {
