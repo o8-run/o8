@@ -217,13 +217,6 @@ impl Updater {
         }
     }
 
-    fn install_id(&self) -> Option<String> {
-        let id = self.settings().get("installId")?.as_str()?.to_owned();
-        let parsed = uuid::Uuid::parse_str(&id).ok()?;
-        (parsed.get_version_num() == 4 && parsed.get_variant() == uuid::Variant::RFC4122)
-            .then_some(id)
-    }
-
     /// Why this install location cannot be updated in place, if it cannot.
     pub fn blocked(&self) -> Option<String> {
         installable(&self.bundle).err()
@@ -260,19 +253,15 @@ impl Updater {
             .iter()
             .map(|endpoint| channel_fallback(endpoint, channel))
             .collect::<Result<Vec<_>, _>>()?;
-        if let Some(id) = self.install_id() {
-            let mut headers = vec![("X-O8-Install-Id", id), ("X-O8-Channel", channel.into())];
-            if let Some(version) = macos_version() {
-                headers.push(("X-O8-Macos-Version", version));
-            }
-            // Any service failure, redirect or wrong identity falls back to the mirror.
-            if let Ok(result) = self
-                .fetch(service, SERVICE_TIMEOUT, &headers, true)
-                .and_then(|result| validate_identity(result, channel))
-            {
-                if result.is_some() || !mirror_when_current {
-                    return Ok(result);
-                }
+        // The service hears only the channel, version and platform; no install or device identity.
+        let headers = [("X-O8-Channel", channel.to_string())];
+        // Any service failure, redirect or wrong channel falls back to the mirror.
+        if let Ok(result) = self
+            .fetch(service, SERVICE_TIMEOUT, &headers, true)
+            .and_then(|result| validate_identity(result, channel))
+        {
+            if result.is_some() || !mirror_when_current {
+                return Ok(result);
             }
         }
         let mut last = Err("No update manifest was found".to_string());
@@ -860,18 +849,6 @@ fn client(timeout: Duration, stop_redirects: bool) -> Result<reqwest::blocking::
         .redirect(policy)
         .build()
         .map_err(|e| format!("Update client unavailable: {e}"))
-}
-
-fn macos_version() -> Option<String> {
-    let output = std::process::Command::new("/usr/bin/sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()?;
-    let version = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    (output.status.success()
-        && !version.is_empty()
-        && version.chars().all(|c| c.is_ascii_digit() || c == '.'))
-    .then_some(version)
 }
 
 /// The classic shell's manifest name per channel, beside the mirror's `latest.json`.

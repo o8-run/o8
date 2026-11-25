@@ -286,7 +286,7 @@ impl Case {
 fn good_update_installs_after_a_proven_stop_and_launches_the_new_version() {
     let mut case = Case::new();
     let (bytes, signature) = case.signed("2.0.0", &[]);
-    // The service answers first for an enrolled install, as in the classic shell.
+    // The service answers first. An install id left by an older release is never sent.
     fs::write(
         case.f.root.join("update-ping.json"),
         serde_json::json!({"installId": uuid::Uuid::new_v4().to_string(), "channel": "stable"})
@@ -314,13 +314,17 @@ fn good_update_installs_after_a_proven_stop_and_launches_the_new_version() {
     assert_eq!(checked["state"], "available", "{checked}");
     assert_eq!(checked["available"]["version"], "2.0.0");
     assert_eq!(checked["current"], "1.0.0");
-    assert!(case
-        .feed
-        .requests
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|r| r.to_ascii_lowercase().contains("x-o8-install-id")));
+    {
+        let requests = case.feed.requests.lock().unwrap();
+        let service = requests
+            .iter()
+            .map(|r| r.to_ascii_lowercase())
+            .find(|r| r.contains("/v1/update/"))
+            .expect("the update service is asked first");
+        assert!(service.contains("x-o8-channel: stable"), "{service}");
+        assert!(!service.contains("x-o8-install-id"), "{service}");
+        assert!(!service.contains("x-o8-macos-version"), "{service}");
+    }
     assert_eq!(
         control(&case.f, serde_json::json!({"op":"update-apply"}))["state"],
         "staging"

@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    fn ipc_sends_exact_fields_and_reuses_device_identity_after_restart() {
+    fn ipc_sends_only_the_channel_and_no_install_or_device_identity() {
         let service = server("ok");
         let fallback = server("ok");
         let dir = tempfile::tempdir().unwrap();
@@ -296,29 +296,12 @@ mod tests {
             )
         );
         let mut fields = headers(&request);
-        let id = fields.remove("x-o8-install-id").unwrap();
-        assert_eq!(uuid::Uuid::parse_str(&id).unwrap().get_version_num(), 4);
         assert_eq!(fields.remove("x-o8-channel").unwrap(), "stable");
-        #[cfg(target_os = "macos")]
-        assert_eq!(
-            fields.remove("x-o8-macos-version").unwrap(),
-            String::from_utf8(
-                std::process::Command::new("/usr/bin/sw_vers")
-                    .arg("-productVersion")
-                    .output()
-                    .unwrap()
-                    .stdout
-            )
-            .unwrap()
-            .trim()
-        );
         assert_eq!(
             fields.keys().map(String::as_str).collect::<Vec<_>>(),
             vec!["accept", "host", "user-agent"]
         );
-        let saved: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        assert_eq!(saved, serde_json::json!({ "installId": id }));
+        assert!(!path.exists(), "no install identity is created");
         drop(first);
         let restarted = app(&service.url, &fallback.url, &path);
         invoke(&restarted);
@@ -326,7 +309,7 @@ mod tests {
             .requests
             .recv_timeout(Duration::from_secs(3))
             .unwrap();
-        assert_eq!(headers(&next)["x-o8-install-id"], id);
+        assert!(!headers(&next).contains_key("x-o8-install-id"));
         assert!(fallback.requests.try_recv().is_err());
     }
 
@@ -425,23 +408,21 @@ mod tests {
     }
 
     #[test]
-    fn ipc_keeps_updates_working_when_identity_settings_are_invalid() {
+    fn ipc_never_sends_an_install_id_left_by_an_older_release() {
         let service = server("ok");
         let fallback = server("ok");
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("update-ping.json");
-        std::fs::write(&path, r#"{"installId":"not-a-device-uuid"}"#).unwrap();
+        let saved = format!(r#"{{"installId":"{}"}}"#, uuid::Uuid::new_v4());
+        std::fs::write(&path, &saved).unwrap();
         let app = build_app(&service.url, &fallback.url, "0.1.0");
-        assert!(update_ping::initialize_at(app.handle(), &path).is_err());
-        invoke(&app);
-        assert!(fallback
+        update_ping::initialize_at(app.handle(), &path).unwrap();
+        assert_eq!(invoke(&app)["version"], "0.2.0");
+        let request = service
             .requests
             .recv_timeout(Duration::from_secs(3))
-            .is_ok());
-        assert!(service.requests.try_recv().is_err());
-        assert_eq!(
-            std::fs::read_to_string(path).unwrap(),
-            r#"{"installId":"not-a-device-uuid"}"#
-        );
+            .unwrap();
+        assert!(!headers(&request).contains_key("x-o8-install-id"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), saved);
     }
 }
