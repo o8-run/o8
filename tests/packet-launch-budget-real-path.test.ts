@@ -29,7 +29,6 @@ vi.mock('node:fs/promises', async (original) => {
   }) };
 });
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: vi.fn(async () => ({

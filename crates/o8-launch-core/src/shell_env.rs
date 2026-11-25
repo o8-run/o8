@@ -42,10 +42,6 @@ pub const AI_KEYS: &[&str] = &[
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "XAI_API_KEY",
-    // Read-only token for the founder usage-analytics dashboard (epic #1249).
-    // Only present in the founder's login shell — a normal user's shell has
-    // none, so nothing is forwarded and the dashboard stays hidden.
-    "O8_ANALYTICS_TOKEN",
 ];
 
 /// Sentinel prefixes so PATH/node lines can't collide with a key name.

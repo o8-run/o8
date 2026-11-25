@@ -263,7 +263,6 @@ function verbSequence(laneId: string): string[] {
 
 beforeAll(async () => {
   await updateOperatorDefaults({
-    productTelemetryEnabled: false,
     storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001,
   });

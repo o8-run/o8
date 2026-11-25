@@ -9,7 +9,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable:
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: async () => ({ ready: true }),
 }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: async () => undefined }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => undefined }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),

@@ -37,7 +37,6 @@ const GLOBAL_ONLY: ReadonlySet<Key> = new Set<Key>([
   'knowledgeSources',
   'experimentalNext',
   'localInferenceBaseUrl',
-  'telemetryIngestUrl',
 ]);
 export const SCOPED_SETTING_KEYS: readonly Key[] = Object.freeze(
   OPERATOR_DEFAULTS_TOML_KEYS.filter((key) => !GLOBAL_ONLY.has(key)),

@@ -101,22 +101,17 @@ async function makePacketWorkspace(name: string) {
 beforeAll(async () => {
   // The storage governor is not under test; keep its reserve out of the way.
   await updateOperatorDefaults({
-    productTelemetryEnabled: false,
     storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001,
   });
 });
 
 afterAll(async () => {
-  try {
-    await updateOperatorDefaults({ productTelemetryEnabled: false });
-  } finally {
-    for (const [key, value] of Object.entries(originalEnv)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('merge evidence capture after the reviewed HEAD moves', () => {

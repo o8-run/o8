@@ -209,7 +209,6 @@ beforeAll(async () => {
   fixture = await startJudgmentEndpointFixture();
   setApprovalRefereeOptionsForTests({ endpoint: fixture.endpoint, retryBaseMs: 1, timeoutMs: 5_000 });
   await updateOperatorDefaults({
-    productTelemetryEnabled: false,
     storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001,
   });

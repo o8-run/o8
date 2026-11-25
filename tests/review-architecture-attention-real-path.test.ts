@@ -114,7 +114,7 @@ beforeAll(async () => {
     maxAttempts: 1,
     retryBaseMs: 1,
   });
-  await updateOperatorDefaults({ productTelemetryEnabled: false, judgmentProvider: 'typesafe' });
+  await updateOperatorDefaults({ judgmentProvider: 'typesafe' });
 });
 
 afterAll(async () => {

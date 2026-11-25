@@ -13,7 +13,6 @@ import type { SupervisorCallbacks } from '@/lib/supervisor/agent-supervisor';
 // The executable below is the provider boundary. Session locks, process proof,
 // signals, persistence, MCP, authenticated action routing and supervision are real.
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: vi.fn(async () => ({ ready: true })) }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn(), triggerScanIfStale: vi.fn(), startChangePolling: vi.fn(), stopChangePolling: vi.fn() }));
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'o8-interrupted-recovery-')));

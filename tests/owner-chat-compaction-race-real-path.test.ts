@@ -17,7 +17,7 @@ it('commits one compact boundary when independent route processes summarize the 
   mkdirSync(join(root, 'chat-history'));
   writeFileSync(join(root, 'repos.json'), JSON.stringify([{ id: 'fixture', name: 'Fixture', path: repoPath }]));
   writeFileSync(join(root, 'operator-defaults.json'), JSON.stringify({ inAppOrchestratorEnabled: true,
-    judgmentProvider: 'off', autoTitleInferenceEnabled: false, productTelemetryEnabled: false }));
+    judgmentProvider: 'off', autoTitleInferenceEnabled: false }));
   const historyPath = join(root, 'chat-history', `${threadId}.json`);
   const messages = Array.from({ length: 10 }, (_, index) => ({ id: `message-${index}`,
     role: index % 2 ? 'assistant' : 'user', content: `Fixture ${index}`, timestamp: index + 1 }));

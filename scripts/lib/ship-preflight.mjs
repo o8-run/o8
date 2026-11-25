@@ -66,13 +66,13 @@ function repositoryFromRemote(remoteUrl) {
 // A desktop build without these ships with account sign-in, GitHub sign-in and
 // crash reporting switched off. Values stay out of Git in o8.release.json or the
 // environment; only the key names are reported.
-const REQUIRED_RELEASE_CONFIG = ['clerkPublishableKey', 'githubOAuthClientId', 'sentryDsn'];
+const REQUIRED_RELEASE_CONFIG = ['clerkPublishableKey', 'githubOAuthClientId'];
 
 function checkReleaseConfig(root, env) {
   const config = resolveReleaseConfig(root, env);
   const missing = REQUIRED_RELEASE_CONFIG.filter((key) => !config[key]);
   if (missing.length > 0) {
-    throw new Error(`missing desktop release configuration: ${missing.join(', ')}; add o8.release.json to the release worktree or set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, GITHUB_OAUTH_CLIENT_ID and SENTRY_DSN`);
+    throw new Error(`missing desktop release configuration: ${missing.join(', ')}; add o8.release.json to the release worktree or set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and GITHUB_OAUTH_CLIENT_ID`);
   }
   return [...REQUIRED_RELEASE_CONFIG];
 }

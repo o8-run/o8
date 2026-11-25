@@ -263,7 +263,7 @@ const withoutBuildClock = (text: string) => text.replace(/"generatedAt":"[^"]*"/
 
 beforeAll(async () => {
   fixture = await startJudgmentEndpointFixture();
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
   writeJudgmentFixtureKey(judgmentKeyPath());
 });
 

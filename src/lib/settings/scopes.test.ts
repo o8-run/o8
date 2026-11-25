@@ -83,6 +83,6 @@ describe('settings.toml layers', () => {
   it('validates values and keeps global-only keys out of the layers', () => {
     expect(() => writeScopedSetting(flat, 'machine', 'm1', 'parallelCap', 0)).toThrow();
     expect(() => writeScopedSetting(flat, 'machine', 'm1', 'knowledgeSources', [])).toThrow(/globally/);
-    expect(SCOPED_SETTING_KEYS).not.toContain('telemetryIngestUrl');
+    expect(SCOPED_SETTING_KEYS).not.toContain('localInferenceBaseUrl');
   });
 });

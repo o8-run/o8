@@ -6,8 +6,6 @@ const restoreNextWindow = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@/lib/next/app-window', () => ({ restoreNextWindow }));
 vi.mock('@/lib/orchestrator/shared-worker-recovery', () => ({ settleSharedCheckoutTeams: async () => {} }));
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ ensureReviewQueueDrainStarted: () => {} }));
-vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: () => {} }));
-vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: async () => {} }));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
   repairFlippedOrchestratorTranscripts: () => {}, repairComposerPreamblePollution: () => {} }));
 vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: () => {} }));

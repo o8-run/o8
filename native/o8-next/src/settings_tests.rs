@@ -159,9 +159,6 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     for field in [
         "autoTitleInferenceEnabled",
         "presentationQuietMode",
-        "productTelemetryEnabled",
-        "crashReportsEnabled",
-        "telemetryOptIn",
         "supervisorAutoEscalate",
         "reviewContinuation",
         "buyinDocEnabled",
@@ -174,14 +171,9 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     ] {
         search(cx, field);
         let value = values(&fixture)[field].clone();
-        let previous = value.as_bool().unwrap_or_else(|| {
-            assert_eq!(
-                field, "productTelemetryEnabled",
-                "only usage consent is nullable"
-            );
-            assert!(value.is_null(), "unanswered usage consent must be null");
-            false
-        });
+        let previous = value
+            .as_bool()
+            .unwrap_or_else(|| panic!("{field} is a boolean setting"));
         let start = Instant::now();
         click(cx, &format!("setting-{field}"));
         frame(&shell, cx);
@@ -279,9 +271,9 @@ fn settings_fixture_all_default_controls_persist_and_refresh(cx: &mut TestAppCon
     // No settings or drafts enter shell view-state persistence.
     let saved = fs::read_to_string(shell.read_with(cx, |s, _| s.file.clone())).unwrap();
     assert!(!saved.contains("desktop-fixture") && !saved.contains("discarded"));
-    assert_eq!(frames.len(), 40);
+    assert_eq!(frames.len(), 37);
     if let Ok(path) = std::env::var("O8_NEXT_SETTINGS_RESULTS") {
-        fs::write(path, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI CPU scene paint", "profile":"debug", "openToFirstFrameMs":open_ms, "interactionToFrameMs":frames, "defaultControls":40})).unwrap()).unwrap();
+        fs::write(path, serde_json::to_vec_pretty(&json!({"endpoint":"headless GPUI CPU scene paint", "profile":"debug", "openToFirstFrameMs":open_ms, "interactionToFrameMs":frames, "defaultControls":37})).unwrap()).unwrap();
     }
 }
 

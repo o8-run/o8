@@ -12,8 +12,6 @@ vi.mock('@/lib/runtime/actions', () => ({ launchRuntimeSurface }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [] } }) }));
-vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: () => {} }));
-vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: async () => {} }));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({ repairFlippedOrchestratorTranscripts: () => {}, repairComposerPreamblePollution: () => {} }));
 vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: () => {} }));
 vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: async () => {} }));

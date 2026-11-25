@@ -41,7 +41,6 @@ vi.mock('@/lib/runtime/actions', async (original) => ({
   ...await original<typeof import('@/lib/runtime/actions')>(), launchRuntimeSurface: h.launch, performRuntimeAction: h.cleanup,
 }));
 vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: vi.fn(async () => {}) }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
 vi.mock('@/lib/panel/api-port', async (original) => {
   const actual = await original<typeof import('@/lib/panel/api-port')>();

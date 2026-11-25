@@ -366,7 +366,7 @@ describe('native release cache real entry points', { timeout: 120_000 }, () => {
       expect(await restoreReleaseBuildCache(f.root, 'native', { env: f.env, buildOptions })).toMatchObject({ status: 'miss', reason: 'entry_missing' });
     });
 
-  it.each(['RUSTFLAGS', 'MACOSX_DEPLOYMENT_TARGET', 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'SENTRY_DSN', 'CARGO_PROFILE_RELEASE_LTO'])(
+  it.each(['RUSTFLAGS', 'MACOSX_DEPLOYMENT_TARGET', 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'CARGO_PROFILE_RELEASE_LTO'])(
     'misses after changing build-time environment %s without recording the value', async key => {
       const f = fixture();
       put(f.root, 'src-tauri/target/.release-native-artifact/o8', 'native artifact');

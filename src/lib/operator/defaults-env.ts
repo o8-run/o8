@@ -328,7 +328,7 @@ export function envCollideAggregator(): CollideAggregator | null {
 
 /**
  * `O8_NO_PHONE_HOME=1` turns off, for one run and over the saved settings:
- * automatic updates, crash-log upload, crash reports, usage analytics and the
+ * automatic updates and the
  * hosted relay connection that reaches a paired phone off the local network.
  * The launcher reads the same variable and skips its update checks.
  */
@@ -342,26 +342,6 @@ export function envUpdateAutoApply(): UpdateAutoApply | null {
     ?? process.env.O8_AUTO_APPLY_UPDATES?.trim();
   if (raw === 'off' || raw === 'idle') return raw;
   if (raw === 'when-idle') return 'idle';
-  return null;
-}
-
-export function envTelemetryOptIn(): boolean | null {
-  if (envNoPhoneHome()) return false;
-  const raw = process.env.O8_TELEMETRY_OPT_IN;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
-  return null;
-}
-
-export function envTelemetryIngestUrl(): string | null {
-  return process.env.O8_TELEMETRY_INGEST_URL?.trim() || null;
-}
-
-export function envCrashReports(): boolean | null {
-  if (envNoPhoneHome()) return false;
-  const raw = process.env.O8_CRASH_REPORTS;
-  if (raw === '1') return true;
-  if (raw === '0') return false;
   return null;
 }
 

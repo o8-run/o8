@@ -214,7 +214,6 @@ function baseSubjects(repo: string): string[] {
 beforeAll(async () => {
   await updateOperatorDefaults({
     commitAttributionEnabled: true,
-    productTelemetryEnabled: false,
     storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001,
   });

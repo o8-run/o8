@@ -24,18 +24,16 @@ pub(super) fn step_name(step: Step) -> &'static str {
         Step::Import | Step::Projects | Step::Folder | Step::NewProject => "open",
         Step::Repos => "repos",
         Step::Tools => "dispatch",
-        Step::Privacy => "privacy",
         Step::Permissions => "permissions",
     }
 }
-/// The page a saved step reopens. A step this window has no page for yet
-/// (mobile) reopens the last one it has.
+/// The page a saved step reopens. A step this window has no page for (the
+/// retired privacy step, mobile) reopens the agent step.
 fn page(name: &str) -> Step {
     match name {
         "repos" => Step::Repos,
-        "dispatch" => Step::Tools,
+        "dispatch" | "privacy" | "mobile" => Step::Tools,
         "permissions" => Step::Permissions,
-        "privacy" | "mobile" => Step::Privacy,
         _ => Step::Projects,
     }
 }
@@ -121,11 +119,12 @@ fn saved_progress_reads_by_the_desktop_rules() {
     assert!(
         unknown.step == Step::Projects && unknown.project.is_none() && !unknown.tools_configured
     );
-    // The project and voice steps resume where they stopped; mobile has no page here yet.
+    // The project and voice steps resume where they stopped; privacy and mobile reopen the agent step.
     assert!(read(Some(&saved("repos", good.clone(), ""))).step == Step::Repos);
     assert_eq!(write(Step::Repos, None, false, "").step, "repos");
     assert!(read(Some(&saved("permissions", good.clone(), ""))).step == Step::Permissions);
-    assert!(read(Some(&saved("mobile", good.clone(), ""))).step == Step::Privacy);
+    assert!(read(Some(&saved("mobile", good.clone(), ""))).step == Step::Tools);
+    assert!(read(Some(&saved("privacy", good.clone(), ""))).step == Step::Tools);
     // An incomplete project is dropped; built-in prompts and long tasks are not kept as typed.
     assert!(
         read(Some(&saved(

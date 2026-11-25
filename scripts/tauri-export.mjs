@@ -305,20 +305,6 @@ if (releaseConfig.githubOAuthClientId) {
   console.log('📦 No GITHUB_OAUTH_CLIENT_ID configured — device flow stays disabled in this build');
 }
 
-// Bake the Sentry DSN so the Next server process (and, via inheritance, any
-// child it spawns) inits @sentry/node. The `if (!process.env…)` guard means the
-// Rust sidecar's O8_SENTRY_DSN (which it also passes to ws-server) wins when
-// present. Absent → the whole telemetry stack stays dormant.
-const SENTRY_ENV_STANZA = releaseConfig.sentryDsn
-  ? `\n// Sentry crash/error reporting DSN, baked at release build (telemetry ruling).\n` +
-    `if (!process.env.O8_SENTRY_DSN) process.env.O8_SENTRY_DSN = ${JSON.stringify(releaseConfig.sentryDsn)};\n`
-  : '';
-if (releaseConfig.sentryDsn) {
-  console.log('📦 Baking O8_SENTRY_DSN into server.js wrapper (Sentry enabled)');
-} else {
-  console.log('📦 No sentryDsn configured — Sentry stays dormant in this build');
-}
-
 // Bake the app version so both the boot crash guard below AND the server's
 // resolveAppVersion() (src/lib/telemetry/crash-store.ts) stamp the real version
 // even when cwd's package.json is the minimal Next standalone one.
@@ -513,7 +499,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-${RELEASE_ENV_STANZA}${SENTRY_ENV_STANZA}${APP_VERSION_STANZA}${BUILD_GIT_SHA_STANZA}${BOOT_CAPTURE_STANZA}
+${RELEASE_ENV_STANZA}${APP_VERSION_STANZA}${BUILD_GIT_SHA_STANZA}${BOOT_CAPTURE_STANZA}
 process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
@@ -753,15 +739,6 @@ for (const bundle of REQUIRED_BUNDLES) {
       console.error(`❌ Missing required server bundle: ${required}`);
       process.exit(1);
     }
-  }
-}
-
-// The WS process reports its own crashes, so its Sentry SDK must be compiled
-// into the artifact rather than resolved from the pruned standalone runtime.
-for (const file of readdirSync(server).filter(file => file.endsWith('.mjs'))) {
-  if (/\b(?:import|require)\s*\(\s*['"]@sentry\/node['"]\s*\)/.test(readFileSync(join(server, file), 'utf8'))) {
-    console.error(`WS bundle still externalizes @sentry/node: ${file}`);
-    process.exit(1);
   }
 }
 

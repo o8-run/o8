@@ -5,8 +5,6 @@ import { build } from 'esbuild';
 vi.mock('@/lib/lane/registry', () => ({ getLane: vi.fn() }));
 vi.mock('@/lib/lane/auto-review', () => ({ triggerAutoReview: vi.fn() }));
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ ensureReviewQueueDrainStarted: vi.fn() }));
-vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: vi.fn() }));
-vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: vi.fn() }));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
   repairFlippedOrchestratorTranscripts: vi.fn(), repairComposerPreamblePollution: vi.fn(),
 }));

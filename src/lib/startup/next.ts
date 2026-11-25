@@ -2,7 +2,7 @@ import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 
 const runtime = globalThis as typeof globalThis & { __o8NextOptionalStartup?: Promise<void> };
 
-function warn(stage: 'telemetry' | 'transcript-repair'): void {
+function warn(stage: 'transcript-repair'): void {
   try {
     console.warn('[startup] Optional initialization failed; continuing startup.', { stage });
   } catch {
@@ -30,14 +30,6 @@ async function initialize(): Promise<void> {
     if (process.env.O8_NEXT_WINDOW_OWNER !== 'ws') {
       void import('@/lib/next/app-window').then(({ restoreNextWindow }) => restoreNextWindow()).catch(() => {});
     }
-  }
-  try {
-    const { startTelemetryUploadLoop } = await import('@/lib/telemetry/uploader');
-    startTelemetryUploadLoop();
-    const { initSentryNode } = await import('@/lib/telemetry/sentry-node');
-    await initSentryNode('server');
-  } catch {
-    warn('telemetry');
   }
   try {
     const { repairFlippedOrchestratorTranscripts, repairComposerPreamblePollution } = await import('@/lib/mobile/orchestrator-thread-history');

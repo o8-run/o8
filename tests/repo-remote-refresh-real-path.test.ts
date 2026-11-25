@@ -5,7 +5,6 @@ import path from 'node:path';
 import { afterAll, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/cortex/spec-ingest', () => ({ ingestRepoSpecs: async () => ({ scannedFiles: 0, writtenDirectives: 0, deletedStaleDirectives: 0 }), purgeOrphanedSpecDirectives: vi.fn(() => ({ purged: 0 })) }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: async () => {} }));
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-remote-refresh-'));
 process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
 process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;

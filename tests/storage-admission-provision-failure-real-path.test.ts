@@ -29,9 +29,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
 
-vi.mock('@/lib/analytics/server', () => ({
-  emitProductEvent: vi.fn(async () => undefined),
-}));
 
 vi.mock('@/lib/workspace/manifest/terminal-release', () => ({
   settleTerminalWorkspaceManifestAndLeases: vi.fn(async () => undefined),

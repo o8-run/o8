@@ -67,9 +67,6 @@ vi.mock('@/lib/lane/commands', () => ({
   }),
 }));
 
-vi.mock('@/lib/analytics/server', () => ({
-  emitProductEvent: vi.fn(async () => undefined),
-}));
 
 const dataDir = mkdtempSync(join(tmpdir(), 'o8-automation-fire-spine-'));
 process.env.O8_DATA_DIR = dataDir;

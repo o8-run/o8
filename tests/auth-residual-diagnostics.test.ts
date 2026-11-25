@@ -138,17 +138,7 @@ describe('residual auth diagnostics', () => {
     expect(JSON.stringify(record)).not.toContain(marker);
   });
 
-  it('Sentry events drop raw console breadcrumb arguments and redact the rest', async () => {
-    const { scrubSentryEvent } = await import('@/lib/telemetry/scrub');
-    const event = scrubSentryEvent({
-      message: `failed ?__clerk_ticket=${marker}`,
-      breadcrumbs: [{ message: `Clerk load failed Bearer ${marker}`, data: { arguments: [`stack eyJ${marker}.eyJ${marker}.${marker}`, { ticket: marker }], logger: 'console' } }],
-    });
-    expect(JSON.stringify(event)).not.toContain(marker);
-    expect(event?.breadcrumbs?.[0]?.data).not.toHaveProperty('arguments');
-  });
-
-  it('crash records read for upload or feedback are redacted, including rows written raw', async () => {
+  it('crash records read for triage or feedback are redacted, including rows written raw', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'o8-crash-redact-'));
     vi.stubEnv('O8_DATA_DIR', dataDir);
     vi.stubEnv('CORTEX_IDE_DATA_DIR', dataDir);

@@ -52,6 +52,8 @@ describe('release config', () => {
     expect(resolveReleaseBuildEnvironment(root, env)).toEqual({ ...env,
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_from_file' });
     expect(env).not.toHaveProperty('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+    // A crash-reporting key left in an old release file is never read.
+    expect(resolveReleaseConfig(root, { SENTRY_DSN: 'env-dsn' })).not.toHaveProperty('sentryDsn');
   });
 
   it('preserves the explicit compiler value byte-for-byte instead of substituting file config', () => {

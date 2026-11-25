@@ -15,7 +15,7 @@ it('keeps the generated Next wrapper boundary on the public Host and preserves r
   const end = source.indexOf("\nconsole.log('📦 Wrote server.js wrapper", start);
   const template = source.slice(start, end).trim().replace(/\);$/, '');
   const wrapper = runInNewContext(template, Object.fromEntries([
-    'RELEASE_ENV_STANZA', 'SENTRY_ENV_STANZA', 'APP_VERSION_STANZA', 'BUILD_GIT_SHA_STANZA', 'BOOT_CAPTURE_STANZA',
+    'RELEASE_ENV_STANZA', 'APP_VERSION_STANZA', 'BUILD_GIT_SHA_STANZA', 'BOOT_CAPTURE_STANZA',
   ].map(name => [name, ''])));
   writeFileSync(join(directory, 'server.js'), wrapper);
   // Native-addon selection is outside this socket-boundary test; the actual

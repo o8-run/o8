@@ -125,14 +125,6 @@ vi.mock('@/lib/usage-log', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/analytics/server', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/analytics/server')>();
-  return {
-    ...actual,
-    emitProductEvent: vi.fn(async () => undefined),
-  };
-});
-
 let testRoot: string | null = null;
 const priorEnv: Record<string, string | undefined> = {};
 const controlledEnvKeys = [

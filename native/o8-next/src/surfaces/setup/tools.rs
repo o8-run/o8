@@ -570,9 +570,6 @@ impl Setup {
         let workers_locked = snapshot
             .as_ref()
             .is_some_and(|s| s.locked("defaultDispatchRuntime"));
-        let consent = snapshot
-            .as_ref()
-            .is_some_and(|s| s.setup["values"]["telemetryConsentAnswered"] == true);
         let project = self.project.as_ref().map(|p| p.name.clone());
         let heading = if show_tools {
             if needs_connection {
@@ -598,10 +595,7 @@ impl Setup {
             "Check your tools again to continue.".to_owned()
         } else if ready_to_save {
             match &project {
-                Some(name) if consent => format!("Next: open {name} with {label}."),
-                Some(_) => {
-                    "Next: choose your privacy preferences, then open your workspace.".into()
-                }
+                Some(name) => format!("Next: open {name} with {label}."),
                 None => "Next: save this setup and return to your projects.".into(),
             }
         } else {

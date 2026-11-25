@@ -1,7 +1,6 @@
 export interface ReleaseConfig {
   githubOAuthClientId: string;
   clerkPublishableKey: string;
-  sentryDsn: string;
 }
 
 export function resolveReleaseConfig(

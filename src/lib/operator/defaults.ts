@@ -67,10 +67,7 @@ import {
   envPromptCachingEnabled,
   envReviewerBackend,
   envSubscriptionProfile,
-  envCrashReports,
   envSupervisorAutoEscalate,
-  envTelemetryIngestUrl,
-  envTelemetryOptIn,
   envThinkingEffort,
   envWorkersUseBrain,
   envWorktreeMaxCount,
@@ -276,11 +273,6 @@ export interface OperatorDefaults extends KnowledgeSourceDefaults, StorageReserv
   updateAutoApply: UpdateAutoApply;
   /** Collide aggregator override. Auto follows the active composer backend. */
   collideAggregator: CollideAggregator;
-  /** Coarse usage analytics: null = never chosen (default on), true = on, false = off. */ productTelemetryEnabled: boolean | null;
-  /** First-run telemetry prompt was answered with both independent choices. */ telemetryConsentAnswered: boolean;
-  /** Crash-log upload opt-in; local capture continues while off. Env: `O8_TELEMETRY_OPT_IN`. */ telemetryOptIn: boolean;
-  /** Crash-log endpoint, consulted only when telemetryOptIn is on. */ telemetryIngestUrl: string;
-  /** Scrubbed Sentry crash/error sharing, packaged builds only and default off. */ crashReportsEnabled: boolean;
   /**
    * Prefix for branches o8 opens from GitHub issues (`<prefix>/<n>-<slug>`).
    * **Default `'issue'`** — byte-identical to the previous hardcoded literal.
@@ -381,11 +373,6 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   updateAutoApply: 'off',
   collideAggregator: 'auto',
-  productTelemetryEnabled: null,
-  telemetryConsentAnswered: false,
-  telemetryOptIn: false, // Local capture only, nothing uploaded.
-  telemetryIngestUrl: '',
-  crashReportsEnabled: false, // Transmission always requires explicit consent.
   // Byte-identical to the previous hardcoded `issue/` branch literal.
   branchPrefix: 'issue',
   // Agent commit attribution OFF — commits carry the raw message as before.
@@ -526,17 +513,6 @@ function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
   if (isCollideAggregator(stored.collideAggregator)) {
     result.collideAggregator = stored.collideAggregator;
   }
-  if (stored.productTelemetryEnabled === null || typeof stored.productTelemetryEnabled === 'boolean') result.productTelemetryEnabled = stored.productTelemetryEnabled;
-  if (typeof stored.telemetryConsentAnswered === 'boolean') result.telemetryConsentAnswered = stored.telemetryConsentAnswered;
-  if (typeof stored.telemetryOptIn === 'boolean') {
-    result.telemetryOptIn = stored.telemetryOptIn;
-  }
-  if (typeof stored.telemetryIngestUrl === 'string') {
-    result.telemetryIngestUrl = stored.telemetryIngestUrl.trim();
-  }
-  if (typeof stored.crashReportsEnabled === 'boolean') {
-    result.crashReportsEnabled = stored.crashReportsEnabled;
-  }
   const cleanedBranchPrefix = sanitizeBranchPrefix(stored.branchPrefix);
   if (cleanedBranchPrefix) {
     result.branchPrefix = cleanedBranchPrefix;
@@ -599,9 +575,6 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
   const envBuyinDoc = envBuyinDocEnabled();
   const envApplyUpdates = envUpdateAutoApply();
   const envCollideAgg = envCollideAggregator();
-  const envTelemetry = envTelemetryOptIn();
-  const envTelemetryUrl = envTelemetryIngestUrl();
-  const envCrash = envCrashReports();
   const envBranch = envBranchPrefix();
   const envCommitAttrib = envCommitAttribution();
   const envPrLink = envPrLinkDestination();
@@ -695,11 +668,6 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     updateAutoApply: envApplyUpdates ?? fileValues.updateAutoApply ?? OPERATOR_DEFAULTS_FALLBACK.updateAutoApply,
     collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
-    productTelemetryEnabled: fileValues.productTelemetryEnabled ?? OPERATOR_DEFAULTS_FALLBACK.productTelemetryEnabled,
-    telemetryConsentAnswered: fileValues.telemetryConsentAnswered ?? OPERATOR_DEFAULTS_FALLBACK.telemetryConsentAnswered,
-    telemetryOptIn: envTelemetry ?? fileValues.telemetryOptIn ?? OPERATOR_DEFAULTS_FALLBACK.telemetryOptIn,
-    telemetryIngestUrl: envTelemetryUrl ?? fileValues.telemetryIngestUrl ?? OPERATOR_DEFAULTS_FALLBACK.telemetryIngestUrl,
-    crashReportsEnabled: envCrash ?? fileValues.crashReportsEnabled ?? OPERATOR_DEFAULTS_FALLBACK.crashReportsEnabled,
     branchPrefix: envBranch ?? fileValues.branchPrefix ?? OPERATOR_DEFAULTS_FALLBACK.branchPrefix,
     commitAttributionEnabled: envCommitAttrib ?? fileValues.commitAttributionEnabled ?? OPERATOR_DEFAULTS_FALLBACK.commitAttributionEnabled,
     prLinkDestination: envPrLink ?? fileValues.prLinkDestination ?? OPERATOR_DEFAULTS_FALLBACK.prLinkDestination,
@@ -772,11 +740,6 @@ function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWith
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     updateAutoApply: envApplyUpdates !== null ? 'env' : fileValues.updateAutoApply !== undefined ? 'file' : 'default',
     collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
-    productTelemetryEnabled: fileValues.productTelemetryEnabled !== undefined ? 'file' : 'default',
-    telemetryConsentAnswered: fileValues.telemetryConsentAnswered !== undefined ? 'file' : 'default',
-    telemetryOptIn: envTelemetry !== null ? 'env' : fileValues.telemetryOptIn !== undefined ? 'file' : 'default',
-    telemetryIngestUrl: envTelemetryUrl !== null ? 'env' : fileValues.telemetryIngestUrl !== undefined ? 'file' : 'default',
-    crashReportsEnabled: envCrash !== null ? 'env' : fileValues.crashReportsEnabled !== undefined ? 'file' : 'default',
     branchPrefix: envBranch !== null ? 'env' : fileValues.branchPrefix !== undefined ? 'file' : 'default',
     commitAttributionEnabled: envCommitAttrib !== null ? 'env' : fileValues.commitAttributionEnabled !== undefined ? 'file' : 'default',
     prLinkDestination: envPrLink !== null ? 'env' : fileValues.prLinkDestination !== undefined ? 'file' : 'default',
@@ -1023,17 +986,6 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
     }
     stored.collideAggregator = update.collideAggregator;
   }
-  if (update.productTelemetryEnabled !== undefined) stored.productTelemetryEnabled = update.productTelemetryEnabled;
-  if (update.telemetryConsentAnswered !== undefined) stored.telemetryConsentAnswered = Boolean(update.telemetryConsentAnswered);
-  if (update.telemetryOptIn !== undefined) {
-    stored.telemetryOptIn = Boolean(update.telemetryOptIn);
-  }
-  if (update.crashReportsEnabled !== undefined) {
-    stored.crashReportsEnabled = Boolean(update.crashReportsEnabled);
-  }
-  if (update.telemetryIngestUrl !== undefined) {
-    stored.telemetryIngestUrl = validateCredentialSafeUrl(update.telemetryIngestUrl, 'telemetryIngestUrl');
-  }
   if (update.branchPrefix !== undefined) {
     const cleaned = sanitizeBranchPrefix(update.branchPrefix);
     if (!cleaned) {
@@ -1211,26 +1163,6 @@ export function resolveBuyinDocEnabledSync(): boolean {
 
 export function resolveCollideAggregatorSync(): CollideAggregator {
   return getOperatorDefaultsSync().values.collideAggregator;
-}
-
-/** Effective usage preference. First-run disclosure is a separate egress gate. */
-export function resolveProductTelemetryEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.productTelemetryEnabled !== false;
-}
-
-/** Whether crash-telemetry upload is opted in (Rock 2, default off). */
-export function resolveTelemetryOptInSync(): boolean {
-  return getOperatorDefaultsSync().values.telemetryOptIn;
-}
-
-/** Crash-telemetry ingest endpoint ('' = no upload). Env overrides file. */
-export function resolveTelemetryIngestUrlSync(): string {
-  return getOperatorDefaultsSync().values.telemetryIngestUrl;
-}
-
-/** Crash/error data-sharing toggle (default off; also gates user bug reports). */
-export function resolveCrashReportsEnabledSync(): boolean {
-  return getOperatorDefaultsSync().values.crashReportsEnabled;
 }
 
 /** Prefix for issue-derived packet branches. */

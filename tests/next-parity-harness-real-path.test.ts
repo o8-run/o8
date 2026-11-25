@@ -104,7 +104,7 @@ it('serves the same persisted history and selected desktop tab through productio
     const history = await read('/api/mobile/history?sessionKey=llm-chat:thoughts-rich&limit=100');
     expect(history.transcript.length).toBeGreaterThan(0);
     const defaults = await read('/api/panel/operator-defaults');
-    expect(defaults.values).toMatchObject({ experimentalCanvas: true, telemetryConsentAnswered: true, crashReportsEnabled: false, productTelemetryEnabled: false });
+    expect(defaults.values).toMatchObject({ experimentalCanvas: true });
   } finally {
     lines.close();
     if (host.exitCode === null && host.signalCode === null) {

@@ -208,7 +208,6 @@
   "/api/panel/ssh-machines",
   "/api/panel/status",
   "/api/panel/supervisor-inbox",
-  "/api/panel/telemetry",
   "/api/panel/terminal-sessions",
   "/api/panel/terminal-state",
   "/api/panel/threads",

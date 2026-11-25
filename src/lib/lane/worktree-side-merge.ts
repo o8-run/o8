@@ -34,8 +34,6 @@ import {
   SpokenReviewSnapshotChangedError,
   validateSpokenReviewEvidenceBundle,
 } from '@/lib/lane/spoken-review-snapshot';
-import { emitProductEvent } from '@/lib/analytics/server';
-import { recordProductMilestone } from '@/lib/analytics/activation';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import {
   WorktreeFetchUnreachableError,
@@ -797,10 +795,6 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     if (getLane(command.laneId)?.status !== 'archived') {
       setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
     }
-
-    // Coarse product signal: the governance loop closed. Fire-and-forget.
-    void recordProductMilestone('merge.first_completed');
-    void emitProductEvent('merge.approved', { runtime: lane.runtime, pushed: pushedToOrigin });
 
     const decompositionNote = await enqueueMergeDecompositions(lane.repoPath, lane.runtime);
     const updated = getLane(command.laneId);

@@ -6,7 +6,6 @@ import { createLanEncryptedHttp } from './lib/mobile/lan-encrypted-http';
 import { isPathReachable } from '@/lib/fs/protected-folders';
 import { recordInboxConversationEvent } from '@/lib/inbox/store';
 import { mobileModelError } from './lib/mobile/model-catalog';
-import { startProductSession, endProductSession } from '@/lib/analytics/session';
 import { mutationToLaneLifecyclePayload } from '@/lib/realtime/lane-lifecycle';
 import { compactionThreadEvent } from '@/lib/realtime/compaction-thread-event';
 import { assertOrchestratorPermissionMode, resolveOrchestratorPermissionMode } from '@/lib/orchestrator/permission-mode';
@@ -348,16 +347,12 @@ import {
   type OrchestratorSendAckState,
 } from './lib/ws-server/orchestrator-command-idempotency';
 import { installProcessCrashCapture } from './lib/telemetry/crash-capture';
-import { initSentryNode } from './lib/telemetry/sentry-node';
 import { runStartupSequence } from './lib/ws-server/startup-sequence';
 
 /** Lanes created before this belong to an earlier run of the server. */
 const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 
 installProcessCrashCapture('ws-server');
-// Sentry (dormant unless PACKAGED + a DSN was baked). Fire-and-forget; the
-// local JSONL crash capture above is independent and always runs.
-void initSentryNode('ws');
 
 // Windows resolves a bare command name against the CURRENT DIRECTORY before
 // PATH. This process spawns tools with user repos and agent worktrees as cwd,
@@ -8837,9 +8832,7 @@ const wsStartupReady = startup.ready.catch(() => {
   console.error('[ws-server] Startup initialization failed.');
   shutdown('startup-failed', 1);
 });
-void startup.recovered.then(() => {
-  if (!shuttingDown) void startProductSession();
-}, () => {
+void startup.recovered.then(() => {}, () => {
   if (shuttingDown) return;
   console.error('[ws-server] Startup maintenance failed.');
   shutdown('startup-failed', 1);
@@ -8909,7 +8902,7 @@ async function shutdown(signal: string, exitCode = 0) {
   // Force exit after 3s if something hangs
   const forceShutdownTimer = setTimeout(() => {
     exitCode ||= 1;
-    void endProductSession(false).finally(() => process.exit(exitCode || 1));
+    process.exit(exitCode || 1);
   }, 3000).unref();
 
   // Close HTTP + WS server, then exit
@@ -8917,7 +8910,7 @@ async function shutdown(signal: string, exitCode = 0) {
     httpServer.close(() => {
       clearTimeout(forceShutdownTimer);
       console.log('[ws-server] Clean shutdown complete');
-      void endProductSession(exitCode === 0).finally(() => process.exit(exitCode));
+      process.exit(exitCode);
     });
   });
 }

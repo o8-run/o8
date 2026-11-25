@@ -29,7 +29,6 @@ function fixture() {
   writeFileSync(join(root, 'o8.release.json'), JSON.stringify({
     clerkPublishableKey: 'pk_test_synthetic',
     githubOAuthClientId: 'synthetic-client-id',
-    sentryDsn: 'https://synthetic@example.invalid/1',
   }));
   const env: NodeJS.ProcessEnv = {
     NODE_ENV: 'test',
@@ -42,7 +41,6 @@ function fixture() {
   };
   delete env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   delete env.GITHUB_OAUTH_CLIENT_ID;
-  delete env.SENTRY_DSN;
   return { root, home, head, env };
 }
 
@@ -130,7 +128,7 @@ describe('ship preflight', () => {
     rmSync(join(root, 'o8.release.json'));
     let message = '';
     try { performShipPreflight({ root, version: '0.1.999', env, run: passingRun(head) }); } catch (error) { message = (error as Error).message; }
-    expect(message).toContain('missing desktop release configuration: clerkPublishableKey, githubOAuthClientId, sentryDsn');
+    expect(message).toContain('missing desktop release configuration: clerkPublishableKey, githubOAuthClientId');
   });
 
   it('accepts the desktop release configuration from the environment and never reports its values', () => {
@@ -138,10 +136,9 @@ describe('ship preflight', () => {
     rmSync(join(root, 'o8.release.json'));
     env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_from_env';
     env.GITHUB_OAUTH_CLIENT_ID = 'client-from-env';
-    env.SENTRY_DSN = 'https://env@example.invalid/2';
     const receipt = performShipPreflight({ root, version: '0.1.999', env, run: passingRun(head) });
-    expect(receipt.releaseConfigKeys).toEqual(['clerkPublishableKey', 'githubOAuthClientId', 'sentryDsn']);
-    expect(JSON.stringify(receipt)).not.toMatch(/pk_test_from_env|client-from-env|env@example/);
+    expect(receipt.releaseConfigKeys).toEqual(['clerkPublishableKey', 'githubOAuthClientId']);
+    expect(JSON.stringify(receipt)).not.toMatch(/pk_test_from_env|client-from-env/);
   });
 
   it('proves tag, remote, credentials, disk, tools, and a clear build owner before work starts', () => {

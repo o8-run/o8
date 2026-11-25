@@ -131,7 +131,6 @@ function normalized(value: unknown, threadId: string): string {
 const stampFree = (text: string | null) => (text ?? '').replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/g, '<stamp>');
 
 beforeAll(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
   fixture = await startJudgmentEndpointFixture();
   setCompactionScorerTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 2_000, maxAttempts: 1 });
   writeFileSync(judgmentKeyPath(), `${KEY}\n`);

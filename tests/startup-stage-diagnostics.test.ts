@@ -9,8 +9,6 @@ let healthReady = true;
 let bootstrapFailures = 0;
 const mocks = {
   installProcessCrashCapture: vi.fn(),
-  startTelemetryUploadLoop: vi.fn(),
-  initSentryNode: vi.fn(),
   repairFlippedOrchestratorTranscripts: vi.fn(),
   repairComposerPreamblePollution: vi.fn(),
   runUnifiedSearchBackfills: vi.fn(),
@@ -54,16 +52,6 @@ beforeEach(() => {
     failImportIfSelected('@/lib/telemetry/crash-capture');
     importedModules.push('crash-capture');
     return { installProcessCrashCapture: mocks.installProcessCrashCapture };
-  });
-  vi.doMock('@/lib/telemetry/uploader', () => {
-    failImportIfSelected('@/lib/telemetry/uploader');
-    importedModules.push('uploader');
-    return { startTelemetryUploadLoop: mocks.startTelemetryUploadLoop };
-  });
-  vi.doMock('@/lib/telemetry/sentry-node', () => {
-    failImportIfSelected('@/lib/telemetry/sentry-node');
-    importedModules.push('sentry-node');
-    return { initSentryNode: mocks.initSentryNode };
   });
   vi.doMock('@/lib/mobile/orchestrator-thread-history', () => {
     failImportIfSelected('@/lib/mobile/orchestrator-thread-history');
@@ -118,13 +106,9 @@ function expectStageWarning(stage: 'telemetry' | 'transcript-repair'): void {
 
 const telemetryImports = [
   '@/lib/telemetry/crash-capture',
-  '@/lib/telemetry/uploader',
-  '@/lib/telemetry/sentry-node',
 ] as const;
 const telemetryInitializers = [
   'installProcessCrashCapture',
-  'startTelemetryUploadLoop',
-  'initSentryNode',
 ] as const;
 const repairInitializers = [
   'repairFlippedOrchestratorTranscripts',
@@ -163,7 +147,6 @@ describe('startup stage diagnostics through register', () => {
       method: 'POST', headers: { authorization: `Bearer ${getOrCreateWsToken()}` },
       body: JSON.stringify({ action: 'bootstrap' }),
     }))));
-    expect(mocks.startTelemetryUploadLoop).toHaveBeenCalledOnce();
     expect(mocks.repairComposerPreamblePollution).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1_500);
     await vi.dynamicImportSettled();
@@ -197,7 +180,6 @@ describe('startup stage diagnostics through register', () => {
 
     expect(calls).toEqual([...telemetryInitializers, ...repairInitializers]);
     expect(mocks.installProcessCrashCapture).toHaveBeenCalledWith('next-server');
-    expect(mocks.initSentryNode).toHaveBeenCalledWith('server');
     expect(mocks.ensureReviewQueueDrainStarted).not.toHaveBeenCalled();
     expect(warn).not.toHaveBeenCalled();
     await expectDeferredBackfill();
@@ -252,7 +234,7 @@ describe('startup stage diagnostics through register', () => {
     mocks[initializer].mockImplementation(() => { throw new Error('synthetic repair failure'); });
 
     await registerAndSettle();
-    expect(calls.slice(0, 3)).toEqual([...telemetryInitializers]);
+    expect(calls.slice(0, telemetryInitializers.length)).toEqual([...telemetryInitializers]);
     await expectDeferredBackfill();
     expectStageWarning('transcript-repair');
   });

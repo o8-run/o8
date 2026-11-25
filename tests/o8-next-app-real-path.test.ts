@@ -22,8 +22,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', () => ({
   getRuntimeAuthSnapshot: async () => ({ statuses: {}, suggestedSubscriptionProfile: { profile: null, detail: null } }),
   getDispatchableRuntimeAvailability: async () => [], invalidateRuntimeAuthCache: () => {},
 }));
-vi.mock('@/lib/telemetry/uploader', () => ({ startTelemetryUploadLoop: () => {} }));
-vi.mock('@/lib/telemetry/sentry-node', () => ({ initSentryNode: async () => {} }));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({ repairFlippedOrchestratorTranscripts: () => {}, repairComposerPreamblePollution: () => {} }));
 vi.mock('@/lib/lane/review-drain-bootstrap', () => ({ ensureReviewQueueDrainStarted: () => {} }));
 vi.mock('@/lib/panel/status-boot', () => ({ startStatusBootHooks: () => {} }));

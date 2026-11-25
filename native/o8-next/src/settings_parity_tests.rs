@@ -45,15 +45,14 @@ fn settings_parity_general_groups_and_global_search(cx: &mut TestAppContext) {
     for selector in [
         "settings-group-Conversations",
         "settings-group-Presentation",
-        "settings-group-Privacy",
     ] {
         assert!(cx.debug_bounds(selector).is_some(), "missing {selector}");
     }
-    search(cx, "privacy usage");
-    let previous = values(&fixture)["productTelemetryEnabled"] == true;
-    click(cx, "setting-productTelemetryEnabled");
+    search(cx, "quiet mode");
+    let previous = values(&fixture)["presentationQuietMode"] == true;
+    click(cx, "setting-presentationQuietMode");
     frame(&shell, cx);
-    assert_eq!(values(&fixture)["productTelemetryEnabled"], !previous);
+    assert_eq!(values(&fixture)["presentationQuietMode"], !previous);
     assert!(
         cx.debug_bounds("setting-autoTitleInferenceEnabled")
             .is_none()

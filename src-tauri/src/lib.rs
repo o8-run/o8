@@ -104,7 +104,6 @@ mod entitlement;
 // like the rest of the voice stack (#1673).
 #[cfg(target_os = "macos")]
 mod external_keyboard;
-mod telemetry;
 #[cfg(target_os = "macos")]
 mod url_scheme_handler;
 mod webview_latch;
@@ -7458,7 +7457,7 @@ fn app_context<R: tauri::Runtime>() -> tauri::Context<R> {
 pub fn run() {
     // A disposable native test process runs beside the operator's installed app.
     // Treat its environment as an all-or-nothing safety contract and fail before
-    // telemetry, lifecycle cleanup, plugins, ports, or persistent state when it
+    // lifecycle cleanup, plugins, ports, or persistent state when it
     // is incomplete. A typo must never silently degrade into a production boot.
     let native_test_instance =
         match native_test_instance::NativeTestInstance::from_env_if_requested() {
@@ -7489,36 +7488,6 @@ pub fn run() {
     let _ = BOOT_T0.set(std::time::Instant::now());
     boot_trace("run() entry");
 
-    // Sentry (native shell). Dormant unless a RELEASE build baked a DSN; dev /
-    // `tauri dev` stay silent. Init FIRST so panics during startup are captured;
-    // hold the guard for the whole program so events flush on exit. Then export
-    // the DSN so the Next server + ws-server children inherit it.
-    let _sentry_guard = telemetry::init();
-    telemetry::export_dsn_to_env();
-    log::info!("[boot] telemetry init at {}ms", boot_ms());
-    boot_trace("telemetry init");
-
-    // Native crash capture (signals/faults the sentry panic hook can't see:
-    // SIGSEGV/SIGABRT/SIGBUS/stack-overflow). MUST start HERE — right after
-    // sentry, and BEFORE boot-identity, port allocation, orphan reaping, and
-    // window creation — because it re-execs THIS binary as an out-of-process
-    // reporter and everything before this line runs in BOTH processes. The
-    // reporter `exit(0)`s inside init and never runs the setup below, so it
-    // never binds ports, reaps the main app's Node children, or opens a window
-    // (see telemetry::init_minidump_handler). Held for the program lifetime so
-    // the reporter process stays alive; None when dormant (debug/no-DSN) or the
-    // crash-reports toggle is OFF at launch.
-    let _minidump_handle = _sentry_guard
-        .as_ref()
-        .and_then(telemetry::init_minidump_handler);
-
-    // Hidden crash-test hook (O8_CRASH_TEST=segv|abort|stackoverflow) — lets the
-    // operator verify the native crash pipeline end-to-end post-ship with one
-    // terminal launch. Runs only in the main process; no-op when the var is
-    // unset. Placed AFTER minidump init so the reporter is already listening.
-    telemetry::maybe_trigger_crash_test();
-
-    // The crash reporter must exit through minidump initialization above first.
     // Real full-app launches claim the same per-user lock as voice-only mode,
     // before reaping processes, touching server metadata or installing hotkeys.
     // Debug builds skip it: they run beside the installed app during

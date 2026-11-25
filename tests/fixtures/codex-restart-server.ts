@@ -22,7 +22,7 @@ async function main() {
   const { writeOrchestratorControlPlaneState } = await import('../../src/lib/orchestrator/control-plane');
   const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('../../src/lib/orchestrator/store');
   await import('../../src/lib/runtimes');
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001,
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001 });
   const server = createServer(async (incoming, outgoing) => {
     try {

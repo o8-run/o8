@@ -250,7 +250,6 @@ describe('packaging preflight through real filesystem and script entry points', 
       writeFileSync(join(f.root, '.tauri/cortex-ide.key'), 'fixture-key');
       writeFileSync(join(f.root, 'o8.release.json'), JSON.stringify({
         clerkPublishableKey: 'pk_test_synthetic', githubOAuthClientId: 'synthetic',
-        sentryDsn: 'https://synthetic@example.invalid/1',
       }));
       const existingOutput = scenario.startsWith('output-');
       if (existingOutput) {

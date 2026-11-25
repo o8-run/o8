@@ -151,7 +151,6 @@ const withoutBuildClock = (text: string) => text.replace(/"generatedAt":"[^"]*"/
 
 beforeAll(async () => {
   fixture = await startJudgmentEndpointFixture();
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
   writeJudgmentFixtureKey(judgmentKeyPath());
 });
 

@@ -234,7 +234,6 @@ beforeAll(async () => {
   // The storage governor is not under test here; keep its reserve out of the way so
   // these merge-path assertions do not depend on the host's free disk.
   await updateOperatorDefaults({
-    productTelemetryEnabled: false,
     storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001,
   });
@@ -243,7 +242,6 @@ beforeAll(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   try {
-    await updateOperatorDefaults({ productTelemetryEnabled: false });
     writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
     __resetIdempotencyStoreForTests();
   } finally {
@@ -254,13 +252,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  try {
-    await updateOperatorDefaults({ productTelemetryEnabled: false });
-  } finally {
-    restoreEnv();
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  restoreEnv();
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -999,58 +993,6 @@ describe('worktree-side merge with real git repos', () => {
     expect(git(worktree.path, ['status', '--porcelain'])).toBe('');
     expect(conflictApproval?.args?.preservedRef).toEqual(expect.any(String));
     expect(git(repo, ['rev-parse', String(conflictApproval?.args?.preservedRef)])).toBe(reviewedHeadSha);
-  }, 30_000);
-
-  it('merge approval emits nothing while product telemetry is off and once while on', async () => {
-    const previousProxyUrl = process.env.O8_PROXY_URL;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch');
-    // Reuse the repository; each attempt still creates and merges a real branch.
-    const { repo } = makeRepo('o8-merge-telemetry');
-
-    const mergeOnce = async (suffix: string) => {
-      const worktree = await makeWorktree(repo, `pkt-telemetry-${suffix}`, `inline/telemetry-${suffix}`);
-      writeFileSync(join(worktree.path, `${suffix}.txt`), `${suffix}\n`);
-      commitAll(worktree.path, `${suffix} change`);
-      const lane = createLane({
-        repoPath: repo,
-        worktreePath: worktree.path,
-        branch: `inline/telemetry-${suffix}`,
-        baseBranch: 'main',
-        runtime: 'codex',
-        packetId: `pkt-telemetry-${suffix}`,
-      });
-      expect((await mergeLane(lane)).result.ok).toBe(true);
-    };
-
-    try {
-      writeFileSync(join(dataDir, 'entitlement.json'), JSON.stringify({ licenseKey: 'header.payload.signature' }));
-      process.env.O8_PROXY_URL = 'https://telemetry.example.test';
-      fetchSpy.mockResolvedValue(Response.json({ ok: true }));
-      rmSync(join(dataDir, 'usage-analytics'), { recursive: true, force: true });
-      await updateOperatorDefaults({
-        productTelemetryEnabled: true, crashReportsEnabled: false, telemetryConsentAnswered: true,
-      });
-      await mergeOnce('on');
-      const telemetry = () => fetchSpy.mock.calls.filter(([input]) => String(input).endsWith('/v1/telemetry'));
-      const payloads = () => telemetry().map(([, init]) => JSON.parse(String(init?.body)));
-      expect(payloads()).toContainEqual({ event: 'merge.first_completed' });
-      expect(payloads()).toContainEqual({ event: 'merge.approved', props: { runtime: 'codex', pushed: true } });
-      expect(existsSync(join(dataDir, 'usage-analytics', 'merge.first_completed'))).toBe(true);
-      await mergeOnce('repeat');
-      expect(payloads().filter((payload) => payload.event === 'merge.first_completed')).toHaveLength(1);
-      await updateOperatorDefaults({ productTelemetryEnabled: false });
-      fetchSpy.mockClear();
-      await mergeOnce('off');
-      expect(telemetry()).toHaveLength(0);
-    } finally {
-      try {
-        await updateOperatorDefaults({ productTelemetryEnabled: false });
-      } finally {
-        if (previousProxyUrl === undefined) delete process.env.O8_PROXY_URL;
-        else process.env.O8_PROXY_URL = previousProxyUrl;
-        fetchSpy.mockRestore();
-      }
-    }
   }, 30_000);
 });
 

@@ -18,7 +18,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async original => ({
   ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(), assertRuntimeDispatchable: async () => {},
 }));
 vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: async () => {} }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: () => {} }));
 
 let server: Awaited<ReturnType<typeof startParityReference>>;
 let origin: string;

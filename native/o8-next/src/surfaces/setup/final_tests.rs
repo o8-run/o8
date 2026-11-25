@@ -17,7 +17,7 @@ fn runtime_model_matrix(cx: &mut TestAppContext, backend: &str, saved: bool, api
         let _: Value = fixture.client.get("/api/panel/operator-defaults", &[("include", "setup"), ("refresh", "runtime")]).unwrap();
     }
     let initial: Value = fixture.client.get("/api/panel/operator-defaults", &[("include", "values")]).unwrap();
-    let mut update = json!({"orchestratorBackend":backend,"workerRuntimes":["codex"],"defaultDispatchRuntime":"codex","telemetryConsentAnswered":true,"productTelemetryEnabled":false,"crashReportsEnabled":false});
+    let mut update = json!({"orchestratorBackend":backend,"workerRuntimes":["codex"],"defaultDispatchRuntime":"codex"});
     if saved && backend == "claude" {
         fixture.client.setup_request("POST", "/api/panel/operator-defaults", &json!({"orchestratorBackend":"claude", "workerRuntimes":["claude-code"], "defaultDispatchRuntime":"claude-code"})).unwrap();
         let own: Value = fixture.client.get("/api/panel/operator-defaults", &[("include", "setup")]).unwrap();

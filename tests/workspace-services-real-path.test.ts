@@ -57,7 +57,7 @@ beforeAll(async () => {
   process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
   process.env.SERVICE_TEST_TOKEN = 'fixture-only-secret';
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001,
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001, workspaceManifestPolicy: 'auto' });
 });
 

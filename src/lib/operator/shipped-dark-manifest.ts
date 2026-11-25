@@ -112,21 +112,6 @@ export const SHIPPED_DARK_FLAG_MANIFEST: Readonly<
     lifecycle: 'deliberate-default-off',
     rationale: 'Opt-in buy-in document generated after merge; off unless the operator wants the external artifact.',
   },
-  productTelemetryEnabled: {
-    landedRelease: '0.1.681',
-    lifecycle: 'promoted',
-    rationale: 'Usage analytics default on after first-run disclosure; explicit opt-outs remain off.',
-  },
-  telemetryOptIn: {
-    landedRelease: '0.1.681',
-    lifecycle: 'deliberate-default-off',
-    rationale: 'Privacy consent: crash logs stay local until the operator opts into upload.',
-  },
-  crashReportsEnabled: {
-    landedRelease: '0.1.681',
-    lifecycle: 'deliberate-default-off',
-    rationale: 'Privacy consent: scrubbed crash sharing only transmits after an explicit opt-in.',
-  },
 });
 
 export function isShippedDarkLifecycle(value: unknown): value is ShippedDarkLifecycle {

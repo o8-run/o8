@@ -239,7 +239,6 @@ function persistedRows(setup: ReturnType<typeof setupPacket>, packetId: string):
 }
 
 beforeAll(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
   fixture = await startJudgmentEndpointFixture();
   setReportClaimCheckTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 2_000, maxAttempts: 1 });
   writeFileSync(judgmentKeyPath(), `${KEY}\n`);

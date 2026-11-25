@@ -56,7 +56,7 @@ if(args[0]==='app-server'){
 }
 `, { mode: 0o700 });
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveFloorGb: 0.001, storageReserveRatio: 0.0001 });
+  await updateOperatorDefaults({ storageReserveFloorGb: 0.001, storageReserveRatio: 0.0001 });
 });
 beforeEach(() => {
   vi.stubEnv('CODEX_HOME', account);

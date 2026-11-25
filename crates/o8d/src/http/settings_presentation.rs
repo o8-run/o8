@@ -57,9 +57,6 @@ fn layer(table: &Table, global: bool) -> Result<Values, Failure> {
                 ("models", "cross_house_worker_fallback") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("orchestrator", "codex_app_threads") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("review", "buyin_doc_enabled") => { value.as_bool().ok_or(Failure::Invalid)?; }
-                ("telemetry", "consent_answered") => { value.as_bool().ok_or(Failure::Invalid)?; }
-                ("telemetry", "crash_log_opt_in") => { value.as_bool().ok_or(Failure::Invalid)?; }
-                ("telemetry", "sentry_enabled") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("git", "commit_attribution_enabled") => { value.as_bool().ok_or(Failure::Invalid)?; }
                 ("git", "worktree_max_count") => { bounded_number(value, 0.0, 1000.0, true, false)?; }
                 ("git", "worktree_max_total_gb") => { bounded_number(value, 0.0, 10000.0, false, false)?; }
@@ -70,6 +67,8 @@ fn layer(table: &Table, global: bool) -> Result<Values, Failure> {
                 ("local_models", "chat_model") => { value.as_str().ok_or(Failure::Invalid)?; }
                 ("text_generation", "title_model") => { value.as_str().ok_or(Failure::Invalid)?; }
                 ("editor", "command") => { value.as_str().ok_or(Failure::Invalid)?; }
+                // Removed settings that older files may still carry; the server ignores them.
+                ("telemetry", _) => {}
                 _ => return Err(Failure::Unknown),
             }
         }

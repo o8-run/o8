@@ -297,7 +297,6 @@ async function runStoppedInterleaving(packetId: string, retries: number, beforeR
 beforeAll(async () => {
   // Keep the storage governor's reserve out of the way; the merge path is what is under test.
   await updateOperatorDefaults({
-    productTelemetryEnabled: false,
     storageReserveRatio: 0.0001,
     storageReserveFloorGb: 0.001,
   });

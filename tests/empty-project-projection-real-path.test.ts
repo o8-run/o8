@@ -15,7 +15,6 @@ vi.mock('@/lib/runtimes/shared/auth-detect', async (original) => ({
   ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(),
   assertRuntimeDispatchable: vi.fn(async () => undefined),
 }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 // The effort check reads the model catalog from the installed Codex CLI, which
 // CI does not have. The requested and default worker models advertise the effort.
 vi.mock('@/lib/codex/service-tier-catalogue', async (original) => {

@@ -44,6 +44,5 @@ Module._load = function (request, parent, isMain) {
     } });
   }
   if (/\/orchestrator\/capacity-snapshots(?:\.ts)?$/.test(request)) return { capturePacketCapacitySnapshot: async () => {} };
-  if (/\/analytics\/server(?:\.ts)?$/.test(request)) return { emitProductEvent: () => {} };
   return load.call(this, request, parent, isMain);
 };

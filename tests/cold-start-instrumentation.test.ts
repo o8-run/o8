@@ -22,12 +22,6 @@ vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: vi.fn() }))
 vi.mock('@/lib/telemetry/crash-capture', () => ({
   installProcessCrashCapture: vi.fn(),
 }));
-vi.mock('@/lib/telemetry/uploader', () => ({
-  startTelemetryUploadLoop: vi.fn(),
-}));
-vi.mock('@/lib/telemetry/sentry-node', () => ({
-  initSentryNode: vi.fn(),
-}));
 vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
   repairComposerPreamblePollution: vi.fn(),
   repairFlippedOrchestratorTranscripts: vi.fn(),

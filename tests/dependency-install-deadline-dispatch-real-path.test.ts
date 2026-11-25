@@ -18,7 +18,6 @@ vi.mock('@/lib/workspace/dependency-manager-executable', async original => {
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: async () => undefined }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: async () => ({ ready: true }) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: async () => undefined }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: async () => false }));
 vi.mock('@/lib/worktree/storage-telemetry', async (original) => ({
   ...await original<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: async () => ({ accountingStatus: 'observed', probePath: '/',
@@ -76,7 +75,7 @@ beforeAll(async () => {
   chmodSync(join(root, 'bin/npm'), 0o755);
   vi.stubGlobal('fetch', async () => Response.json({ ok: true }));
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
 }, 0);
 afterAll(async () => {
   const { closeDb } = await import('@/lib/db');

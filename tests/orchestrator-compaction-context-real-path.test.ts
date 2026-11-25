@@ -105,7 +105,7 @@ const nativeFetch = globalThis.fetch;
 
 beforeAll(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  await updateOperatorDefaults({ inAppOrchestratorEnabled: true, judgmentProvider: 'typesafe', productTelemetryEnabled: false });
+  await updateOperatorDefaults({ inAppOrchestratorEnabled: true, judgmentProvider: 'typesafe' });
   fixture = await startJudgmentEndpointFixture();
   writeFileSync(judgmentKeyPath(), 'synthetic-compaction-key');
   chmodSync(judgmentKeyPath(), 0o600);

@@ -235,7 +235,6 @@ describe.sequential('workspace manifest lifecycle through packet launch', () => 
     process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
     const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
     await updateOperatorDefaults({
-      productTelemetryEnabled: false,
       storageReserveRatio: 0.0001,
       storageReserveFloorGb: 0.001,
       workspaceManifestPolicy: 'auto',

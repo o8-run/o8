@@ -134,9 +134,6 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', async (importOriginal) => {
   };
 });
 
-vi.mock('@/lib/analytics/server', () => ({
-  emitProductEvent: vi.fn(async () => undefined),
-}));
 
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => undefined),

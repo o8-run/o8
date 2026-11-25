@@ -121,13 +121,12 @@ fn onboarding_repos_clone_from_github_opens_the_project(cx: &mut TestAppContext)
         .find(|path| path.ends_with("/Developer/fixture-app"))
         .expect("the clone is registered from the projects folder");
     assert_eq!(error(&shell, cx), None);
-    assert_eq!(page(&shell, cx), Some("privacy"));
-    let project = shell
-        .read_with(cx, |s, _| s.state.onboarding.clone())
-        .unwrap()
-        .project
-        .unwrap();
-    assert_eq!(project["localPath"], cloned.as_str());
+    // With tools ready the cloned project opens straight away.
+    assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.state.selected.clone()),
+        Some(cloned.clone())
+    );
 }
 
 #[gpui::test]

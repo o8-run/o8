@@ -105,7 +105,7 @@ fn onboarding_registered_workspace_without_sessions_still_starts_setup(cx: &mut 
 }
 
 #[gpui::test]
-fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
+fn onboarding_project_tools_and_workspace(cx: &mut TestAppContext) {
     let fixture = Fixture::start_mode(false, "--onboarding --transcript");
     let start = Instant::now();
     let (shell, mut visual) = open(
@@ -152,28 +152,6 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
     click(cx, "setup-customize");
     click(cx, "setup-worker-claude-code");
     click(cx, "setup-use");
-    assert!(cx.debug_bounds("setup-privacy").is_some());
-    // As on the desktop, saving waits for a crash-report choice, and the
-    // usage analytics choice is saved as soon as it changes.
-    click(cx, "setup-consent");
-    assert!(
-        cx.debug_bounds("setup-privacy").is_some(),
-        "no crash choice yet"
-    );
-    click(cx, "setup-telemetry");
-    let usage: Value = fixture
-        .client
-        .get("/api/panel/operator-defaults", &[("include", "values")])
-        .unwrap();
-    assert_eq!(usage["values"]["productTelemetryEnabled"], false);
-    assert_ne!(usage["values"]["telemetryConsentAnswered"], true);
-    scroll_privacy(cx);
-    assert!(cx.debug_bounds("setup-crash-sample-payload").is_none());
-    click(cx, "setup-crash-sample");
-    assert!(cx.debug_bounds("setup-crash-sample-payload").is_some());
-    scroll_privacy(cx);
-    click(cx, "setup-crashes-share");
-    click(cx, "setup-consent");
     cx.run_until_parked();
     draw(cx);
     let saved: Value = fixture
@@ -185,9 +163,6 @@ fn onboarding_project_tools_privacy_and_workspace(cx: &mut TestAppContext) {
         saved["values"]["workerRuntimes"],
         json!(["codex", "claude-code"])
     );
-    assert_eq!(saved["values"]["productTelemetryEnabled"], false);
-    assert_eq!(saved["values"]["crashReportsEnabled"], true);
-    assert_eq!(saved["values"]["telemetryConsentAnswered"], true);
     let config: Value = fixture.client.get("/api/setup/config", &[]).unwrap();
     assert_eq!(config["setupComplete"], true);
     assert!(
@@ -277,9 +252,6 @@ fn onboarding_opencode_keeps_selected_model_for_first_send(cx: &mut TestAppConte
     refresh_tools(cx);
     use_only_opencode(cx);
     click(cx, "setup-use");
-    scroll_privacy(cx);
-    click(cx, "setup-crashes-off");
-    click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     let session = shell.read_with(cx, |s, _| {
         let Some(Tab::Session(id)) = s.active() else {
@@ -394,8 +366,6 @@ fn onboarding_operator_auth_error_retry(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("setup-project-0").is_none());
 }
 
-/// Scroll the privacy choices to their end, where the crash-report choice
-/// sits, as a person would before choosing.
 /// Check the tools again from Add coding tools, then return to the choices.
 /// With no ready tool the step already shows tool setup, as on the desktop.
 pub(super) fn refresh_tools(cx: &mut VisualTestContext) {
@@ -437,20 +407,6 @@ pub(super) fn use_only_opencode(cx: &mut VisualTestContext) {
     click(cx, "setup-worker-opencode");
     click(cx, "setup-worker-codex");
     click(cx, "setup-customize");
-}
-
-pub(super) fn scroll_privacy(cx: &mut VisualTestContext) {
-    draw(cx);
-    let bounds = cx
-        .debug_bounds("setup-privacy-scroll")
-        .expect("privacy choices");
-    cx.simulate_event(gpui::ScrollWheelEvent {
-        position: bounds.center(),
-        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(-5000.))),
-        ..Default::default()
-    });
-    cx.run_until_parked();
-    draw(cx);
 }
 
 /// Tools step controls outside its scrolling area, always in view.

@@ -78,9 +78,6 @@ const envKeys = [
   'O8_SKIP_PRELAUNCH_TYPECHECK',
   'O8_LOCAL_INFERENCE_BASE_URL',
   'O8_LOCAL_CHAT_MODEL',
-  'O8_TELEMETRY_OPT_IN',
-  'O8_TELEMETRY_INGEST_URL',
-  'O8_CRASH_REPORTS',
   'O8_EGRESS_REPORT_PATH',
   'O8_EGRESS_ALLOWED_ENDPOINTS',
   'O8_EGRESS_BLOCK_UNEXPECTED',
@@ -101,9 +98,6 @@ process.env.O8_CRASH_SURVIVABLE_WORKERS = '1';
 delete process.env.O8_PACKAGED_APP;
 process.env.O8_APFS_DEPENDENCY_IMAGES = '0';
 process.env.O8_SKIP_PRELAUNCH_TYPECHECK = '1';
-process.env.O8_TELEMETRY_OPT_IN = '0';
-process.env.O8_CRASH_REPORTS = '0';
-delete process.env.O8_TELEMETRY_INGEST_URL;
 process.env.O8_EGRESS_REPORT_PATH = reportPath;
 process.env.O8_EGRESS_BLOCK_UNEXPECTED = '1';
 // Worker children inherit only allowlisted names (#4585): the egress preload and the fake
@@ -152,7 +146,6 @@ const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator
 const { addRepo } = await import('@/lib/repos/registry');
 const { callOpenRouter } = await import('@/lib/cortex/qa/llm/openrouter-adapter');
 const { resetLocalInferenceProbeCacheForTests } = await import('@/lib/cortex/qa/llm/inference-route');
-const { runTelemetryUpload } = await import('@/lib/telemetry/uploader');
 
 let provider: Server | null = null;
 let providerEndpoint = '';
@@ -362,15 +355,6 @@ describe.skipIf(process.platform === 'win32')('#2228 local provider egress asser
     } finally {
       if (priorSurface === undefined) delete process.env.O8_EGRESS_SURFACE;
       else process.env.O8_EGRESS_SURFACE = priorSurface;
-    }
-
-    const telemetrySurface = process.env.O8_EGRESS_SURFACE;
-    process.env.O8_EGRESS_SURFACE = 'telemetry';
-    try {
-      expect(await runTelemetryUpload()).toBe('disabled');
-    } finally {
-      if (telemetrySurface === undefined) delete process.env.O8_EGRESS_SURFACE;
-      else process.env.O8_EGRESS_SURFACE = telemetrySurface;
     }
 
     const reviewRequested = await dispatch({ verb: 'request_review', laneId: delegated.laneId, actor: 'system' });

@@ -48,7 +48,7 @@ else emit('run.terminal.completed', {terminal:'completed',text:JSON.stringify(re
 `);
   writeFileSync(join(root, 'muse'), `#!/bin/sh\nexec '${process.execPath.replace(/'/g, "'\\''")}' '${join(root, 'fixture.cjs')}' "$@"\n`); chmodSync(join(root, 'muse'), 0o700);
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
   await (await import('@/lib/repos/registry')).addRepo(repo);
   await import('@/lib/runtime/actions');
 }, 120_000);

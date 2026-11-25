@@ -102,19 +102,18 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
         "setup-agent-codex",
         "setup-customize",
         "setup-worker-claude-code",
-        "setup-use",
     ] {
         std::thread::sleep(std::time::Duration::from_millis(80));
         click(cx, selector);
     }
-    assert_eq!(page(&shell, cx), Some("privacy"));
-    // As on the desktop, project, tool and Use choices tick; only the
-    // optional voice and iPhone offers chime advance.
-    assert_eq!(sound::played(), [Cue::Tick; 4]);
+    assert_eq!(page(&shell, cx), Some("tools"));
+    // As on the desktop, project and tool choices tick; only the optional
+    // voice and iPhone offers chime advance.
+    assert_eq!(sound::played(), [Cue::Tick; 3]);
     let (parts, current) = rail(&shell, cx);
-    assert_eq!(current, 2);
+    assert_eq!(current, 1);
     assert_eq!(parts[1], ("Agent", "Ready".to_owned(), true));
-    assert_eq!(parts[2].1, "Privacy choices");
+    assert_eq!(parts[2].1, "Next");
     // The cue files are written beside the window's saved state.
     let tick = fixture.root.join("sounds").join("onboarding-tick.wav");
     for _ in 0..200 {
@@ -127,8 +126,7 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
 
     // A relaunch with that saved state opens setup where it stopped.
     let state = shell.read_with(cx, |s, _| s.state.clone());
-    assert_eq!(state.onboarding.as_ref().unwrap().step, "privacy");
-    assert!(state.onboarding.as_ref().unwrap().tools_configured);
+    assert_eq!(state.onboarding.as_ref().unwrap().step, "dispatch");
     let (again, mut relaunched) = open(
         fixture.client.clone(),
         fixture.root.join("frame-again.json"),
@@ -138,14 +136,12 @@ fn onboarding_frame_resumes_where_it_stopped_and_cues_only_when_on(cx: &mut Test
     let cx = &mut relaunched;
     cx.run_until_parked();
     draw(cx);
-    assert_eq!(page(&again, cx), Some("privacy"));
+    assert_eq!(page(&again, cx), Some("tools"));
     assert_eq!(rail(&again, cx).0[0], ("Project", project, true));
-    scroll_privacy(cx);
-    click(cx, "setup-crashes-off");
     sound::played();
     std::thread::sleep(std::time::Duration::from_millis(80));
     // Finishing ticks, plays complete and clears the saved progress.
-    click(cx, "setup-consent");
+    click(cx, "setup-use");
     assert!(again.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     assert_eq!(sound::played(), [Cue::Tick, Cue::Complete]);
     assert!(again.read_with(cx, |s, _| s.state.onboarding.is_none()));
