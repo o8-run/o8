@@ -38,7 +38,6 @@
   "/api/cortex/proposals",
   "/api/cortex/recent-outcomes",
   "/api/cortex/reingest",
-  "/api/cortex/sources",
   "/api/devices/agent",
   "/api/github/webhook",
   "/api/lanes",

@@ -854,8 +854,6 @@
     "shared:entry:src/lib/cortex/directive-merges.ts": 2187,
     "shared:entry:src/lib/cortex/forget.ts": 7103,
     "shared:entry:src/lib/cortex/indexer/doc-watcher.ts": 9257,
-    "shared:entry:src/lib/cortex/knowledge/index.ts": 3194,
-    "shared:entry:src/lib/cortex/knowledge/sources-route.ts": 5094,
     "shared:entry:src/lib/cortex/qa/ask.ts": 3054,
     "shared:entry:src/lib/cortex/qa/llm/byok-keys.ts": 688,
     "shared:entry:src/lib/cortex/qa/llm/inference-route.ts": 1840,

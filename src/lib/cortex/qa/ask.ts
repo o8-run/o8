@@ -1,4 +1,3 @@
-import { assertKnowledgeAnswerCurrent } from '@/lib/cortex/knowledge/answer-validity';
 /**
  * Cortex Q&A public API (epic #915 sub-2).
  *
@@ -409,9 +408,7 @@ async function runAskCortexUncached(
   let answer = '';
   const citations: Citation[] = [];
 
-  const assertKnowledgeCurrent = () => assertKnowledgeAnswerCurrent(topRows, memoryRevision);
   const emit: SseEmit = (name, payload) => {
-    assertKnowledgeCurrent();
     if (name === 'token') {
       answer += (payload as { text: string }).text ?? '';
     } else if (name === 'citation') {
@@ -444,8 +441,7 @@ async function runAskCortexUncached(
     }
   } catch (error) {
     if (error instanceof ManagedBrainUnavailableError) {
-      assertKnowledgeCurrent();
-      throw new ManagedBrainUnavailableError(
+        throw new ManagedBrainUnavailableError(
         topRows.map(row => ({ ...row.citation, title: rowDisplayTitle(row) })),
         topRows.length,
       );
@@ -453,7 +449,6 @@ async function runAskCortexUncached(
     throw error;
   }
 
-  assertKnowledgeCurrent();
   const result: AskCortexResult = {
     answer: answer.trim(),
     citations,
@@ -587,9 +582,7 @@ export async function runAskPipeline(
   let cachedAnswer = '';
   const cachedCitations: Citation[] = [];
 
-  const assertKnowledgeCurrent = () => assertKnowledgeAnswerCurrent(topRows, memoryRevision);
   const trackingEmit: SseEmit = (name, payload) => {
-    assertKnowledgeCurrent();
     if (name === 'token') {
       cachedAnswer += (payload as { text: string }).text ?? '';
     } else if (name === 'citation') {
@@ -621,7 +614,6 @@ export async function runAskPipeline(
     await composeClassB(question, repoPath, topRows, trackingEmit, options);
   }
 
-  assertKnowledgeCurrent();
   // Store in cache for follow-up identical questions.
   if (cachedAnswer.trim() && memoryRevision === readMemoryRevision()) {
     setCache(key, {

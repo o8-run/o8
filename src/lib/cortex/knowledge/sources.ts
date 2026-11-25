@@ -6,11 +6,11 @@ import { loadOperatorDefaultsFilesSync } from '@/lib/settings/operator-defaults-
 import { parseKnowledgeSources, type KnowledgeSource } from '@/lib/operator/knowledge-source-defaults';
 import { gitWriteRoots } from './git-write-roots';
 
-export function configuredKnowledgeSources(): KnowledgeSource[] {
+function configuredKnowledgeSources(): KnowledgeSource[] {
   const values = loadOperatorDefaultsFilesSync(raw => JSON.parse(raw));
   try { return parseKnowledgeSources(values.knowledgeSources ?? []); } catch { return []; }
 }
-export function containsPath(root: string, candidate: string) {
+function containsPath(root: string, candidate: string) {
   const rel = path.relative(root, candidate);
   return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
 }

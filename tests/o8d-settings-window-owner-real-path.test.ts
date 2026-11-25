@@ -9,7 +9,6 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { startParityReference } from './fixtures/ws-parity-server';
 
 const fixture = vi.hoisted(() => ({ spawn: vi.fn(), auth: vi.fn(), invalidate: vi.fn(), entitlement: vi.fn() }));
-vi.mock('@/lib/cortex/knowledge/index', () => { throw new Error('Next loaded the knowledge index'); });
 vi.mock('@/lib/runtimes/shared/auth-detect', async original => ({ ...await original<typeof import('@/lib/runtimes/shared/auth-detect')>(), getRuntimeAuthSnapshot: fixture.auth, invalidateRuntimeAuthCache: fixture.invalidate }));
 vi.mock('@/lib/entitlement/store', async original => { const originalStore = await original<typeof import('@/lib/entitlement/store')>(); fixture.entitlement.mockImplementation(originalStore.getEntitlementSync); return { ...originalStore, getEntitlementSync: fixture.entitlement }; });
 vi.mock('@/lib/providers/child-process', async original => ({ ...await original<typeof import('@/lib/providers/child-process')>(), spawn: fixture.spawn }));
@@ -108,7 +107,7 @@ it('keeps structured and TOML window changes and rollback in Next with native tr
   expect(loop.status).toBe(503);
 });
 
-it('keeps knowledge state in WS and reads shared receipts, entitlements and runtime refresh there', async () => {
+it('saves knowledge sources and reads shared receipts, entitlements and runtime refresh in WS', async () => {
   const { recordRoleRoutingReceipt } = await import('@/lib/operator/role-routing-ledger');
   const receipt = recordRoleRoutingReceipt({ role: 'brain', requested: { backend: null, runtime: null, model: null, effort: null, label: 'Fixture' },
     sources: { backend: 'default', runtime: 'default', model: 'default', effort: 'default' }, reason: 'Window owner fixture', status: 'selected' });
@@ -118,8 +117,7 @@ it('keeps knowledge state in WS and reads shared receipts, entitlements and runt
     const source = { id: crypto.randomUUID(), path: folder, name: 'Fixture notes', include: ['**/*.md'], exclude: [] };
     const saved = await call({ experimentalNext: false, knowledgeSources: [source], settingsTomlRevision: before.settingsToml.revision });
     expect(saved.status, await saved.clone().text()).toBe(200);
-    const sources = await fetch(`${origin}/api/cortex/sources`, { headers: { authorization: `Bearer ${server.token}` } });
-    expect((await sources.json()).sources).toContainEqual(expect.objectContaining({ id: source.id }));
+    expect((await (await call()).json()).values.knowledgeSources).toContainEqual(expect.objectContaining({ id: source.id }));
     fixture.auth.mockClear(); fixture.invalidate.mockClear(); fixture.entitlement.mockClear();
     writeFileSync(join(directory, 'entitlement.json'), JSON.stringify({ plan: 'free' }));
     const free = await (await call(undefined, '/api/panel/operator-defaults?refresh=runtime')).json();
@@ -136,47 +134,10 @@ it('keeps knowledge state in WS and reads shared receipts, entitlements and runt
   } finally { rmdirSync(folder); }
 });
 
-it('orders concurrent source writes behind a Next window save without blocking its WS reconciliation', async () => {
-  const folders = [0, 1].map(() => realpathSync(mkdtempSync(join(tmpdir(), 'o8-window-concurrent-notes-'))));
-  const before = await (await call()).json();
-  const source = { id: crypto.randomUUID(), path: folders[0], name: 'First', include: ['**/*.md'], exclude: [] };
-  const originalFetch = globalThis.fetch;
-  let entered = false;
-  let release!: () => void;
-  const held = new Promise<void>(resolve => { release = resolve; });
-  vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (typeof input === 'string' && input.endsWith('/api/cortex/sources') && typeof init?.body === 'string'
-      && JSON.parse(init.body).action === 'reconcile') { entered = true; await held; }
-    return originalFetch(input, init);
-  });
-  try {
-    const saved = call({ experimentalNext: false, knowledgeSources: [source], settingsTomlRevision: before.settingsToml.revision });
-    await expect.poll(() => entered).toBe(true);
-    let addSettled = false;
-    const added = originalFetch(`${origin}/api/cortex/sources`, { method: 'POST',
-      headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'add', path: folders[1] }), signal: AbortSignal.timeout(5_000),
-    }).then(response => { addSettled = true; return response; });
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(addSettled).toBe(false);
-    release();
-    const responses = await Promise.all([saved, added]);
-    expect(responses.map(response => response.status)).toEqual([200, 200]);
-    const sources = await (await originalFetch(`${origin}/api/cortex/sources`, { headers: { authorization: `Bearer ${server.token}` } })).json();
-    expect(sources.sources.map((entry: { path: string }) => entry.path).sort()).toEqual([...folders].sort());
-  } finally { release(); vi.unstubAllGlobals(); folders.forEach(folder => rmdirSync(folder)); }
-});
-
-it('serves the plain settings save from Next and keeps it when index reconciliation fails', async () => {
+it('serves the plain settings save from Next', async () => {
   const dummy = join(directory, 'stub-window');
   vi.stubEnv('O8_NEXT_BIN', dummy);
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'o8-window-plain-notes-')));
-  const originalFetch = globalThis.fetch;
-  vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (typeof input === 'string' && input.endsWith('/api/cortex/sources') && typeof init?.body === 'string'
-      && JSON.parse(init.body).action === 'reconcile') return new Response('{}', { status: 503 });
-    return originalFetch(input, init);
-  });
   try {
     const spawned = fixture.spawn.mock.calls.length;
     const before = await (await call()).json();
@@ -198,7 +159,7 @@ it('serves the plain settings save from Next and keeps it when index reconciliat
     expect(disabled.status).toBe(200);
     expect(runtime.__o8NativeWindow?.child).toBeUndefined();
     expect(existsSync(join(directory, 'ws-window-actions'))).toBe(false);
-  } finally { vi.unstubAllGlobals(); rmdirSync(folder); }
+  } finally { rmdirSync(folder); }
 });
 
 it('answers native settings reads when the window owner is not running', async () => {

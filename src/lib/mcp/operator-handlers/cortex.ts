@@ -1,4 +1,3 @@
-import { KNOWLEDGE_SOURCE_TOOLS, handleKnowledgeSources } from './knowledge-sources';
 import { O8ApiError, McpInputError } from '@/lib/mcp/api-error';
 import {
   apiFetch,
@@ -14,7 +13,6 @@ const OBSERVATION_KINDS = new Set(['regression', 'pattern', 'gotcha', 'preferenc
 const OBSERVATION_SCOPES = new Set(['packet', 'repo', 'global']);
 
 export const CORTEX_TOOLS: McpTool[] = [
-  ...KNOWLEDGE_SOURCE_TOOLS,
   {
     name: 'cortex_propose_observation',
     description: 'Propose a worker observation for the orchestrator proposal queue. The worker does not write memory directly; the orchestrator reviews and promotes the useful observations.',
@@ -170,4 +168,4 @@ export async function handleProposeObservation(args: Record<string, unknown>): P
   }
 }
 
-export const CORTEX_HANDLERS = { cortex_ask: handleAsk, cortex_propose_observation: handleProposeObservation, cortex_knowledge_sources: handleKnowledgeSources };
+export const CORTEX_HANDLERS = { cortex_ask: handleAsk, cortex_propose_observation: handleProposeObservation };

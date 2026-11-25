@@ -1,4 +1,3 @@
-import { ensureKnowledgeSourceWatcher, stopKnowledgeSourceWatcher } from '@/lib/cortex/knowledge';
 import { chunkMarkdown } from './markdown-chunks';
 /**
  * Doc-watcher — incremental re-distillation on file change (#964).
@@ -452,7 +451,5 @@ function startRepoDocWatcher(): () => void {
 }
 
 export function startDocWatcher(): () => void {
-  ensureKnowledgeSourceWatcher();
-  const stopDocs = startRepoDocWatcher();
-  return () => { stopKnowledgeSourceWatcher(); stopDocs(); };
+  return startRepoDocWatcher();
 }

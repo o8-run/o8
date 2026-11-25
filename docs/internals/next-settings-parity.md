@@ -119,7 +119,6 @@ the existing operator-defaults route unless another owner is named.
 | Indexing / Repositories | Every repository index status; Refresh docs; Retry | missing | present: repository status, per-repository refresh receipt, retry after error |
 | Indexing / Engineering Brain | Saved instructions; Recorded task outcomes; Knowledge storage | missing | partial: instruction/outcome totals present; knowledge storage details remain |
 | Indexing / Conversation history | Choose ZIP/JSON conversation export; Import conversation history; local profile/topic/unfinished-project summary | missing | skipped: account-export/profile ingestion review |
-| Indexing / Knowledge sources | Folder; include patterns; exclude patterns; add/refresh/remove source and facts | missing | missing: source ingestion/redaction behavior skipped |
 | MCP / Clients | Claude Desktop, Claude Code, Hermes Agent, OpenClaw status; Install/Update/Remove | missing | skipped: writes authenticated client configuration |
 | MCP / External servers | Add command/URL/JSON; candidate edit/add; manual name/transport/command/args/env/URL; enable; worker/Symon injection; test; remove | missing | skipped: arbitrary environment, credentials and network endpoints |
 | MCP / ChatGPT task review | Held task; exact requirements; approve/deny review | missing | skipped: authorization |
