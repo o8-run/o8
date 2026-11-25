@@ -4079,6 +4079,13 @@
       ]
     },
     {
+      "path": "tests/linux-red-baseline.test.ts",
+      "reasons": [
+        "child-process",
+        "git-cli"
+      ]
+    },
+    {
       "path": "tests/linux-worker-sandbox-real-path.test.ts",
       "reasons": [
         "child-process",

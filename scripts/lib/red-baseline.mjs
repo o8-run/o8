@@ -1,19 +1,29 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 
 /**
  * Reads the exempted red-file baseline for the integration gate (#2391).
  * Returns a Set of manifest paths, or null when the file is absent or
- * unreadable, which keeps the gate strict.
+ * unreadable, which keeps the gate strict. With `ref`, the list is read as
+ * committed at that commit instead of from the working tree.
  */
-export function loadRedBaseline(path) {
-  if (!path || !existsSync(path)) return null;
+export function loadRedBaseline(path, ref, cwd = process.cwd()) {
+  if (!path) return null;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    const text = ref ? committedText(ref, path, cwd) : existsSync(path) ? readFileSync(path, 'utf8') : null;
+    if (text === null) return null;
+    const parsed = JSON.parse(text);
     if (!Array.isArray(parsed?.files)) return null;
     return new Set(parsed.files.map((entry) => entry?.path).filter((entry) => typeof entry === 'string'));
   } catch {
     return null;
   }
+}
+
+/** The list as committed at `ref`, so a change under test cannot add itself to it. */
+function committedText(ref, path, cwd) {
+  const result = spawnSync('git', ['show', `${ref}:${path}`], { cwd, encoding: 'utf8' });
+  return result.status === 0 ? result.stdout : null;
 }
 
 /**
