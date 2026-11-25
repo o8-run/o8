@@ -375,7 +375,12 @@ jobs:
       - if: needs.reuse.outputs.reuse != 'true' && steps.select.outputs.count != '0'
         run: npm run test:integration -- ${{ steps.select.outputs.files }}
         env:
-          O8_INTEGRATION_BASELINE: tests/integration-linux-baseline.json
+          # A touched file already red on unmodified main (#6761) still runs and
+          # reports "baseline red" or "now green" without blocking. The list is
+          # read from the base commit, so a change cannot add itself to it. Any
+          # other red file fails the job.
+          O8_INTEGRATION_BASELINE: tests/integration-quarantine.json
+          O8_INTEGRATION_BASELINE_REF: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}
 
   # Main pushes and the weekly full suite use six contiguous slices of the
   # manifest file list (O8_INTEGRATION_SHARD=k/6).
@@ -430,8 +435,7 @@ jobs:
       - run: npm run test:integration
         env:
           O8_INTEGRATION_SHARD: ${{ matrix.shard }}/6
-          # Files red on unmodified main, each with its reason (#6761). The
-          # per-pull-request lane keeps the empty baseline above.
+          # Files red on unmodified main, each with its reason (#6761).
           O8_INTEGRATION_BASELINE: tests/integration-quarantine.json
 
   integration-weekly-report:

@@ -479,8 +479,10 @@ try {
 const failures = results.filter((result) => result.code !== 0 || result.signal);
 // O8_INTEGRATION_BASELINE names files already red on the CI runner (#2391).
 // They still run; their failures are reported but do not fail the gate.
+// O8_INTEGRATION_BASELINE_REF reads the list as committed at that commit (the
+// merge base), so a change cannot exempt a file by adding it to the list.
 const baselinePath = process.env.O8_INTEGRATION_BASELINE;
-const baseline = loadRedBaseline(baselinePath);
+const baseline = loadRedBaseline(baselinePath, process.env.O8_INTEGRATION_BASELINE_REF || undefined);
 if (baselinePath && !baseline) {
   console.error(`[integration-gate] baseline ${baselinePath} unavailable; every failure counts`);
 }

@@ -1,5 +1,5 @@
 {
-  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). Only the full-suite lane reads this list: a listed file still runs and its failure is reported, not gating. The per-pull-request lane does not read it. Remove a file when it passes; tracked in #6761.",
+  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). A listed file still runs and its failure is reported, not gating. The full-suite lane reads this file; the changed-files lane reads it as committed at the merge base, so a change cannot add itself. Remove a file when it passes; tracked in #6761.",
   "sourceRun": 45536677599,
   "issue": 6761,
   "count": 126,

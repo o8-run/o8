@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { classifyAgainstBaseline, loadRedBaseline } from '../scripts/lib/red-baseline.mjs';
@@ -35,6 +38,32 @@ describe('integration gate red baseline', () => {
     const outcome = classifyAgainstBaseline([{ file: 'tests/known-red-real-path.test.ts', failed: true }], missing);
     expect(outcome.newRed).toEqual(['tests/known-red-real-path.test.ts']);
     expect(loadRedBaseline(undefined)).toBeNull();
+  });
+
+  it('reads the list as committed at the base, so a change cannot exempt itself', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'o8-red-baseline-'));
+    try {
+      const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+      const list = (paths: string[]) => JSON.stringify({ files: paths.map((path) => ({ path })) });
+      git('init', '-q');
+      mkdirSync(join(repo, 'tests'));
+      writeFileSync(join(repo, 'tests/quarantine.json'), list(['tests/known-red-real-path.test.ts']));
+      git('add', '.');
+      git('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'base');
+      // The change under test adds its own broken file to the list.
+      writeFileSync(join(repo, 'tests/quarantine.json'), list(['tests/known-red-real-path.test.ts', 'tests/new-break-real-path.test.ts']));
+      const committed = loadRedBaseline('tests/quarantine.json', 'HEAD', repo);
+      expect([...(committed ?? [])]).toEqual(['tests/known-red-real-path.test.ts']);
+      const outcome = classifyAgainstBaseline([
+        { file: 'tests/known-red-real-path.test.ts', failed: true },
+        { file: 'tests/new-break-real-path.test.ts', failed: true },
+      ], committed);
+      expect(outcome.baselineRed).toEqual(['tests/known-red-real-path.test.ts']);
+      expect(outcome.newRed).toEqual(['tests/new-break-real-path.test.ts']);
+      expect(loadRedBaseline('tests/quarantine.json', 'no-such-ref', repo)).toBeNull();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it('loads the recorded Linux baseline, which lists only resource-owning files', async () => {
