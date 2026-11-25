@@ -32,8 +32,6 @@ import {
 import { repointRepoPathReferences } from '@/lib/repos/path-repoint';
 import { assertOrchestratorRepoPath } from '@/lib/lane/repo-preflight';
 import { isOrchestratorHomePath } from '@/lib/orchestrator/repo-path';
-import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
-import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
 import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
@@ -295,9 +293,6 @@ async function handlePOST(request: Request) {
         // GET rather than holding this POST (and the subsequent project link).
         const registered = await addRepo(body.localPath);
         const repo = { ...enrichRepoReadinessFromCache(registered), exists: true };
-        // Auto-scan skeleton for newly added repo + start change polling
-        triggerScan(repo.localPath);
-        startChangePolling(repo.localPath);
         return NextResponse.json({ repo }, { status: 201 });
       }
       case 'clone': {
@@ -309,8 +304,6 @@ async function handlePOST(request: Request) {
         try {
           const { localPath } = await cloneRepoToDefaultLocation(body.cloneUrl, 'name' in body ? body.name : undefined);
           const repo = await enrichRepoReadiness(await addRepo(localPath));
-          triggerScan(repo.localPath);
-          startChangePolling(repo.localPath);
           return NextResponse.json({ repo }, { status: 201 });
         } catch (error) {
           if (error instanceof RepoCloneError) {
@@ -323,8 +316,6 @@ async function handlePOST(request: Request) {
         try {
           const { localPath } = await createGitHubRepo('name' in body ? body.name : undefined, 'visibility' in body ? body.visibility : undefined);
           const repo = { ...enrichRepoReadinessFromCache(await addRepo(localPath)), exists: true };
-          triggerScan(repo.localPath);
-          startChangePolling(repo.localPath);
           return NextResponse.json({ repo }, { status: 201 });
         } catch (error) {
           if (error instanceof RepoCreateError) {
@@ -370,10 +361,6 @@ async function handlePOST(request: Request) {
           repointRepoPathReferences(previous.localPath, repo.localPath);
           invalidateRepoReadiness(previous.localPath, repo.localPath);
           invalidateAnswerCache();
-          clearSkeletonCache(previous.localPath);
-          stopChangePolling(previous.localPath);
-          triggerScan(repo.localPath);
-          startChangePolling(repo.localPath);
         }
         return NextResponse.json({ repo: await enrichRepoReadiness(repo) });
       }
@@ -385,8 +372,6 @@ async function handlePOST(request: Request) {
           body.id,
           'lastOpenedAt' in body ? body.lastOpenedAt ?? undefined : undefined,
         );
-        // Rescan skeleton if stale when repo is opened
-        triggerScanIfStale(repo.localPath);
         return NextResponse.json({ repo: await enrichRepoReadiness(repo) });
       }
       default:
@@ -441,8 +426,8 @@ export async function DELETE(request: Request) {
       }, { status: 409 });
     }
 
-    // Registry + SQLite links + lifecycle + terminal state + skeleton cache +
-    // polling all go through the shared removal flow (also used by project
+    // Registry + SQLite links + lifecycle + terminal state all go through
+    // the shared removal flow (also used by project
     // deletion). Ledger cleanup stays here.
     const removed = await removeRepoFromPool(body.id);
     if (toRemove?.localPath) {

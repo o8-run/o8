@@ -29,8 +29,8 @@ names, enum values, tool names, authority boundaries, and payer policy stable wh
 
 ## Size measurement
 
-No model tokenizer is installed for this purpose. Use the repository's existing approximation,
-`ceil(UTF-16 characters / 4)` from `src/lib/skeleton/renderer.ts`. It is not a provider token count.
+No model tokenizer is installed for this purpose. Use the approximation
+`ceil(UTF-16 characters / 4)`. It is not a provider token count.
 The source inventory counts literal fragments across branches and excludes dynamic substitutions;
 never sum those rows as a request size. Native source estimates also retain escaped characters.
 

@@ -7,7 +7,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { addRepo } from '@/lib/repos/registry';
 import { reconcileProjectsWithRegistry } from '@/lib/repos/projects';
-import { triggerScan, startChangePolling } from '@/lib/skeleton/autoscan';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 const execFileAsync = promisify(execFile);
@@ -141,8 +140,6 @@ async function ensureInitialCommit(repoPath: string, name?: string): Promise<boo
 
 async function registerRepo(repoPath: string): Promise<RegisteredBootstrapRepo> {
   const repo = await addRepo(repoPath);
-  triggerScan(repo.localPath);
-  startChangePolling(repo.localPath);
   const ledger = await reconcileProjectsWithRegistry();
   const project = ledger.projects.find((entry) => (
     entry.repoPaths.some((candidate) => path.resolve(candidate) === path.resolve(repo.localPath))

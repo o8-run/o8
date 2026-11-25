@@ -24,7 +24,7 @@ import { isSafeGitRef } from '@/lib/git/refs';
 import { resolveLaneAttributionBase } from '@/lib/lane/attribution-base';
 import { IMPLEMENTATION_NOTES_FILENAME } from '@/lib/orchestrator/packet-deviations';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
-import { getCachedFileLineCounts } from '@/lib/skeleton/store';
+import { lineCountsAt } from '@/lib/repo-files/lookup';
 import { checkUntrackedImports } from './check-untracked-imports';
 import { getRelocatedDeletionCredits } from './diff-relocation';
 import { hasScopePartitionToken } from './review-risk';
@@ -288,6 +288,8 @@ function checkScopePartitionHeuristics(addedLines: AddedDiffLine[]): MergeViolat
 // Security + integrity violations stay block-level regardless (those
 // catch genuine risks the orchestrator can't waive). See F25 / #1001.
 
+const MERGE_GATE_LINE_COUNT_TIMEOUT_MS = 5_000;
+
 async function checkDiffBudgets(
   cwd: string,
   baseBranch: string,
@@ -297,8 +299,8 @@ async function checkDiffBudgets(
   const numstat = await getDiffNumstat(cwd, baseBranch, repoPath);
   if (numstat.length === 0) return [];
 
-  // Budgets need scalar line counts, never the repository's symbol/import JSON.
-  const skeleton = new Map(getCachedFileLineCounts(repoPath).map((file) => [file.relativePath, file.lineCount]));
+  // Budgets use each changed file's line count on the base branch; new files have none.
+  const lineCounts = await lineCountsAt(repoPath, baseBranch, numstat.map(({ file }) => file), Date.now() + MERGE_GATE_LINE_COUNT_TIMEOUT_MS);
   let relocationCredits = new Map<string, number>();
   try {
     const { stdout } = await laneGit(cwd, repoPath, ['diff', '--unified=0', '--no-color', '--no-ext-diff', `${baseBranch}...HEAD`], {
@@ -311,7 +313,7 @@ async function checkDiffBudgets(
   const violations: MergeViolation[] = [];
 
   for (const { file, insertions, deletions } of numstat) {
-    const lineCount = skeleton.get(file);
+    const lineCount = lineCounts.get(file);
     if (!lineCount) continue; // New file — no budget applies
 
     const addBudget = Math.ceil(lineCount * PRESERVATION_ADD_BUDGET_RATIO);

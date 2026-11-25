@@ -369,7 +369,6 @@ device flow and every stateful panel route require the operator bearer.
 | POST | `/api/panel/repos/init` | Initialize a new git repo at the given path. |
 | GET | `/api/panel/search?q=...` | Cmd+K command palette server-side fan-out (#661). |
 | GET | `/api/panel/serve-image?path=...` | Serve image file from allowed roots (`$HOME` or `/tmp`). |
-| GET | `/api/panel/skeleton?workspace=...&search=...` | Workspace skeleton map + rendered text, or symbol search. |
 | GET | `/api/panel/status` | Stable status read for CLI / agents (allowlisted — read-only). |
 | GET | `/api/panel/supervisor-inbox?includeDismissed=1&scope=all&projectId=...` | Supervisor inbox items + summary. |
 | POST | `/api/panel/supervisor-inbox` | Dismiss / clear inbox items. |

@@ -47,22 +47,3 @@ it('loads the compiler only when Review analyzes imports and JSONC aliases', asy
   }));
   expect(compiler.loads).toBe(1);
 });
-
-it('loads the compiler on a skeleton scan and persists exact TS and TSX bodies', async () => {
-  const { scanRepo, getChunksForFile } = await import('@/lib/skeleton');
-  expect(compiler.loads).toBe(0);
-  const root = fixture();
-  const sources = {
-    'core.ts': 'export function compute(value: number): number {\n  const doubled = value * 2;\n  return doubled + 10;\n}\n',
-    'View.tsx': 'export function View({ title }: { title: string }) {\n  return <section><h1>{title}</h1><p>Fixture content</p></section>;\n}\n',
-  };
-  for (const [name, content] of Object.entries(sources)) writeFileSync(join(root, 'src', name), content);
-  await scanRepo({ repoPath: root });
-  for (const [name, content] of Object.entries(sources)) {
-    const chunks = getChunksForFile(root, `src/${name}`);
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0].body).toBe(content.trimEnd());
-    expect(content.slice(chunks[0].startPos, chunks[0].endPos)).toBe(chunks[0].body);
-  }
-  expect(compiler.loads).toBe(1);
-});

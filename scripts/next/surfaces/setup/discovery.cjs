@@ -24,8 +24,5 @@ Module._load = function(request, parent, isMain) {
     readRuntimeActivity: async () => ({ codex: 0, claude: 0, complete: false }),
     readLocalLeadModels: async () => process.argv.includes('--onboarding-codex-saved-model') ? { codex: require('../../../../src/lib/models').MODEL_IDS.codexCliDefault } : ({}),
   };
-  if (request.endsWith('/skeleton/autoscan') || request.endsWith('/skeleton/autoscan.ts')) return {
-    triggerScan() {}, startChangePolling() {}, triggerScanIfStale() {}, stopChangePolling() {},
-  };
   return load.call(this, request, parent, isMain);
 };

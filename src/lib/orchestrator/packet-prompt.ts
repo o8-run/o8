@@ -342,8 +342,10 @@ async function assemblePacketPrompt(
   const projectId = packet.projectId ?? findLatestLaneByPacket(packet.id)?.projectId
     ?? getActiveProjectScopeForRepoSync(packet.workspaceTargetPath).projectId;
   const operatorCorrectionsSection = buildPacketCorrectionsSection(packet.id, projectId);
-  const fileSizeSections = checkFileSizeThresholds(packet);
-  const preservationSections = buildPreservationEnvelope(packet);
+  const [fileSizeSections, preservationSections] = await Promise.all([
+    checkFileSizeThresholds(packet),
+    buildPreservationEnvelope(packet),
+  ]);
   const learnedRuleSection = buildLearnedRuleSection(packet);
   // #535 — Read-before-write scaffolding. When the delegate route or
   // scheduler populated `packet.readBudget`, render it into the prompt so

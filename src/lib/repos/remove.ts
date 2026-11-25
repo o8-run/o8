@@ -5,8 +5,6 @@ import { removeRepoFromAllProjects } from '@/lib/projects/store';
 import { removeRuntimeTerminalSessionsForRepoPath } from '@/lib/runtime/terminal-session-registry';
 import { pruneTerminalStateForRepoPath } from '@/lib/terminal/state-store';
 import { removeWorkspaceLifecycleRecordsForRepoPath } from '@/lib/workspace/lifecycle';
-import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
-import { stopChangePolling } from '@/lib/skeleton/autoscan';
 
 export interface RemovedRepo {
   id: string;
@@ -17,8 +15,8 @@ export interface RemovedRepo {
 
 /**
  * Remove a repo from o8's pool everywhere it is tracked: registry, SQLite
- * project links, workspace lifecycle records, terminal state, skeleton cache,
- * change polling, and runtime terminal bindings. The repo on disk is never
+ * project links, workspace lifecycle records, terminal state, and runtime
+ * terminal bindings. The repo on disk is never
  * touched.
  *
  * Shared by the repo-registry DELETE route and project deletion (a deleted
@@ -46,8 +44,6 @@ export async function removeRepoFromPool(repoId: string): Promise<RemovedRepo> {
     removeRepoFromAllProjects(toRemove.id);
     removeWorkspaceLifecycleRecordsForRepoPath(toRemove.localPath);
     pruneTerminalStateForRepoPath(toRemove.localPath);
-    clearSkeletonCache(toRemove.localPath);
-    stopChangePolling(toRemove.localPath);
   }
 
   return {

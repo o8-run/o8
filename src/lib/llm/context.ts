@@ -8,7 +8,6 @@
 import { execSync } from '@/lib/providers/child-process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { getRenderedSkeletonCached } from '@/lib/skeleton';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const WORKSPACE_CONTEXT_TTL_MS = 10_000;
@@ -89,40 +88,11 @@ function loadProjectRules(repoRoot = DEFAULT_REPO_ROOT): { content: string; sour
   return null;
 }
 
-/**
- * Extract changed file paths from git status output to use as focus paths
- * for the skeleton renderer.
- */
-function extractChangedPaths(status: string): string[] {
-  return status
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(line => {
-      // git status --short format: "XY path" or "XY old -> new"
-      const parts = line.slice(3).trim().split(' -> ');
-      return parts[parts.length - 1];
-    })
-    .filter(Boolean);
-}
-
 export function buildSystemPrompt(ctx: WorkspaceContext): string {
   const repoRoot = ctx.repoRoot;
   const rules = loadProjectRules(repoRoot);
 
-  // Try skeleton map first, fall back to crude file tree
-  const focusPaths = extractChangedPaths(ctx.status);
-  const skeleton = getRenderedSkeletonCached(repoRoot, {
-    maxTokens: 3000,
-    focusPaths,
-  });
-
-  const structureSection = skeleton
-    ? `## Code Map (${skeleton.fileCount} files, ${skeleton.symbolCount} symbols)
-\`\`\`
-${skeleton.text}
-\`\`\``
-    : `## File Structure
+  const structureSection = `## File Structure
 \`\`\`
 ${ctx.fileTreeSummary}
 \`\`\``;

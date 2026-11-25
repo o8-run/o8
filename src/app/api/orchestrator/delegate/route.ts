@@ -145,7 +145,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
     // start writing before reading the adjacent surface. The helper returns
     // null when no budget is warranted (empty targets / strong tier w/ no
     // graph), which preserves legacy behaviour for delegate callers.
-    const predictedFiles = computePredictedFiles({
+    const predictedFiles = await computePredictedFiles({
       workspaceTargetPath: repoPath,
       title: taskName,
       summary: prompt,
@@ -154,19 +154,13 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       runtime: workerRouting.selectedRuntime,
       assignedModel: workerRouting.selectedModel,
     });
-    const readBudget = computeReadBudget({
-      repoPath,
-      targetFiles: predictedFiles,
-      tier: modelTier,
-    }) ?? undefined;
+    const [readBudget, edgeCaseResult] = await Promise.all([
+      computeReadBudget({ repoPath, targetFiles: predictedFiles, tier: modelTier }),
+      surfaceEdgeCases({ repoPath, targetFiles: predictedFiles }),
+    ]);
 
     // #536 — Edge-case surfacer — never throws, returns { sites: [] } on
     // garbage input so the packet shape stays legal.
-    const edgeCaseResult = surfaceEdgeCases({
-      repoPath,
-      targetFiles: predictedFiles,
-      depth: 1,
-    });
     const edgeCaseSites = edgeCaseResult.sites.length > 0 ? edgeCaseResult.sites : undefined;
     const projectContext = await getProjectContext({ repoPath });
     const projectBrief = buildProjectTaskBrief(projectContext, {
@@ -258,7 +252,7 @@ async function performDelegate(request: NextRequest, clientMutationId: string, i
       assignedModel: workerRouting.selectedModel,
       instanceId: typeof body.instanceId === 'string' ? body.instanceId.trim() : undefined,
       predictedFiles: predictedFiles.length > 0 ? predictedFiles : undefined,
-      readBudget,
+      readBudget: readBudget ?? undefined,
       edgeCaseSites,
       workerIntent: workerRouting.workerIntent,
       workerRouting,

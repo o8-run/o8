@@ -63,7 +63,6 @@ const {
   writeOrchestratorControlPlaneState,
 } = await import('@/lib/orchestrator/control-plane');
 const { normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
-const { scanRepo } = await import('@/lib/skeleton');
 const { getWorktreeManager } = await import('@/lib/worktree/launch');
 const { createWorkspaceSnapshot, transitionWorkspaceSnapshot } = await import('@/lib/worktree/snapshot-state');
 const { getOrCreateWsToken } = await import('@/lib/ws-auth');
@@ -174,7 +173,6 @@ async function createBudgetBlockedLane(label: string) {
   ].join('\n'));
   commitAll(repo, 'base');
   git(repo, ['push', '-u', 'origin', 'main']);
-  await scanRepo({ repoPath: repo, chunks: false });
 
   const worktree = await getWorktreeManager(repo).create({
     agentType: 'codex',

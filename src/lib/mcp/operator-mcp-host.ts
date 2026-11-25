@@ -83,7 +83,6 @@ import {
   handleSteerPacket,
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
-import { TARGETING_TOOLS, handleTargets } from '@/lib/mcp/operator-handlers/targeting';
 import { TRUTH_TOOLS, handleTruthQuery } from '@/lib/mcp/operator-handlers/truth';
 import { UPDATE_TOOLS, handleUpdateApply } from '@/lib/mcp/operator-handlers/update';
 import { getDataDir } from '@/lib/data-dir-migration';
@@ -198,7 +197,6 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((tool) => tool.name === 'o8_operator_defaults'),
   ...CORTEX_TOOLS,
   ...DIGEST_TOOLS,
-  ...TARGETING_TOOLS,
   ...RECEIPT_TOOLS,
   ...TRUTH_TOOLS,
   ...AGENT_MESSAGE_TOOLS,
@@ -272,7 +270,6 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   ...CORTEX_HANDLERS,
   digest: handleDigest,
   fetch_raw: handleFetchRaw,
-  o8_targets: handleTargets,
   o8_packet_receipt: handlePacketReceipt,
   o8_verify_receipt: handleVerifyReceipt,
   o8_truth_query: handleTruthQuery,

@@ -15,7 +15,6 @@ writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf8');
 
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
-const { scanRepo } = await import('@/lib/skeleton');
 
 function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
@@ -48,7 +47,6 @@ describe('implementation notes artifact real path', () => {
     );
     git(repoPath, ['add', 'implementation-notes.md']);
     git(repoPath, ['commit', '-q', '-m', 'base']);
-    await scanRepo({ repoPath, chunks: false });
     git(repoPath, ['checkout', '-q', '-b', 'inline/worker-notes']);
     rmSync(join(repoPath, 'implementation-notes.md'));
     git(repoPath, ['add', '-A']);

@@ -434,7 +434,7 @@ export interface OrchestratorPacket {
   qualitySearch?: QualitySearchPacketState;
   /** Cheap-tier packet has had a same-house frontier escalation suggested. */
   tierEscalated?: boolean;
-  /** Files predicted to be touched, computed from packet scope vs skeleton cache */
+  /** Files predicted to be touched, computed at dispatch from packet scope vs `git ls-files` */
   predictedFiles?: string[];
   /** Routing scaffold: what kind of worker this task wants before runtime selection. */
   workerIntent?: WorkerIntent;
