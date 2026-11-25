@@ -5,7 +5,7 @@
  * Extracted verbatim from `app/api/setup/external-client/route.ts` (Step E2) so
  * both shapes are unit-testable WITHOUT spawning the CLIs. The route still owns
  * the spawn; this owns only the argument/payload serialization. external-client
- * forwards ONLY the operator entry (named "o8") — never codebase-memory or DB
+ * forwards ONLY the operator entry (named "o8") — never DB
  * externals.
  *
  *   hermes   → `hermes mcp add o8 --command <cmd> [--args <a>...] [--env K=V]...`

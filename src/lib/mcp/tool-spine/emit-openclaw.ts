@@ -5,7 +5,7 @@
  * to the profile's `mcp` key (`o8Config.mcp = toOpenclawJson(r)`). This REPLACES
  * the current "read whatever the user pre-registered + throw if missing"
  * passthrough with a registry-derived entry. The openclaw surface carries only
- * the operator (renamed "o8"); cortex / codebase-memory / DB externals are not
+ * the operator (renamed "o8"); cortex and DB externals are not
  * part of the governed profile.
  *
  * Phase 1 emits the current stdio shape (byte-identical to what

@@ -15,8 +15,7 @@
  *     pushes out to NOW + 30d. Append-only — never deletes.
  *
  * Cadence:
- *   - Boot pass: wired into `/api/panel/status` next to
- *     `ensureCodebaseMemoryBootIndex()`.
+ *   - Boot pass: wired into `/api/panel/status` with the other boot hooks.
  *   - Tick pass: same trigger fires every 6h via `setInterval` on the first
  *     boot of a Next process.
  *

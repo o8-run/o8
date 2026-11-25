@@ -20,7 +20,7 @@ pub(super) const NAV: &[(&str, &[&str])] = &[
         "Agents",
         &["dispatch", "models", "local-models", "providers", "keys"],
     ),
-    ("Workspace", &["storage", "git", "indexing"]),
+    ("Workspace", &["storage", "git"]),
     ("Connections", &["mcp", "machines", "mobile", "connections"]),
     ("System", &["limits", "diagnostics", "about"]),
 ];
@@ -51,7 +51,6 @@ const PANEL_GROUPS: &[(&str, &[&str])] = &[
         "storage",
         &["Storage usage", "Fleet parking", "Storage categories"],
     ),
-    ("indexing", &["Repositories"]),
     ("mobile", &["Remote access", "Pairing", "Paired devices"]),
 ];
 

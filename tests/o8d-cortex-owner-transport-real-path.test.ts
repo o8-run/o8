@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -24,42 +24,22 @@ it('serves live owner state and fresh timings through native GETs with Next stop
       expect(response.status, path).toBe(200);
       return response.json();
     };
-    expect(await read('/api/cortex/codebase-memory')).toEqual({ bootRan: false, inFlight: false, entries: [] });
     expect((await read('/api/cortex/diagnostics')).timing.totalSamples).toBe(0);
-    const repo = join(directory, 'repo');
-    mkdirSync(repo);
-    await promisify(execFile)('git', ['init', '--quiet', repo]);
-    await promisify(execFile)('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
-      'commit', '--quiet', '--allow-empty', '-m', 'Fixture']);
-    writeFileSync(join(directory, 'repos.json'), JSON.stringify({ version: 1, repos: [{
-      id: 'fixture-owner', name: 'Fixture owner', localPath: repo, addedAt: new Date().toISOString(),
-    }] }));
-    const executable = join(directory, 'fixture-indexer');
-    copyFileSync('tests/fixtures/cortex-index-mcp.mjs', executable);
-    chmodSync(executable, 0o700);
     owner = spawn(process.execPath, ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx',
       'tests/fixtures/cortex-state-owner.ts'], { env: { ...process.env,
       HOME: directory, USERPROFILE: directory, O8_DATA_DIR: directory, CORTEX_IDE_DATA_DIR: directory,
-      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db'), O8_CODEBASE_MEMORY_BIN: executable },
+      CORTEX_IDE_DB_PATH: join(directory, 'cortex-ide.db') },
       stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     let errors = '';
     owner.stderr!.on('data', chunk => { errors = (errors + String(chunk)).slice(-4000); });
     owner.stdout!.resume();
-    await expect.poll(async () => (await read('/api/cortex/codebase-memory')).entries[0]?.status,
-      { timeout: 20_000, message: 'real owner indexer must publish in-flight state' }).toBe('indexing');
+    await expect.poll(() => existsSync(join(directory, 'owner-result.json')), { timeout: 20_000 }).toBe(true);
     expect(errors).toBe('');
-    expect(await read('/api/cortex/codebase-memory')).toMatchObject({ bootRan: true, inFlight: true,
-      entries: [{ repoId: 'fixture-owner', status: 'indexing' }] });
+    await expect.poll(async () => (await read('/api/cortex/diagnostics')).timing.totalSamples, { timeout: 10_000 }).toBe(1);
     const diagnostic = await read('/api/cortex/diagnostics');
     expect(diagnostic.timing).toMatchObject({ totalSamples: 1, p95Ms: 43,
       byLabel: [{ label: 'fixture.owner.process', samples: 1 }] });
     expect(diagnostic.processCwdProbe.emptyRequestSkips).toBe(1);
-    writeFileSync(join(directory, 'finish-index'), '');
-    await expect.poll(async () => (await read('/api/cortex/codebase-memory')).entries[0]?.status, { timeout: 10_000 }).toBe('ready');
-    await expect.poll(() => existsSync(join(directory, 'owner-result.json'))).toBe(true);
-    expect(await read('/api/cortex/codebase-memory')).toEqual(JSON.parse(readFileSync(join(directory, 'owner-result.json'), 'utf8')));
-    const head = JSON.parse(readFileSync(join(directory, 'codebase-memory-state.json'), 'utf8')).heads['fixture-owner'].head;
-    expect(head).toMatch(/^[a-f0-9]{40}$/);
     await Promise.all(['a', 'b'].map(label => promisify(execFile)(process.execPath,
       ['--import=./scripts/register-server-only-stub.mjs', '--import=tsx', 'tests/fixtures/cortex-state-owner.ts', '--timings-only', label],
       { env: { ...process.env, O8_DATA_DIR: directory, CORTEX_IDE_DATA_DIR: directory } })));
@@ -69,7 +49,8 @@ it('serves live owner state and fresh timings through native GETs with Next stop
       expect.objectContaining({ label: 'fixture.producer.a', samples: 25 }),
       expect.objectContaining({ label: 'fixture.producer.b', samples: 25 }),
     ]));
-    for (const path of ['/api/cortex/codebase-memory', '/api/cortex/diagnostics']) {
+    writeFileSync(join(directory, 'finish-owner'), '');
+    for (const path of ['/api/cortex/diagnostics']) {
       expect((await fetch(origin + path)).status).toBe(401);
       const refused = await fetch(origin + path, { method: 'POST', headers: { authorization: `Bearer ${server.token}` } });
       expect(refused.status).toBe(405);

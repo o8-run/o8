@@ -10,7 +10,7 @@
  *   - remote = { type:'remote', url, headers?:{…} }.
  * Empty `environment` is omitted to match the CLI's own minimal output.
  *
- * Surfaces: operator ("o8") + codebase-memory.
+ * Surfaces: operator ("o8").
  */
 
 import { entriesForSurface, type ToolRegistry } from './registry';

@@ -20,7 +20,6 @@ export type CitationKind =
   | 'comment'
   | 'doc'
   | 'fact'
-  | 'symbol'
   | 'project'
   | 'project_repo'
   /** #2219 — operator rejection or steer reason (approvals / lane_events). */
@@ -87,7 +86,7 @@ export interface TypedRow {
 }
 
 export interface RetrieverResult {
-  retriever: 'sql' | 'fts' | 'graph' | 'facts' | 'corrections';
+  retriever: 'sql' | 'fts' | 'facts' | 'corrections';
   rows: TypedRow[];
   durationMs: number;
 }

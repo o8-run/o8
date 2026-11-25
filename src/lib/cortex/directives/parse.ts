@@ -2,7 +2,7 @@
  * Shared directive front-matter parser.
  *
  * Two call sites read directive markdown files and need the same shape:
- *   - `src/lib/codebase-memory/build-context.ts` (dispatch context — filters
+ *   - `src/lib/cortex/context-block.ts` (dispatch context — filters
  *     project-scoped directives by repo membership)
  *   - `src/app/api/cortex/directives/route.ts` (Recall Card UI)
  *

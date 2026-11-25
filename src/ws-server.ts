@@ -26,7 +26,7 @@ import { orchestratorErrorMessage, orchestratorErrorText } from '@/lib/transcrip
  *   history — transcript updates (pushed on change)
  *   lane-lifecycle — lane status transitions (pushed on change)
  *   review  — review file updates (pushed on change)
- *   cortex-changes — directive / outcome / codebase-memory writes (#840)
+ *   cortex-changes — directive / outcome writes (#840)
  *   pong    — keepalive response
  *
  * The client sends:

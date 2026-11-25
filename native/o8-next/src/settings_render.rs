@@ -229,20 +229,6 @@ impl Render for Settings {
                 &query,
                 "storage disk worktrees workspace usage free reserved parking categories allocated logical",
             );
-            let indexing = panels::matches(
-                "indexing",
-                self.section,
-                &query,
-                "indexing repository index engineering brain instructions outcomes knowledge documentation",
-            );
-            if indexing {
-                child_index += 1;
-                content = content.child(if query.len() >= 2 && self.section != "indexing" {
-                    self.panel_result("indexing", "Indexing", window, cx)
-                } else {
-                    self.indexing_view(window, cx)
-                });
-            }
             if storage {
                 child_index += 1;
                 content = content.child(if query.len() >= 2 && self.section != "storage" {
@@ -290,7 +276,6 @@ impl Render for Settings {
                 && !connections
                 && !diagnostics
                 && !storage
-                && !indexing
             {
                 content = content.child(empty("No settings match this search."));
             }

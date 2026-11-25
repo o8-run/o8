@@ -12,7 +12,6 @@ vi.mock('@/lib/mobile/orchestrator-thread-history', () => ({
 }));
 vi.mock('@/lib/search/backfill', () => ({ runUnifiedSearchBackfills: vi.fn() }));
 
-vi.mock('@/lib/codebase-memory/indexer', () => ({ ensureCodebaseMemoryBootIndex: vi.fn() }));
 vi.mock('@/lib/cortex/decay', () => ({ ensureDecayBootHook: vi.fn() }));
 vi.mock('@/lib/cortex/proposer', () => ({ ensureProposerBootTick: vi.fn() }));
 vi.mock('@/lib/cortex/stack-signature', () => ({ ensureStackSignatureBoot: vi.fn() }));
@@ -72,13 +71,12 @@ describe('GET /api/panel/status', () => {
     const compiled = await build({ entryPoints: ['src/app/api/panel/status/route.ts'], bundle: true,
       platform: 'node', format: 'esm', packages: 'external', write: false, metafile: true });
     expect(Object.keys(compiled.metafile!.inputs).filter(file =>
-      /shipped-dark-audit\.ts|cortex\/proposer|codebase-memory\/indexer/.test(file))).toEqual([]);
+      /shipped-dark-audit\.ts|cortex\/proposer/.test(file))).toEqual([]);
   });
 
   it('answers health before starting background indexing and learning, then starts each hook', async () => {
     vi.useFakeTimers();
     const hooks = [
-      (await import('@/lib/codebase-memory/indexer')).ensureCodebaseMemoryBootIndex,
       (await import('@/lib/cortex/decay')).ensureDecayBootHook,
       (await import('@/lib/cortex/proposer')).ensureProposerBootTick,
       (await import('@/lib/cortex/stack-signature')).ensureStackSignatureBoot,

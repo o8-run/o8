@@ -17,7 +17,6 @@ vi.mock('@/lib/worktree/apfs', async original => ({
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtime/capacity-service', () => ({ getRuntimeCapacityControlSnapshot: async () => ({ capacities: [] }) }));
-vi.mock('@/lib/codebase-memory/indexer', () => ({ ensureCodebaseMemoryBootIndex: vi.fn() }));
 vi.mock('@/lib/cortex/decay', () => ({ ensureDecayBootHook: vi.fn() }));
 vi.mock('@/lib/cortex/proposer', () => ({ ensureProposerBootTick: vi.fn() }));
 vi.mock('@/lib/cortex/stack-signature', () => ({ ensureStackSignatureBoot: vi.fn() }));

@@ -192,10 +192,6 @@ note says project files are not wired. The current evidence Library therefore
 cannot provide Claude-style input-file knowledge, upload replacement/versioning,
 retrieval provenance or project-memory editing.
 
-The separate [codebase-memory status route][codebase-memory] reports indexer
-state and can kick its boot pass; it is not a project knowledge-file or memory
-editing API. Do not treat that status chip as an inherited-context receipt.
-
 No new endpoint is required for the initial Threads inventory and evidence
 port. Full uploaded knowledge or shared project-memory editing needs a separate
 server contract and review; stop at that boundary rather than implementing a
@@ -279,5 +275,4 @@ the behavior they add.
 [exchange-route]: ../../src/app/api/agents/message/route.ts
 [artifact-route]: ../../src/app/api/panel/threads/artifact/route.ts
 
-[codebase-memory]: ../../src/app/api/cortex/codebase-memory/route.ts
 [native-projects]: ../../native/o8-next/src/projects_model.rs

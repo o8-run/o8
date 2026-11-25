@@ -9,7 +9,7 @@
  * o8's operator server is streamable-HTTP-or-stdio, so it maps to `httpUrl`/
  * `command` accordingly. Empty `env` is omitted to match the CLI's own format.
  *
- * Surfaces: operator ("o8") + codebase-memory.
+ * Surfaces: operator ("o8").
  */
 
 import { entriesForSurface, type ToolRegistry } from './registry';

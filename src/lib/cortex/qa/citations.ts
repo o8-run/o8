@@ -94,9 +94,6 @@ export function rowDisplayTitle(row: TypedRow): string {
     case 'fact':
       title = fields?.sourceKind === 'knowledge' ? `${pick('sourceName')} · ${pick('title')}` : pick('content').split('\n')[0] ?? '';
       break;
-    case 'symbol':
-      title = [pick('kind'), pick('symbol')].filter(Boolean).join(' ');
-      break;
     case 'project':
       title = pick('name');
       break;
@@ -168,8 +165,6 @@ export function buildCitationHandle(row: TypedRow): string {
       // composite `<parent_kind>-<parent_number>-<gh_comment_id>` from the
       // ingestion job.
       return `CMT-${rowId}`;
-    case 'symbol':
-      return `SYM-${rowId}`;
     case 'project':
       return `PROJ-${rowId}`;
     case 'project_repo':

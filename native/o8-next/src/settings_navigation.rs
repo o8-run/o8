@@ -121,7 +121,6 @@ impl Settings {
             ("connections", "Connections", "connections adapter capabilities workers actions session transforms usage limits"),
             ("diagnostics", "Diagnostics", "diagnostics shipped feature audit flags maintenance transcript retention"),
             ("storage", "Worktrees & storage", "storage disk worktrees workspace usage free reserved parking categories allocated logical"),
-            ("indexing", "Indexing", "indexing repository index engineering brain instructions outcomes knowledge documentation"),
         ].into_iter().find(|(section, _, words)| panels::matches(section, self.section, query, words))
             .map(|(section, label, _)| Destination::Panel(section, label))
     }

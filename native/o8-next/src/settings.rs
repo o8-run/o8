@@ -167,7 +167,6 @@ pub(crate) struct Settings {
     pub painted: Rc<Cell<u64>>,
     scroll: gpui::ScrollHandle,
     navigation: navigation::State,
-    indexing: indexing::State,
     storage: storage::State,
     diagnostics: diagnostics::State,
     connections: connections::State,
@@ -239,7 +238,6 @@ impl Settings {
             painted: Rc::new(Cell::new(u64::MAX)),
             scroll: gpui::ScrollHandle::new(),
             navigation: navigation::State::default(),
-            indexing: indexing::State::default(),
             storage: storage::State::default(),
             diagnostics: diagnostics::State::default(),
             connections: connections::State::default(),
@@ -462,9 +460,6 @@ impl Settings {
         self.scroll
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
         self.load(false, cx);
-        if section == "indexing" {
-            self.load_indexing_counts(true, cx);
-        }
         self.load_panel(false, cx);
     }
     fn load_panel(&mut self, force: bool, cx: &mut Context<Self>) {
@@ -479,9 +474,6 @@ impl Settings {
         }
         if self.section == "storage" {
             self.load_storage(force, cx);
-        }
-        if self.section == "indexing" {
-            self.load_indexing(force, cx);
         }
         if force && self.section == "voice" && self.voice_panel == VoicePanel::History {
             if let Some(history) = &self.voice_history {
@@ -758,9 +750,6 @@ mod diagnostics;
 
 #[path = "settings_storage.rs"]
 mod storage;
-
-#[path = "settings_indexing.rs"]
-mod indexing;
 
 #[path = "settings_navigation.rs"]
 mod navigation;

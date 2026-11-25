@@ -17,7 +17,6 @@ const peer = join(root, 'peer.cjs');
 const receipt = join(root, 'receipt.json');
 const { managedCommandLaunch } = await import('@/lib/terminal/managed-command-launch');
 const { sanitizePtyEnv } = await import('@/lib/ws-server/pty-support');
-const { callCodebaseMemoryTool } = await import('@/lib/codebase-memory/mcp-client');
 const processBoundary = await import('@/lib/providers/child-process');
 const { childEnvironment } = await import('@/lib/providers/spawn-environment');
 const { closeDb } = await import('@/lib/db');
@@ -62,11 +61,6 @@ describe('shared process environment boundary', () => {
     }, resolved);
     await completed(fixtureSpawn(launch.file, launch.args, { env: launch.env, stdio: 'ignore' }));
     expect(observed()).toEqual({ leaked: false, service: true, task: true });
-  });
-  it('codebase-memory MCP uses the same ambient boundary', async () => {
-    const result = await callCodebaseMemoryTool({ binPath: peer, cwd: root, toolName: 'fixture', timeoutMs: 3000 });
-    expect(result.ok).toBe(true);
-    expect(observed().leaked, 'parent canaries must not reach memory MCP').toBe(false);
   });
   it.each(['spawn', 'spawnSync', 'execFile', 'execFileSync', 'exec', 'execSync', 'fork'] as const)('%s defaults to an allowlist without runtime identity', async operation => {
     const args = [peer, '--capture'];

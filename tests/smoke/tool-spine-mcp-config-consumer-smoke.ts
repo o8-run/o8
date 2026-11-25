@@ -2,7 +2,7 @@
  * Tool-Spine Step-E1 regression lock (live): the mcp-config GET response server
  * objects.
  *
- * mcp-config/route.ts GET returned { server, codebaseMemory, fullConfig } from
+ * mcp-config/route.ts GET returned { server, fullConfig } from
  * its own buildServerConfig copy; it now derives them from the Tool-Spine
  * claude-desktop projection (Set B). No file write — the parity unit is the
  * returned object. PACKAGED mode (set inline) so resolution is deterministic
@@ -43,15 +43,13 @@ function main(): void {
   // The exact GET-handler expression (mcp-config/route.ts).
   const mcpServers = toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, Record<string, unknown>>;
   const server = mcpServers['o8'];
-  const codebaseMemory = mcpServers['codebase-memory'] ?? null;
   const fullConfig = { mcpServers };
 
-  // Set-B shape: o8 + codebase-memory, NO externals leak, NO type field.
-  assert.deepStrictEqual(Object.keys(mcpServers), ['o8', 'codebase-memory'], 'only o8 + codebase-memory (externals filtered out)');
+  // Set-B shape: o8 only, NO externals leak, NO type field, even with a
+  // codebase-memory binary on disk.
+  assert.deepStrictEqual(Object.keys(mcpServers), ['o8'], 'only o8 (externals filtered out)');
   assert(!('type' in server), 'server (o8) has no type field');
   assert.deepStrictEqual(server, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape');
-  assert(codebaseMemory && !('type' in codebaseMemory), 'codebaseMemory present, no type');
-  assert.deepStrictEqual(codebaseMemory, { command: cmBin, args: [], env: {} }, 'codebase-memory stdio shape');
 
   // fullConfig wraps the same map.
   assert.deepStrictEqual(fullConfig, { mcpServers }, 'fullConfig = { mcpServers }');

@@ -149,7 +149,6 @@ const cacheProvenanceRow: TypedRow = {
 const cacheProvenanceRetrieval: RetrieverResult[] = [
   { retriever: 'sql', rows: [cacheProvenanceRow], durationMs: 1 },
   { retriever: 'fts', rows: [], durationMs: 0 },
-  { retriever: 'graph', rows: [], durationMs: 0 },
   { retriever: 'facts', rows: [], durationMs: 0 },
   { retriever: 'corrections', rows: [], durationMs: 0 },
 ];

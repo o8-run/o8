@@ -95,7 +95,7 @@ export function publishChanged(resource: ChangedResource): void {
 
 /**
  * #840 — Lightweight broadcast for Cortex memory mutations the UI cares
- * about (directives, outcomes, codebase-memory). The ws-server fans this
+ * about (directives, outcomes). The ws-server fans this
  * out as a `cortex-changes` channel event, which the desktop WS context
  * bridges to an `o8:cortex-changes` window event. The Recall Card and
  * Packet Review Card listen for this and re-fetch their data without a
@@ -104,7 +104,7 @@ export function publishChanged(resource: ChangedResource): void {
  * Best-effort — never throws, never blocks the merge path.
  */
 export async function publishCortexChange(payload: {
-  scope: 'directive' | 'outcome' | 'codebase-memory';
+  scope: 'directive' | 'outcome';
   /** Repo path the change applies to, when known. */
   repoPath?: string;
   /** Free-form reason for logs (e.g. `merge:packet-123`). */

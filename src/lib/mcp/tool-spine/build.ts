@@ -3,9 +3,8 @@
  *
  * This is the ONE place the catalog is assembled. The resolvers below were moved
  * verbatim from `lane/orchestrator-mcp-config.ts` (only the `import.meta.url`
- * relative paths shifted for the new directory depth) + `resolveCodebaseMemoryBin`
- * from the setup routes. Entry order matches today's `getMcpServersConfig`:
- * DB externals first, then operator, then cortex, then codebase-memory.
+ * relative paths shifted for the new directory depth). Entry order matches
+ * today's `getMcpServersConfig`: DB externals first, then operator, then cortex.
  *
  * @/lib boundary: this imports DB/ws/api-port, so it must ONLY ever be called
  * from the Next server runtime — never from a standalone `tsx` MCP process
@@ -161,32 +160,10 @@ export function resetToolSpinePortIdentityForTests(): void {
 }
 
 /**
- * Resolve the codebase-memory-mcp binary, falling back from the env var the
- * Tauri sidecar sets (#739) to the deterministic install path. Returns null
- * when neither resolves — the caller omits the entry so cold first launch
- * (binary not yet downloaded) doesn't break session boot.
- */
-function resolveCodebaseMemoryBin(): string | null {
-  const fromEnv = process.env.O8_CODEBASE_MEMORY_BIN;
-  if (fromEnv && fromEnv.trim() && existsSync(fromEnv)) {
-    return fromEnv;
-  }
-
-  const fileName = process.platform === 'win32' ? 'codebase-memory-mcp.exe' : 'codebase-memory-mcp';
-  const deterministic = join(getDataDir(), 'bin', fileName);
-  if (existsSync(deterministic)) {
-    return deterministic;
-  }
-
-  return null;
-}
-
-/**
  * Assemble the catalog. Order is load-bearing (emitters preserve it):
  *   1. DB externals     — orchestrator surfaces only
  *   2. operator         — ALL surfaces (renamed "o8" on external surfaces)
  *   3. cortex           — orchestrator surfaces only
- *   4. codebase-memory  — external surfaces only, omitted when the binary is absent
  *
  * `options.profile` projects the catalog by trust class. `'full'` (default) is
  * today's behavior, BYTE-IDENTICAL to the no-arg call. `'propose'` is the
@@ -281,24 +258,6 @@ export function buildToolRegistry(
       },
     },
   });
-
-  // 4. codebase-memory — external surfaces only, omitted when the binary is absent.
-  const codebaseMemoryBin = resolveCodebaseMemoryBin();
-  if (codebaseMemoryBin) {
-    entries.push({
-      id: 'builtin:codebase-memory',
-      name: 'codebase-memory',
-      source: 'builtin',
-      label: 'Codebase Memory',
-      surfaces: ['claude-desktop', 'gemini', 'opencode'],
-      config: {
-        type: 'stdio',
-        command: codebaseMemoryBin,
-        args: [],
-        env: {},
-      },
-    });
-  }
 
   // Profile projection. `'propose'` (Collide's read-only proposer) is the #1075
   // dispatch lockout, applied STRUCTURALLY here:

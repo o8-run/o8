@@ -457,8 +457,7 @@ function runTick(): void {
 }
 
 /**
- * Boot-time entrypoint. Mirrors the `ensureCodebaseMemoryBootIndex` pattern:
- * fires once per server process via `setImmediate`, then schedules itself
+ * Boot-time entrypoint: fires once per server process via `setImmediate`, then schedules itself
  * every 5 min (#836). Idempotent.
  */
 export function ensureProposerBootTick(): void {

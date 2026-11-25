@@ -437,7 +437,7 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/setup/opencode', 'GET POST', () => import('@/lib/mcp/setup-opencode-route')),
     // Claude Desktop / Claude Code auto-register (Settings > MCP). GET previews the Claude config
     // (other servers by name only; the o8 entry carries the operator's own WS_TOKEN); POST merges the
-    // o8 + codebase-memory entries into the user's config file. No handler-level auth — same
+    // o8 entry into the user's config file. No handler-level auth — same
     // panelGateMiddleware gate as the other /api/setup/* routes (not public-allowlisted, hardening
     // #1562), so both the preview and the config-file WRITE are operator-ws-token-only, whatever the
     // caller's address, as on Next. (#5243)
@@ -450,7 +450,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // string); its args come from the o8 registry projection, not request input (only `target` is,
     // normalized to hermes|openclaw) — so a non-operator cannot reach or steer the spawn. (#5243)
     route('/api/setup/external-client', 'GET POST', () => import('@/app/api/setup/external-client/route')),
-    route('/api/cortex/codebase-memory', 'GET', () => import('@/app/api/cortex/codebase-memory/route')),
     route('/api/cortex/diagnostics', 'GET', () => import('@/app/api/cortex/diagnostics/route')),
     route('/api/runtime/acp-registry', 'GET', () => import('@/app/api/runtime/acp-registry/route')),
     route('/api/runtime/acp-registry/prepare', 'POST', () => import('@/app/api/runtime/acp-registry/prepare/route')),
