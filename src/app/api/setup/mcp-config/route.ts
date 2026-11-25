@@ -12,20 +12,12 @@
  *      /api/mcp host; the standalone full server remains available for
  *      headless flows when the app isn't running.
  *
- * Plus codebase-memory (Context Engine v2, epic #738): a static binary the
- * Tauri sidecar downloads on first launch (#739). Resolved via
- * `O8_CODEBASE_MEMORY_BIN` env var (set when ready) with a deterministic
- * `~/.o8/bin/codebase-memory-mcp{.exe}` fallback. Omitted when neither
- * resolves so cold first launch doesn't break Claude Code session boot.
- *
  * Returns:
  *   {
  *     server: { "o8": { command, args, env } },
- *     codebaseMemory: { command, args, env } | null,
  *     fullConfig: { "mcpServers": { ... } },
  *     instructions: { claudeDesktop, claudeCode },
- *     diagnostics: { nodeInstalled, codexInstalled, ghInstalled,
- *                    codebaseMemoryAvailable, ... }
+ *     diagnostics: { nodeInstalled, codexInstalled, ghInstalled, ... }
  *   }
  */
 
@@ -52,7 +44,7 @@ function findCommand(name: string): string | null {
   }
 }
 
-// The o8 + codebase-memory server config comes from the Tool-Spine
+// The o8 server config comes from the Tool-Spine
 // claude-desktop projection (Set B) — see the GET handler. repoPath is
 // irrelevant to this surface (cortex/externals filtered out); process.cwd()
 // keeps resolver inputs identical to the old builder.
@@ -103,18 +95,13 @@ export async function GET() {
       ? toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>
       : {};
     const server = mcpServers['o8'] ?? null;
-    const codebaseMemory = mcpServers['codebase-memory'] ?? null;
     const fullConfig = { mcpServers };
 
     return NextResponse.json({
       setupReady: mcpReady.ready,
       setupBlockedReason: mcpReady.reason,
       setupBlockedDetail: mcpReady.detail,
-      // Non-blocking degradation (e.g. codebase-memory download failed —
-      // Connect proceeds without it). Rendered as a calm note, never [WAIT].
-      setupWarning: mcpReady.warning,
       server,
-      codebaseMemory,
       fullConfig,
       instructions: buildInstructions(),
       diagnostics: {
@@ -136,7 +123,6 @@ export async function GET() {
         webviewSocketPath,
         webviewToolsAvailable: webviewSocketPath ? existsSync(webviewSocketPath) : false,
         webviewToolsBlockedReason,
-        codebaseMemoryAvailable: Boolean(codebaseMemory),
         cli: getCliAccessStatus(),
       },
     });

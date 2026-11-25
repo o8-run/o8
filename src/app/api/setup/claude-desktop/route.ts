@@ -1,12 +1,8 @@
 /**
  * Claude Desktop / Claude Code Auto-Register
  *
- * POST — merge the o8 + codebase-memory MCP server entries into the user's
- *        Claude config file without touching any other servers they have
- *        configured. codebase-memory is registered only when its binary
- *        resolves (env var or `~/.o8/bin/codebase-memory-mcp{.exe}`); cold
- *        first launch (binary not yet downloaded) skips it gracefully so
- *        Claude Code session boot stays clean.
+ * POST — merge the o8 MCP server entry into the user's Claude config file
+ *        without touching any other servers they have configured.
  * GET  — preview: show the current config file contents and whether the
  *        servers are already registered, without writing anything.
  *
@@ -15,7 +11,7 @@
  *
  * The file is parsed with comment-tolerant handling (Claude Desktop sometimes
  * emits a trailing newline, users hand-edit with `//` comments). We preserve
- * all unknown keys, only touching `mcpServers.o8` and `mcpServers.codebase-memory`.
+ * all unknown keys, only touching `mcpServers.o8`.
  */
 
 export const dynamic = 'force-dynamic';
@@ -53,7 +49,7 @@ function getTargetConfigPath(target: Target): string {
 
 // ── Server config: the Tool-Spine claude-desktop projection ──
 //
-// The operator ("o8") + codebase-memory entries (type stripped for stdio) come
+// The operator ("o8") entry (type stripped for stdio) comes
 // from one registry projection — `toClaudeDesktopJson` for the merge write,
 // `entriesForSurface(..., 'claude-desktop')` for the install list. repoPath is
 // irrelevant to this surface (cortex/externals are filtered out), so any path
@@ -81,7 +77,7 @@ function removeManagedServers(config: ReturnType<typeof readClaudeConfig>): stri
     : null;
   if (!servers) return [];
   const removed: string[] = [];
-  for (const name of ['o8', 'codebase-memory']) {
+  for (const name of ['o8']) {
     if (name in servers) {
       delete servers[name];
       removed.push(name);
@@ -102,30 +98,21 @@ export async function GET(request: Request) {
       ? (config.mcpServers as Record<string, unknown>)
       : {};
     const existingEntry = existingServers['o8'];
-    const existingCodebaseMemoryEntry = existingServers['codebase-memory'];
 
     const mcpReady = getMcpSetupReadiness();
     const projected = mcpReady.ready
       ? toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>
       : {};
     const proposed = projected['o8'];
-    const proposedCodebaseMemory = projected['codebase-memory'] ?? null;
 
     const alreadyUpToDate = Boolean(
       existingEntry
       && typeof existingEntry === 'object'
       && JSON.stringify(existingEntry) === JSON.stringify(proposed),
     );
-    const codebaseMemoryUpToDate = proposedCodebaseMemory
-      ? Boolean(
-        existingCodebaseMemoryEntry
-        && typeof existingCodebaseMemoryEntry === 'object'
-        && JSON.stringify(existingCodebaseMemoryEntry) === JSON.stringify(proposedCodebaseMemory),
-      )
-      : null;
 
     const otherServers = config.mcpServers
-      ? Object.keys(config.mcpServers).filter((k) => k !== 'o8' && k !== 'codebase-memory')
+      ? Object.keys(config.mcpServers).filter((k) => k !== 'o8')
       : [];
 
     return NextResponse.json({
@@ -139,11 +126,6 @@ export async function GET(request: Request) {
       setupBlockedDetail: mcpReady.detail,
       proposed,
       existingEntry: existingEntry ?? null,
-      proposedCodebaseMemory,
-      existingCodebaseMemoryEntry: existingCodebaseMemoryEntry ?? null,
-      codebaseMemoryAvailable: Boolean(proposedCodebaseMemory),
-      codebaseMemoryRegistered: Boolean(existingCodebaseMemoryEntry),
-      codebaseMemoryUpToDate,
       otherServers,
       size: fileExists ? statSync(path).size : 0,
     });
@@ -203,9 +185,7 @@ export async function POST(request: Request) {
     }
 
     // Merge via the Tool-Spine claude-desktop projection: spreads every existing
-    // server + top-level key, overwrites only o8 + codebase-memory, strips the
-    // stdio `type`. codebase-memory is opt-in — the registry omits it when its
-    // binary is absent (cold first launch), so it's simply not in `installed`.
+    // server + top-level key, overwrites only o8, strips the stdio `type`.
     const registry = buildToolRegistry(projectPath ?? process.cwd());
     const installed = entriesForSurface(registry, 'claude-desktop').map((entry) => entry.name);
     const merged = toClaudeDesktopJson(registry, config);
@@ -222,7 +202,6 @@ export async function POST(request: Request) {
       path,
       projectConfigPath,
       installed,
-      codebaseMemoryAvailable: installed.includes('codebase-memory'),
       detail:
         target === 'claude-desktop'
           ? 'Restart Claude Desktop to load the o8 tools.'

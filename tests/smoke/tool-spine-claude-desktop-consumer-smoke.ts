@@ -36,7 +36,8 @@ const EXISTING = {
 };
 
 function main(): void {
-  // Force PACKAGED resolution so o8/codebase-memory entries are deterministic.
+  // Force PACKAGED resolution so the o8 entry is deterministic. A present
+  // codebase-memory binary must no longer add an entry.
   const bundleDir = mkdtempSync(join(tmpdir(), 'cd-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
   const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
@@ -51,7 +52,7 @@ function main(): void {
 
   const registry = buildToolRegistry(process.cwd());
   const installed = entriesForSurface(registry, 'claude-desktop').map((e) => e.name);
-  assert.deepStrictEqual(installed, ['o8', 'codebase-memory'], 'claude-desktop surface = o8 + codebase-memory');
+  assert.deepStrictEqual(installed, ['o8'], 'claude-desktop surface = o8 only');
 
   const merged = toClaudeDesktopJson(registry, EXISTING);
   const servers = merged.mcpServers as Record<string, Record<string, unknown>>;
@@ -63,14 +64,13 @@ function main(): void {
   assert.deepStrictEqual(servers.filesystem, { command: 'fs-mcp', args: ['/Users/me'] }, 'filesystem untouched');
   assert.deepStrictEqual(servers.github, { command: 'gh-mcp', env: { GH_TOKEN: 'x' } }, 'github untouched');
 
-  // #3 — type-strip: o8 + codebase-memory are {command,args,env} with NO type.
+  // #3 — type-strip: o8 is {command,args,env} with NO type.
   assert(!('type' in servers.o8), 'o8 entry has no type field');
-  assert(!('type' in servers['codebase-memory']), 'codebase-memory entry has no type field');
   assert.deepStrictEqual(servers.o8, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape');
-  assert.deepStrictEqual(servers['codebase-memory'], { command: cmBin, args: [], env: {} }, 'codebase-memory stdio shape');
+  assert(!('codebase-memory' in servers), 'codebase-memory is never written');
 
-  // Key order: existing first, then o8, then codebase-memory.
-  assert.deepStrictEqual(Object.keys(servers), ['filesystem', 'github', 'o8', 'codebase-memory'], 'merge order');
+  // Key order: existing first, then o8.
+  assert.deepStrictEqual(Object.keys(servers), ['filesystem', 'github', 'o8'], 'merge order');
 
   // #4 + #1 — real write: trailing newline + backup content == original (name ignored).
   const cfgDir = mkdtempSync(join(tmpdir(), 'cd-cfg-'));

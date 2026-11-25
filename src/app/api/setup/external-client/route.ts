@@ -125,7 +125,7 @@ interface McpServerConfig {
 }
 
 // external-client forwards ONLY the operator entry (named "o8") — never
-// codebase-memory or DB externals — so it picks the `o8` key out of the Set-B
+// DB externals — so it picks the `o8` key out of the Set-B
 // projection. repoPath is irrelevant to this surface (cortex/externals filtered
 // out); process.cwd() keeps resolver inputs identical to the old builder.
 function buildServerConfig(): McpServerConfig {

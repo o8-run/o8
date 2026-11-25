@@ -42,7 +42,6 @@ No peer header grants local authority.
 | `/api/panel/prs/[number]/timeline` | pull_requests | surfaces/pull_requests/model.rs | gate |
 | `/api/review/last-turn` | diff | diff_ui_scope.rs | gate; `git worktree list`, `git --no-optional-locks status` and the committed diff run on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` and never rewrites a worktree index |
 | `/api/tasks` | session | browser_panel/remote/client.rs | gate + panel |
-| `/api/cortex/codebase-memory` | settings | settings_indexing.rs | gate |
 | `/api/cortex/diagnostics` | settings | settings_indexing.rs | gate |
 | `/api/orchestrator/packet-transcript` | sidebar | surfaces/sidebar/thread_list_client.rs | gate + panel; Codex discovery runs `sqlite3 -readonly` on the read-only child boundary (#5652), so the read takes no `.provider-keys.lock` |
 | `/api/orchestrator/archive` | session | composer/command_client.rs | gate + panel; reads the repository registry, saved threads and compaction archives |
@@ -393,17 +392,12 @@ registry add/remove/repoint recomputes. The startup hook is called by
 The default project-membership path uses shared database bootstrap and reads
 project/membership rows without inserting any.
 
-`/api/cortex/codebase-memory` and `/api/cortex/diagnostics` are registered
-for Settings using the production GETs. The design uses a persisted state bridge:
-Next remains the sole boot-indexer owner through `src/lib/startup/next.ts` and
-`startStatusBootHooks`. The existing one-shot guard is unchanged. The native
+`/api/cortex/diagnostics` is registered for Settings using the production GET.
+The design uses a persisted state bridge: Next remains the sole diagnostics
+owner through `src/lib/startup/next.ts` and `startStatusBootHooks`. The native
 HTTP entry point marks its process as a Cortex reader before loading any handler. If the existing
-bootstrap POST loads Next startup hooks there, both the indexer and probe
-publisher refuse ownership. Every boot or repo transition atomically replaces `codebase-memory-live.json`, including
-pending, indexing, cached, ready, deferred, skipped and error entries.
-Successful HEAD receipts remain in `codebase-memory-state.json`. Neither GET
-imports or starts the indexer, and the native process has no indexer trigger.
-A cold read returns the empty state without creating a directory or file.
+bootstrap POST loads Next startup hooks there, the probe publisher refuses
+ownership. A cold read returns the empty state without creating a directory or file.
 
 Timing producers persist each sample in `recall-metrics.db`. An immediate SQLite
 transaction owns each append, legacy import and FIFO eviction; existing Next
@@ -469,8 +463,6 @@ Changed-file ESLint and `git diff --check` also pass.
 
 Owner source files:
 
-- Codebase-memory: `src/app/api/cortex/codebase-memory/route.ts`,
-  `src/lib/codebase-memory/indexer.ts`, `src/lib/codebase-memory/live-state.ts`.
 - Diagnostics: `src/app/api/cortex/diagnostics/route.ts`,
   `src/lib/cortex/diagnostics.ts`, `src/lib/cortex/diagnostics-state.ts`,
   `src/lib/runtime/process-cwd-snapshot.ts`, `src/lib/panel/status-boot.ts`.

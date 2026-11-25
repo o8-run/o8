@@ -13,7 +13,6 @@ const taskFixtureKeys = generateKeyPairSync('ed25519');
 const NATIVE_READS = [
   ['scorecard', '/api/panel/analytics?view=review&range=7', 200],
   ['settings', '/api/plugins/task-drafts', 403],
-  ['settings', '/api/cortex/codebase-memory', 200],
   ['settings', '/api/cortex/diagnostics', 200],
   ['session', '/api/tasks?includeDone=true&includeBrief=true', 200],
   ['session', '/api/panel/branches', 400],

@@ -9,8 +9,8 @@
  * gone). This tests the OBJECT + both shapes; it does NOT spawn the CLIs.
  *
  * SURFACE-SPECIFIC behavior (verified, not inferred from E1): external-client
- * forwards ONLY o8 — never codebase-memory, never externals — EVEN WHEN the
- * codebase-memory binary is available. PACKAGED mode (spec risk #3).
+ * forwards ONLY o8 — never externals — EVEN WHEN a codebase-memory binary is
+ * present on disk. PACKAGED mode (spec risk #3).
  *
  *   CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS='--conditions=react-server' \
  *     npx tsx tests/smoke/tool-spine-external-client-consumer-smoke.ts
@@ -28,8 +28,8 @@ import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 import { hermesAddArgs, openclawSetPayload, type ForwardedServer } from '@/lib/mcp/external-client-args';
 
 function main(): void {
-  // Force PACKAGED resolution, AND make codebase-memory AVAILABLE — to prove
-  // external-client still forwards o8 ONLY (it never forwarded codebase-memory).
+  // Force PACKAGED resolution, AND put a codebase-memory binary on disk — to
+  // prove external-client still forwards o8 ONLY.
   const bundleDir = mkdtempSync(join(tmpdir(), 'ec-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
   const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
@@ -71,7 +71,7 @@ function main(): void {
 
   // o8-ONLY: codebase-memory is AVAILABLE in the projection but must NOT appear
   // in either forwarded shape; externals must not appear either.
-  assert(projected['codebase-memory'], 'codebase-memory IS available in the projection (precondition)');
+  assert(!projected['codebase-memory'], 'the projection never carries codebase-memory');
   for (const shape of [hermes.join(' '), openclaw]) {
     assert(!shape.includes('codebase-memory'), 'forwarded shape must not contain codebase-memory');
     assert(!shape.includes('zeta'), 'forwarded shape must not contain externals');

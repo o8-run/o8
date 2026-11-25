@@ -32,7 +32,6 @@
   "/api/command-center/snapshot",
   "/api/cortex/ask",
   "/api/cortex/ask/answer",
-  "/api/cortex/codebase-memory",
   "/api/cortex/cross-repo-proposals",
   "/api/cortex/diagnostics",
   "/api/cortex/directives",

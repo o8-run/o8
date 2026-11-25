@@ -33,7 +33,7 @@ const EXISTING: ClaudeDesktopConfig = {
 };
 
 function main(): void {
-  // Force PACKAGED resolution + make codebase-memory available.
+  // Force PACKAGED resolution + put a codebase-memory binary on disk.
   const bundleDir = mkdtempSync(join(tmpdir(), 'oc-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
   const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
@@ -48,8 +48,8 @@ function main(): void {
 
   const registry = buildToolRegistry(process.cwd());
 
-  // Surface membership — operator (o8) + codebase-memory, NOT widened.
-  assert.deepStrictEqual(entriesForSurface(registry, 'opencode').map((e) => e.name), ['o8', 'codebase-memory'], 'opencode surface = o8 + codebase-memory');
+  // Surface membership — operator (o8) only, NOT widened.
+  assert.deepStrictEqual(entriesForSurface(registry, 'opencode').map((e) => e.name), ['o8'], 'opencode surface = o8 only');
 
   const merged = toOpencodeJsonMerged(registry, EXISTING);
   const mcp = merged.mcp as Record<string, Record<string, unknown>>;
@@ -61,14 +61,14 @@ function main(): void {
   }
   // local shape: type:'local', folded command array, environment intact on o8.
   assert.deepStrictEqual(mcp.o8, { type: 'local', command: ['/usr/local/bin/node', proxyPath], environment: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 local shape (folded command + environment)');
-  assert.deepStrictEqual(mcp['codebase-memory'], { type: 'local', command: [cmBin] }, 'codebase-memory local shape (empty environment omitted)');
+  assert(!('codebase-memory' in mcp), 'codebase-memory is never written');
 
   // ── Preservation: other servers + top-level keys byte-identical ──
   assert.deepStrictEqual(mcp['my-tool'], { type: 'local', command: ['my-mcp', '--flag'] }, 'user server preserved');
   assert.strictEqual(merged.$schema, 'https://opencode.ai/config.json', '$schema preserved');
   assert.strictEqual(merged.theme, 'opencode', 'theme preserved');
   assert.strictEqual(merged.model, 'opencode/gpt-5-nano', 'model preserved');
-  assert.deepStrictEqual(Object.keys(mcp), ['my-tool', 'o8', 'codebase-memory'], 'merge order: existing first');
+  assert.deepStrictEqual(Object.keys(mcp), ['my-tool', 'o8'], 'merge order: existing first');
 
   // ── http → type:remote with url (not httpUrl) — via the merge path ──
   const httpReg: ToolRegistry = {

@@ -206,7 +206,6 @@ Workers authenticate via `Authorization: Bearer cwk_*` per-request, not the pane
 |---|---|---|
 | POST | `/api/cortex/ask` | Full streaming Q&A pipeline (classifier → composer → SSE). |
 | POST | `/api/cortex/ask/answer` | Non-streaming JSON sibling of `/ask` used by the `cortex_ask` MCP tool. |
-| GET | `/api/cortex/codebase-memory` | Live state of the boot indexer (#741), feeds the Recall card pill. |
 | GET | `/api/cortex/cross-repo-proposals` | List cross-repo directive proposal candidates. |
 | POST | `/api/cortex/cross-repo-proposals` | Dismiss a cross-repo proposal. |
 | GET | `/api/cortex/diagnostics` | Substrate eval summary (#749) — answers "is SQLite still fine?". |
@@ -433,7 +432,7 @@ device flow and every stateful panel route require the operator bearer.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/setup/claude-desktop` | Read current Claude config + report install status. |
-| POST | `/api/setup/claude-desktop` | Merge o8 + codebase-memory MCP entries into Claude config. |
+| POST | `/api/setup/claude-desktop` | Merge the o8 MCP entry into Claude config. |
 | GET | `/api/setup/config` | Read `~/.o8/setup.json`. |
 | POST | `/api/setup/config` | Write `~/.o8/setup.json`. |
 | GET | `/api/setup/detect` | Detect installed tools (Codex, Claude, Gemini, opencode, embeddings, API keys). |

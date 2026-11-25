@@ -4,7 +4,7 @@
  * This is the outage fix. `toClaudeDesktopJson` writes ONLY the keys this
  * registry names onto the claude-desktop surface; every unknown server
  * (`filesystem`, `playwright`, …) and every top-level key survives via the
- * spreads. The desktop `o8`/codebase-memory entries carry NO `type` field —
+ * spreads. The desktop `o8` entry carries NO `type` field —
  * `toClaudeDesktopEntry` strips it for stdio → `{ command, args, env }`.
  *
  * I/O (readClaudeConfig, atomic write + `.o8-backup-<ts>` + trailing newline)
@@ -26,7 +26,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Project one server config into the Claude Desktop wire shape. stdio servers
  * are written WITHOUT the `type` discriminator (`{ command, args, env }`),
- * matching the legacy `buildServerConfig` / `buildCodebaseMemoryConfig` output.
+ * matching the legacy `buildServerConfig` output.
  */
 export function toClaudeDesktopEntry(config: OrchestratorMcpServerConfig): Record<string, unknown> {
   if (config.type === 'http') {

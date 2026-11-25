@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { readClaudeCodeWorkerProfileSync } from '@/lib/claude-code/worker-profile';
-import { buildContextBlock } from '@/lib/codebase-memory/build-context';
+import { buildContextBlock } from '@/lib/cortex/context-block';
 import { buildPacketCorrectionsSection } from '@/lib/cortex/operator-corrections';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
@@ -412,12 +412,11 @@ async function assemblePacketPrompt(
   const captureProofSection = !readOnlyPacket && packetLooksUiShaped(packet)
     ? 'Visual proof (UI changes): only when the task legitimately serves its own app, capture the broken state with `o8 packet capture --url <localhost-url> --before --label "<what>" --wait-for "<selector>"`, then capture the fix with `--after` and the same --label. The pair appears in packet review and chat. Prefer `--clip "<sel>"` for a localized change; use `--full-page` for whole-page layouts. Add `--hover "<sel>"` or `--click "<sel>"` for interaction states. Follow the sandbox restrictions above; never start o8 dev servers for this. Skip pure-logic/backend changes.'
     : null;
-  // #743 — Cortex context block. Pull directives + recent outcomes +
-  // symbol-graph for this repo and prepend a `<context>` envelope so the
+  // #743 — Cortex context block. Pull directives, recent outcomes and
+  // corrections for this repo and prepend a `<context>` envelope so the
   // runtime sees the same recall data the operator sees on the packet
-  // card. Helper degrades gracefully (codebase-memory binary missing,
-  // empty DB, etc.) and returns an empty string when nothing useful
-  // resolved — that's the legacy path.
+  // card. Helper degrades gracefully (empty DB, etc.) and returns an empty
+  // string when nothing useful resolved — that's the legacy path.
   const contextBlock = packet.workspaceTargetPath
     ? await buildContextBlock({
         repoPath: packet.workspaceTargetPath,

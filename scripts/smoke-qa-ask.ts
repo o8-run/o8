@@ -17,7 +17,7 @@ const REPO_PATH = process.env.SMOKE_REPO_PATH ?? process.cwd();
 const CASES = [
   {
     label: 'Class A (lookup)',
-    question: 'Who owns the codebase-memory indexer?',
+    question: 'Who owns the cortex decay pass?',
     expectClass: 'A',
   },
   {

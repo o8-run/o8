@@ -64,11 +64,11 @@ async function main() {
 
   // No retriever should have thrown — Promise.allSettled wrappers turn a
   // throw into an empty result, which we accept. We're only asserting that
-  // the orchestrator returned all three retriever shapes.
-  const expected = new Set(['sql', 'fts', 'graph']);
+  // the orchestrator returned every retriever shape.
+  const expected = new Set(['sql', 'fts', 'facts', 'corrections']);
   const actual = new Set(results.map((r) => r.retriever));
   for (const name of expected) {
-    if (!actual.has(name as 'sql' | 'fts' | 'graph')) {
+    if (!actual.has(name as 'sql' | 'fts' | 'facts' | 'corrections')) {
       throw new Error(`retrieveAll dropped retriever ${name}`);
     }
   }

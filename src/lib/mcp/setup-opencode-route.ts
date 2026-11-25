@@ -1,7 +1,7 @@
 /**
  * OpenCode 2 CLI Auto-Register
  *
- * POST — merge o8's managed MCP servers (o8 operator + codebase-memory) into the
+ * POST — merge o8's managed MCP servers (the o8 operator) into the
  *        user's OpenCode config under `mcp`, without touching any other server or
  *        top-level key. Mirrors /api/setup/gemini (merge-preserving read → atomic
  *        write + .o8-backup-<ts>, reusing the shared claude-desktop-config-io).

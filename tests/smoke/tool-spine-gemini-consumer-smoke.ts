@@ -33,7 +33,7 @@ const EXISTING = {
 };
 
 function main(): void {
-  // Force PACKAGED resolution + make codebase-memory available.
+  // Force PACKAGED resolution + put a codebase-memory binary on disk.
   const bundleDir = mkdtempSync(join(tmpdir(), 'gm-bundle-'));
   const bundlePath = join(bundleDir, 'operator-mcp-server.mjs');
   const proxyPath = join(bundleDir, 'operator-mcp-proxy.mjs');
@@ -48,8 +48,8 @@ function main(): void {
 
   const registry = buildToolRegistry(process.cwd());
 
-  // Surface membership — operator (o8) + codebase-memory, NOT widened.
-  assert.deepStrictEqual(entriesForSurface(registry, 'gemini').map((e) => e.name), ['o8', 'codebase-memory'], 'gemini surface = o8 + codebase-memory');
+  // Surface membership — operator (o8) only, NOT widened.
+  assert.deepStrictEqual(entriesForSurface(registry, 'gemini').map((e) => e.name), ['o8'], 'gemini surface = o8 only');
 
   const merged = toGeminiSettingsMerged(registry, EXISTING);
   const servers = merged.mcpServers as Record<string, Record<string, unknown>>;
@@ -59,18 +59,17 @@ function main(): void {
   for (const name of Object.keys(projection)) {
     assert.deepStrictEqual(servers[name], projection[name], `${name} matches toGeminiSettings projection`);
   }
-  // stdio shape: no `type`; env intact on o8; empty env omitted on codebase-memory.
+  // stdio shape: no `type`; env intact on o8.
   assert.deepStrictEqual(servers.o8, { command: '/usr/local/bin/node', args: [proxyPath], env: { O8_API_BASE: 'http://127.0.0.1:3001' } }, 'o8 stdio shape (env intact)');
   assert(!('type' in servers.o8), 'o8 has no type field');
-  assert.deepStrictEqual(servers['codebase-memory'], { command: cmBin, args: [] }, 'codebase-memory stdio shape (empty env omitted)');
-  assert(!('type' in servers['codebase-memory']), 'codebase-memory has no type field');
+  assert(!('codebase-memory' in servers), 'codebase-memory is never written');
 
   // ── Preservation: other servers + top-level keys byte-identical ──
   assert.deepStrictEqual(servers['chrome-devtools'], { command: 'npx', args: ['chrome-devtools-mcp@latest'] }, 'user server preserved');
   assert.deepStrictEqual(merged.security, { auth: { selectedType: 'gemini-api-key' } }, 'security preserved');
   assert.deepStrictEqual(merged.general, { vimMode: false }, 'general preserved');
   assert.deepStrictEqual(merged.ui, { showLineNumbers: false }, 'ui preserved');
-  assert.deepStrictEqual(Object.keys(servers), ['chrome-devtools', 'o8', 'codebase-memory'], 'merge order: existing first');
+  assert.deepStrictEqual(Object.keys(servers), ['chrome-devtools', 'o8'], 'merge order: existing first');
 
   // ── http → httpUrl (not url) — the streamable-HTTP branch, via the merge path ──
   const httpReg: ToolRegistry = {

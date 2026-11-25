@@ -26,7 +26,7 @@ function minimalPacket(overrides: Partial<OrchestratorPacket> = {}): Orchestrato
     referenceLabel: 'PKT-1',
     title: 'feat: test packet',
     summary: 'Test packet summary',
-    // Null keeps buildPacketPrompt off the codebase-memory/learned-rules
+    // Null keeps buildPacketPrompt off the context-block/learned-rules
     // paths — this suite only pins the session-rules block.
     workspaceTargetPath: null,
     branchTarget: 'main',

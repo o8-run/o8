@@ -1,12 +1,12 @@
 /**
  * Q&A retrieval orchestrator (epic #915 sub-1).
  *
- * Runs all three retrievers in parallel via `Promise.allSettled`, then
+ * Runs every retriever in parallel via `Promise.allSettled`, then
  * union-merges the typed rows with reciprocal rank fusion + dedup by
  * `kind+rowId`. Top 30 by merged score.
  *
- * Acceptance gate from #915: ≤200ms p95 on the founder's DB. The SQL and
- * graph retrievers run in tens of ms; FTS5 is the heaviest (string-search
+ * Acceptance gate from #915: ≤200ms p95 on the founder's DB. The SQL
+ * retriever runs in tens of ms; FTS5 is the heaviest (string-search
  * across N indexes), but indexed-on-write keeps it under the budget.
  */
 
@@ -15,7 +15,6 @@ import 'server-only';
 import { correctionsRetriever } from '@/lib/cortex/qa/retrievers/corrections';
 import { retrieveFacts } from '@/lib/cortex/qa/retrievers/facts';
 import { ftsRetriever } from '@/lib/cortex/qa/retrievers/fts';
-import { graphRetriever } from '@/lib/cortex/qa/retrievers/graph';
 import { sqlRetriever } from '@/lib/cortex/qa/retrievers/sql';
 import type { RetrieverInput, RetrieverResult, TypedRow } from '@/lib/cortex/qa/types';
 
@@ -72,14 +71,13 @@ export async function retrieveAll(input: RetrieverInput): Promise<RetrieverResul
   const settled = await Promise.allSettled([
     sqlRetriever(input),
     ftsRetriever(input),
-    graphRetriever(input),
     retrieveFacts(input),
     correctionsRetriever(input),
   ]);
 
   return settled.map((entry, idx) => {
     if (entry.status === 'fulfilled') return entry.value;
-    const retriever: RetrieverResult['retriever'] = (['sql', 'fts', 'graph', 'facts', 'corrections'] as const)[idx];
+    const retriever: RetrieverResult['retriever'] = (['sql', 'fts', 'facts', 'corrections'] as const)[idx];
     console.warn(
       `[qa][retrieve] ${retriever} retriever rejected:`,
       entry.reason instanceof Error ? entry.reason.message : entry.reason,
