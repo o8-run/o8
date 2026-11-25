@@ -1,3 +1,4 @@
+// Baseline probe for #6776: main without changes. Do not merge.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
