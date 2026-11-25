@@ -1,4 +1,4 @@
-//! Update checks use a device-only identity, separate from entitlement and sign-in.
+//! Update checks send the channel, app version and platform only; no install or device identity.
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -14,7 +14,7 @@ const FALLBACK_TIMEOUT: Duration = Duration::from_secs(15);
 #[path = "update_channel_persistence.rs"]
 mod channel_persistence;
 
-struct UpdateIdentity(String);
+struct UpdateService;
 
 struct UpdateSettingsPath(std::path::PathBuf);
 struct UpdateCheckClock {
@@ -334,51 +334,13 @@ pub fn initialize<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 pub fn initialize_at<R: Runtime>(app: &AppHandle<R>, path: &Path) -> Result<(), String> {
     app.manage(UpdateSettingsPath(path.to_path_buf()));
     let _ = clock(app);
-    let mut store = channel_persistence::load(path)?;
-    let id = match store.get("installId") {
-        Some(value) => {
-            let id = value.as_str().ok_or("invalid update install identifier")?;
-            let parsed = Uuid::parse_str(id).map_err(|e| e.to_string())?;
-            if parsed.get_version_num() != 4 || parsed.get_variant() != uuid::Variant::RFC4122 {
-                return Err("invalid update install identifier".into());
-            }
-            id.to_owned()
-        }
-        None => {
-            let id = Uuid::new_v4().to_string();
-            store.insert("installId".into(), serde_json::json!(id));
-            channel_persistence::save(path, store)?;
-            id
-        }
-    };
-    app.manage(UpdateIdentity(id));
+    channel_persistence::load(path)?;
+    app.manage(UpdateService);
     // An installer may exit the process before returning (or it may crash).
     // The durable held choice must be applied before any launch update check.
     let clock = clock(app);
     apply_pending_channel(app, &mut clock.state.lock().unwrap())?;
     Ok(())
-}
-
-fn macos_version() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let output = std::process::Command::new("/usr/bin/sw_vers")
-            .arg("-productVersion")
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let version = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-        if version.is_empty() || !version.chars().all(|c| c.is_ascii_digit() || c == '.') {
-            return None;
-        }
-        Some(version)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        None
-    }
 }
 
 pub async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
@@ -528,19 +490,17 @@ async fn check_channel<R: Runtime>(
         .iter()
         .map(|endpoint| channel_fallback(endpoint, channel))
         .collect::<Result<Vec<_>, String>>()?;
-    if let Some(identity) = app.try_state::<UpdateIdentity>() {
+    if app.try_state::<UpdateService>().is_some() {
         let primary_host = service.host_str().unwrap_or_default().to_owned();
-        let mut builder = app
+        let builder = app
             .updater_builder()
             .clear_headers()
             .endpoints(vec![service.clone()])
             .map_err(|e| e.to_string())?
             .timeout(SERVICE_TIMEOUT)
-            .header("X-O8-Install-Id", identity.0.as_str())
-            .map_err(|e| e.to_string())?
             .header("X-O8-Channel", channel)
             .map_err(|e| e.to_string())?
-            // A service redirect means fail over locally, without forwarding the ID.
+            // A service redirect means fail over locally instead of following it.
             // Artifact download redirects still use the updater's normal transport.
             .configure_client(move |client| {
                 let host = primary_host.clone();
@@ -556,11 +516,6 @@ async fn check_channel<R: Runtime>(
                     }
                 }))
             });
-        if let Some(version) = macos_version() {
-            builder = builder
-                .header("X-O8-Macos-Version", version)
-                .map_err(|e| e.to_string())?;
-        }
         let updater = guarded_builder(app, builder, force.clone())
             .build()
             .map_err(|e| e.to_string())?;
