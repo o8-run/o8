@@ -41,6 +41,11 @@ export function readChosenMachineName(read: () => string = () => readFileSync(pa
 
 let cached: string | undefined;
 
+/** After the owner renames this computer. */
+export function forgetLocalMachineName(): void {
+  cached = undefined;
+}
+
 /** Read once per process: the name changes rarely and the thread list is hot. */
 export function localMachineName(): string {
   cached ??= readChosenMachineName() ?? readMachineName();

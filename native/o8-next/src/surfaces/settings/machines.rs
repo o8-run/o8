@@ -1,14 +1,15 @@
 //! Settings › Machines: this computer, saved SSH machines and machines linked
 //! to the account, in one read-only list. It is the base for choosing where a
 //! thread runs. Registry membership never claims a machine is reachable; only
-//! Check reaches one.
+//! Check reaches one. This computer's name in the account list can be renamed.
 #[path = "machine_window.rs"]
 pub(crate) mod machine_window;
 
 use crate::client::Client;
+use crate::composer::Composer;
 use crate::theme::current as theme;
-use gpui::{Context, IntoElement, Render, Window, div, prelude::*, px};
-use serde_json::Value;
+use gpui::{Context, Entity, IntoElement, Render, Window, div, prelude::*, px};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 pub(crate) const SSH_MACHINES: &str = "/api/panel/ssh-machines";
@@ -80,6 +81,17 @@ pub(crate) fn merged(ssh: &Value, connect: &Value) -> Vec<Machine> {
     machines
 }
 
+/// Only this computer's own account entry can be renamed from here.
+pub(crate) fn renamable(machine: &Machine) -> bool {
+    machine.current && !machine.ssh && machine.id != "local"
+}
+
+/// The body that renames this computer, or None for a blank name.
+pub(crate) fn rename_body(text: &str) -> Option<Value> {
+    let name = text.lines().next().unwrap_or("").trim();
+    (!name.is_empty()).then(|| json!({ "name": name }))
+}
+
 /// The answer to a Check: a machine that lists terminals is reachable.
 pub(crate) fn check_result(result: Result<Value, String>) -> String {
     match result {
@@ -101,6 +113,9 @@ pub(crate) struct Machines {
     pub note: Option<String>,
     pub loading: bool,
     generation: u64,
+    /// The name field while this computer is being renamed.
+    pub rename: Option<Entity<Composer>>,
+    pub renaming: bool,
 }
 
 impl Machines {
@@ -114,7 +129,68 @@ impl Machines {
             note: None,
             loading: false,
             generation: 0,
+            rename: None,
+            renaming: false,
         }
+    }
+
+    fn start_rename(&mut self, label: String, window: &mut Window, cx: &mut Context<Self>) {
+        let input = cx.new(|cx| {
+            let mut input = Composer::new(cx);
+            input.inline = true;
+            input.placeholder = "Name".into();
+            input.set_text(&label, cx);
+            input
+        });
+        input.read(cx).focus.focus(window);
+        self.rename = Some(input);
+        cx.notify();
+    }
+
+    /// Saves the name and re-registers this computer under it; the account list
+    /// keeps the same machine.
+    pub(crate) fn save_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(input) = &self.rename else { return };
+        let Some(body) = rename_body(&input.read(cx).text) else {
+            self.note = Some("Give this computer a name.".into());
+            cx.notify();
+            return;
+        };
+        self.renaming = true;
+        let client = self.client.clone();
+        let task = cx.background_executor().spawn(async move {
+            let url = client.url(CONNECT).map_err(|_| "Invalid route".to_string())?;
+            client
+                .with_desktop_identity(client.request("POST", &url))
+                .send_json(body)
+                .map_err(|_| "Could not rename this computer.".to_string())
+                .and_then(Client::read::<Value>)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.renaming = false;
+                match result {
+                    Ok(reply) if reply["ok"] == true => {
+                        this.rename = None;
+                        this.note = None;
+                        this.load(cx);
+                    }
+                    Ok(reply) => {
+                        this.note = Some(
+                            reply["error"]["message"]
+                                .as_str()
+                                .unwrap_or("Could not rename this computer.")
+                                .to_owned(),
+                        );
+                    }
+                    Err(error) => this.note = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     pub fn load(&mut self, cx: &mut Context<Self>) {
@@ -218,6 +294,8 @@ impl Render for Machines {
                 let id = machine.id.clone();
                 let opened = machine.clone();
                 let status = self.checks.get(&machine.id).cloned();
+                let can_rename = renamable(&machine) && self.rename.is_none();
+                let label = machine.label.clone();
                 div()
                     .debug_selector(move || format!("settings-machine-{index}"))
                     .flex()
@@ -259,6 +337,25 @@ impl Render for Machines {
                                 .child("Open")
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.open(opened.clone(), cx)
+                                })),
+                        )
+                    })
+                    .when(can_rename, |row| {
+                        row.child(
+                            div()
+                                .id(("settings-machine-rename", index))
+                                .debug_selector(move || format!("settings-machine-rename-{index}"))
+                                .flex_none()
+                                .px(px(8.))
+                                .py(px(2.))
+                                .rounded(px(6.))
+                                .text_size(px(11.))
+                                .border_1()
+                                .border_color(theme().border)
+                                .cursor_pointer()
+                                .child("Rename")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.start_rename(label.clone(), window, cx)
                                 })),
                         )
                     })
@@ -318,6 +415,54 @@ impl Render for Machines {
                 "Add SSH machines with `o8 machine add`.".to_string()
             }))
             .children(self.note.clone().map(muted))
+            .children(self.rename.clone().map(|input| {
+                let button = |id: &'static str, text: &'static str| {
+                    div()
+                        .id(id)
+                        .debug_selector(move || id.into())
+                        .flex_none()
+                        .px(px(8.))
+                        .py(px(2.))
+                        .rounded(px(6.))
+                        .text_size(px(11.))
+                        .border_1()
+                        .border_color(theme().border)
+                        .cursor_pointer()
+                        .child(text)
+                };
+                let focus = input.read(cx).focus.clone();
+                div()
+                    .debug_selector(|| "settings-machine-rename-form".into())
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .px(px(10.))
+                            .py(px(6.))
+                            .rounded(px(7.))
+                            .border_1()
+                            .border_color(theme().border)
+                            .bg(theme().surface_raised)
+                            .text_size(px(12.))
+                            .on_mouse_down(gpui::MouseButton::Left, move |_, window, _| {
+                                focus.focus(window)
+                            })
+                            .child(input),
+                    )
+                    .child(
+                        button("settings-machine-rename-save", if self.renaming { "Saving…" } else { "Save" })
+                            .on_click(cx.listener(|this, _, _, cx| this.save_rename(cx))),
+                    )
+                    .child(button("settings-machine-rename-cancel", "Cancel").on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.rename = None;
+                            cx.notify();
+                        },
+                    )))
+            }))
             .children(rows)
     }
 }
@@ -326,6 +471,28 @@ impl Render for Machines {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_this_computers_account_entry_can_be_renamed() {
+        let connect = json!({
+            "currentMachineId": "m1",
+            "devices": [
+                {"machineId":"m1","name":"Mac","platform":"darwin","appVersion":"1"},
+                {"machineId":"m2","name":"iMac","platform":"darwin","appVersion":"2"}
+            ]
+        });
+        let machines = merged(&Value::Null, &connect);
+        let names: Vec<_> = machines.iter().filter(|m| renamable(m)).map(|m| m.label.as_str()).collect();
+        assert_eq!(names, ["Mac"]);
+        // Signed out: the local placeholder has no account entry to rename.
+        assert!(!merged(&Value::Null, &Value::Null).iter().any(renamable));
+    }
+
+    #[test]
+    fn a_rename_sends_one_trimmed_line_and_never_a_blank_name() {
+        assert_eq!(rename_body("  Studio \nmore"), Some(json!({"name": "Studio"})));
+        assert_eq!(rename_body("   "), None);
+    }
 
     #[test]
     fn the_current_machine_leads_and_ssh_machines_follow() {

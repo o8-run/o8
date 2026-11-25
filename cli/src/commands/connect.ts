@@ -22,6 +22,7 @@ interface ConnectApiError {
 
 interface ConnectApiResponse {
   ok?: boolean;
+  name?: string;
   machineId?: string | null;
   deviceCap?: number;
   disconnected?: boolean;
@@ -96,16 +97,28 @@ function printDevices(devices: MachineDevice[], currentMachineId?: string | null
   for (const device of devices) process.stdout.write(deviceLine(device, currentMachineId));
 }
 
+/** `--name <label>`: the name this computer has in the account's machine list. */
+function nameArgument(rest: string[]): string | undefined {
+  const index = rest.indexOf('--name');
+  if (index < 0) return undefined;
+  const value = rest[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new CliError('invalid_args', '`--name` needs a name.', EXIT.INVALID_ARGS, 'Run `o8 connect --name "Studio"`.');
+  }
+  return value;
+}
+
 function validateArgs(action: ConnectAction, rest: string[]): void {
-  const allowed = action === 'connect' ? new Set(['--status', '--sign-in']) : new Set<string>();
-  const unknown = rest.find((argument) => !allowed.has(argument));
+  const allowed = action === 'connect' ? new Set(['--status', '--sign-in', '--name']) : new Set<string>();
+  const nameIndex = rest.indexOf('--name');
+  const unknown = rest.find((argument, index) => !allowed.has(argument) && !(nameIndex >= 0 && index === nameIndex + 1));
   if (unknown) {
     throw new CliError(
       'invalid_args',
       `Unknown ${action} flag: ${unknown}`,
       EXIT.INVALID_ARGS,
       action === 'connect'
-        ? 'Run `o8 connect`, `o8 connect --status` or `o8 connect --sign-in`.'
+        ? 'Run `o8 connect`, `o8 connect --name <name>`, `o8 connect --status` or `o8 connect --sign-in`.'
         : 'Run `o8 disconnect` without arguments.',
     );
   }
@@ -212,10 +225,11 @@ export async function runConnect(
   const method = action === 'status'
     ? 'GET'
     : action === 'disconnect' ? 'DELETE' : 'POST';
+  const name = action === 'connect' ? nameArgument(rest) : undefined;
   const response = await apiFetch<ConnectApiResponse>(
     resolveConfig(),
     '/api/panel/connect',
-    { method },
+    { method, ...(name !== undefined ? { body: { name } } : {}) },
   );
   const data = response.data;
   if (!data) {
@@ -231,6 +245,7 @@ export async function runConnect(
   const payload = {
     schema: schemaFor(action),
     ok: true,
+    ...(action === 'connect' ? { name: data.name ?? null } : {}),
     machineId: data.machineId ?? null,
     currentMachineId: data.currentMachineId ?? null,
     disconnected: data.disconnected ?? null,
@@ -242,6 +257,7 @@ export async function runConnect(
       printHumanHeading('o8 connect');
       printHumanKv([
         ['status', 'connected'],
+        ['name', data.name ?? 'unknown'],
         ['machine', data.machineId ?? 'unknown'],
         ['device cap', data.deviceCap == null ? 'unknown' : String(data.deviceCap)],
       ]);
