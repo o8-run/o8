@@ -12,7 +12,7 @@ code. Nothing here deletes data.
 | `~/.o8` | The data directory: the database (`cortex-ide.db`), `settings.toml`, `operator-defaults.json`, `logs/`, the launcher socket, worktrees under `worktrees/`, worker and orchestrator homes, the compile cache, and the master key file on systems without a keychain. | `O8_DATA_DIR` in the app's environment moves it. `CORTEX_IDE_DATA_DIR` is the older name. `O8_WORKTREE_ROOT` moves only the worktrees. |
 | `~/.o8/next*` | Native window state: appearance, the snapshot hotkey, composer modes, visualization views, thumbnails and snapshots. | Always under `~/.o8`, even when `O8_DATA_DIR` points elsewhere. |
 | `~/.cortex-ide` | Data from the app's earlier name. | If this exists and `~/.o8` is missing or empty, o8 copies it into `~/.o8` on start unless `O8_DATA_DIR` is set. Move it aside too. |
-| `~/Library/Application Support/ai.o8.desktop/update-ping.json` | Update channel choice and a random install id. | Read by the launcher's update check. |
+| `~/Library/Application Support/ai.o8.desktop/update-ping.json` | Update channel choice. Older releases also saved a random install id here; it is no longer sent. | Read by the launcher's update check. |
 | `~/Library/LaunchAgents/o8.plist` | Open at login. | Only present when Open at login is on. |
 | Keychain item `ai.o8.master-key` (account `default`) | The key that encrypts saved secrets in the database. | Leave it in place. A restored data directory needs the same key. A fresh data directory reuses it. |
 | Keychain items `ai.o8.chatgpt-plan` | A ChatGPT plan sign-in, if one was added. | Leave in place. |
