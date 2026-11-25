@@ -13,7 +13,7 @@ import { computeReadBudget } from '@/lib/dispatch/read-budget';
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { buildPreservationEnvelope, computePredictedFiles, filterOverlappingPackets } from '@/lib/orchestrator/preservation-envelope';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { findImporters, lineCountsAt, trackedFiles } from '@/lib/repo-files/lookup';
+import { clearTrackedFiles, findImporters, lineCountsAt, trackedFiles } from '@/lib/repo-files/lookup';
 
 let repoPath: string;
 
@@ -105,7 +105,12 @@ it('counts base-branch lines for the merge gate and leaves new files out', async
 it('gives the merge gate no count, so no budget, when the base lookup misses or runs out of time', async () => {
   // The outline database had no row for an unscanned file, and the gate skipped its budget.
   expect((await lineCountsAt(repoPath, 'no-such-branch', ['src/lib/store.ts'])).size).toBe(0);
-  expect((await lineCountsAt(repoPath, 'main', ['src/lib/store.ts'], Date.now() - 1)).size).toBe(0);
+  // A spent deadline returns before Git starts, so no runner can finish the read in time.
+  expect((await lineCountsAt(repoPath, 'main', ['src/lib/store.ts'], Date.now() - 1_000)).size).toBe(0);
+  clearTrackedFiles(repoPath);
+  expect(await trackedFiles(repoPath, Date.now() - 1_000)).toBeNull();
+  // The same read with time left does count the file, so the cases above are misses, not a broken reader.
+  expect(Object.fromEntries(await lineCountsAt(repoPath, 'main', ['src/lib/store.ts']))).toEqual({ 'src/lib/store.ts': 3 });
   expect((await lineCountsAt(join(repoPath, 'missing'), 'main', ['src/lib/store.ts'])).size).toBe(0);
 });
 

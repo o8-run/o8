@@ -52,9 +52,10 @@ function gitEnv(): NodeJS.ProcessEnv {
 }
 
 function git(repoPath: string, args: string[], timeoutMs: number, okCodes: number[] = [0]): Promise<string | null> {
+  if (timeoutMs <= 0) return Promise.resolve(null);
   return new Promise((resolve) => {
     execFile('git', ['-C', repoPath, ...args], {
-      encoding: 'utf8', timeout: Math.max(1, timeoutMs), maxBuffer: MAX_LIST_BYTES, env: gitEnv(), windowsHide: true,
+      encoding: 'utf8', timeout: timeoutMs, maxBuffer: MAX_LIST_BYTES, env: gitEnv(), windowsHide: true,
     }, (error, stdout) => {
       if (!error) return resolve(stdout);
       const code = typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : null;
@@ -256,7 +257,8 @@ export function lineCountsAt(
 ): Promise<Map<string, number>> {
   const counts = new Map<string, number>();
   const unique = [...new Set(files.filter((file) => file && !file.includes('\n')))];
-  if (unique.length === 0 || !ref || ref.startsWith('-')) return Promise.resolve(counts);
+  // A lookup whose deadline has passed does not start: no count, so the gate applies no budget.
+  if (unique.length === 0 || !ref || ref.startsWith('-') || remaining(deadline) <= 0) return Promise.resolve(counts);
   return new Promise((resolve) => {
     const child = spawn('git', ['-C', repoPath, 'cat-file', '--batch'], { env: gitEnv(), stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     const chunks: Buffer[] = [];
@@ -269,7 +271,7 @@ export function lineCountsAt(
       if (child.exitCode === null) child.kill();
       resolve(counts);
     };
-    const timer = setTimeout(finish, Math.max(1, remaining(deadline)));
+    const timer = setTimeout(finish, remaining(deadline));
     child.on('error', finish);
     child.stdin.on('error', () => undefined);
     child.stdout.on('data', (chunk: Buffer) => {
