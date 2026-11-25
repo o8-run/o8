@@ -1,4 +1,6 @@
-import { GET as getDefaults, POST as saveDefaults } from '@/app/api/panel/operator-defaults/route';
+// The handler, not the route: the route forwards to the WS listener when the native
+// transport is on, and in the WS process that is a credential-less call to itself.
+import { GET as getDefaults, POST as saveDefaults } from '@/app/api/panel/operator-defaults/handler';
 import { GET as getConfig } from '@/app/api/setup/config/route';
 import { POST as registerRepo } from '@/app/api/panel/repos/route';
 import { validateRepo } from '@/lib/repos/registry';

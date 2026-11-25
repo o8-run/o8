@@ -1,0 +1,638 @@
+{
+  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). Only the full-suite lane reads this list: a listed file still runs and its failure is reported, not gating. The per-pull-request lane does not read it. Remove a file when it passes; tracked in #6761.",
+  "sourceRun": 45536677599,
+  "issue": 6761,
+  "count": 126,
+  "files": [
+    {
+      "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [] to deeply equal [ 'dialog:allow-open' ]"
+    },
+    {
+      "path": "src/lib/orchestrator/shared-checkout-launch.test.ts",
+      "issue": 6761,
+      "reason": "Error: [vitest] No \"ownedRoots\" export is defined on the \"@/lib/runtimes/shared/owned-session-index\" mock. Did you forget to return it from \"vi.mock\"?"
+    },
+    {
+      "path": "src/lib/prompts/prompt-audit.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'fa7ed5e10c0fd6a923e60a434a2f855de30e4\u2026' to be 'e5131fa215bf23f107a8004e2f32afa374616\u2026'"
+    },
+    {
+      "path": "src/lib/runtimes/shared/owned-session/store-child-exit.test.ts",
+      "issue": 6761,
+      "reason": "Error: Test timed out in 20000ms."
+    },
+    {
+      "path": "src/lib/workspace/hibernator-restorer.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: {\"status\":\"refused\",\"code\":\"park_refused\",\"note\":\"Queue owner unavailable.\"}: expected { status: 'refused', \u2026(3) } to match object { Object (sta"
+    },
+    {
+      "path": "src/lib/workspace/mutation-materialization-guard.test.ts",
+      "issue": 6761,
+      "reason": "Expects a direct merge; new projects are PR-first since #6185, so the fixture needs the explicit direct opt-in."
+    },
+    {
+      "path": "src/lib/workspace/replacement-owned-launch.test.ts",
+      "issue": 6761,
+      "reason": "Owned session storage refuses the fixture session (metadata does not match its owned directory)."
+    },
+    {
+      "path": "tests/agent-rule-coverage-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: node scripts/check-agent-rules.mjs"
+    },
+    {
+      "path": "tests/agent-tile-header-layout-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Build failed with 1 error:"
+    },
+    {
+      "path": "tests/approval-referee-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected undefined to deeply equal Any<String>"
+    },
+    {
+      "path": "tests/approve-and-merge-squash-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { ok: true, result: { \u2026(5) } } to match object { ok: true, result: { merged: true } }"
+    },
+    {
+      "path": "tests/bench-design-gesture-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Test timed out in 15000ms."
+    },
+    {
+      "path": "tests/boot-stable-workspace-receipts-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { merged: false, \u2026(4) } to match object { merged: true }"
+    },
+    {
+      "path": "tests/bot-network-thread-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 503 to be 200"
+    },
+    {
+      "path": "tests/brain-managed-routing-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 503 to be 500"
+    },
+    {
+      "path": "tests/ci-audit-tool-cache-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 1 to be +0"
+    },
+    {
+      "path": "tests/ci-reuse-green-tree.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: o8-next-tests PR admission: expected true to be false"
+    },
+    {
+      "path": "tests/claude-code-worker-skill-isolation-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ StringContaining{\u2026}, 'utf8' ]"
+    },
+    {
+      "path": "tests/cli-packet-target-parsing.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'usage: o8 packet <subcommand> [flags]\u2026' not to contain 'packet policy'"
+    },
+    {
+      "path": "tests/cli-resource-management-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: {"
+    },
+    {
+      "path": "tests/composer-missing-session-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out: composer turn completion. [telemetry] crash capture installed for \"ws-server\""
+    },
+    {
+      "path": "tests/composer-next-worker-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected undefined to match object { status: 'held', payload: { \u2026(1) } }"
+    },
+    {
+      "path": "tests/dev-session-startup-memory-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'Error: Server exited before health' to be null"
+    },
+    {
+      "path": "tests/durable-review-uncommitted-edits-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected undefined to be truthy"
+    },
+    {
+      "path": "tests/effective-policy-correction-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'human' to be 'prepare_pull_request'"
+    },
+    {
+      "path": "tests/execution-carrier-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'codex', 'launch' ]"
+    },
+    {
+      "path": "tests/finished-packet-retirement-cli-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: ENOENT: no such file or directory, symlink '<tmp> -> '<tmp>"
+    },
+    {
+      "path": "tests/gate-failure-warning-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: the automatic rerun never fired"
+    },
+    {
+      "path": "tests/generated-output-cli-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: node scripts/build.mjs"
+    },
+    {
+      "path": "tests/governance-base-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected undefined to be truthy"
+    },
+    {
+      "path": "tests/implementation-notes-artifact-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/inbox-preferences.integration.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 503 to be 200"
+    },
+    {
+      "path": "tests/interrupted-supervisor-recovery-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: spawnSync node ETIMEDOUT"
+    },
+    {
+      "path": "tests/lane-git-remaining-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/lane-host-exec-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Expects a direct merge; new projects are PR-first since #6185, so the fixture needs the explicit direct opt-in."
+    },
+    {
+      "path": "tests/lead-handoff-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [ [ 'exec', '--json', \u2026(11) ], \u2026(22) ] to have a length of 24 but got 23"
+    },
+    {
+      "path": "tests/legacy-output-parking-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected '{\"schema\":\"o8/generated-output-cli/v1\u2026' to contain 'helper is missing'"
+    },
+    {
+      "path": "tests/managed-creation-retirement-refusal-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [Function] to throw error including 'durable workspace ownership was retai\u2026' but got 'forced setup failure'"
+    },
+    {
+      "path": "tests/managed-run-receipt-settlement-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: {"
+    },
+    {
+      "path": "tests/mcp-deferred-tools-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 83 to be greater than 100"
+    },
+    {
+      "path": "tests/mcp-source-boot.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected true to be false"
+    },
+    {
+      "path": "tests/merge-check-stop-race-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: merge returned before reaching the verification boundary"
+    },
+    {
+      "path": "tests/merge-checkout-coupling-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { \u2026(11) } to match object { Object (wouldMerge, blockers, ...) }"
+    },
+    {
+      "path": "tests/merge-preview-all-gates-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [ 'file-size-approval', 'pr-only' ] to deeply equal [ 'file-size-approval' ]"
+    },
+    {
+      "path": "tests/merge-settles-on-cleanup-refusal-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/metered-cap-archive-contention-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected '\\u001b[33m(!) Your Vite config uses f\u2026' to contain '[cap-archive] Archive refused by the \u2026'"
+    },
+    {
+      "path": "tests/mission-merge-hold-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: {\"ok\":false,\"code\":\"head_moved_since_review\",\"error\":\"The head changed after approval. Return to review before merging.\",\"approval\":{\"id\":\"appro"
+    },
+    {
+      "path": "tests/mission-project-capture-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for owned CLI launched from captured project."
+    },
+    {
+      "path": "tests/mobile-inbox-referee-chips-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 0 to be greater than 0"
+    },
+    {
+      "path": "tests/native-pr-stack-read-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 421 to be 401"
+    },
+    {
+      "path": "tests/native-test-shard-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: ENOENT: no such file or directory, scandir '<tmp> shards-qZW3Yx/target/debug/deps'"
+    },
+    {
+      "path": "tests/native-verified-peer.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 403 to be 200"
+    },
+    {
+      "path": "tests/next-fetch-native-method.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'http://127.0.0.1:45539/api/v2/proxy/l\u2026' to be 'http://127.0.0.1:45727/api/v2/proxy/l\u2026'"
+    },
+    {
+      "path": "tests/next-history-real-path.test.ts",
+      "issue": 6761,
+      "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
+    },
+    {
+      "path": "tests/next-monaco-build-failure-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected +0 to be 2"
+    },
+    {
+      "path": "tests/next-workers-real-path.test.ts",
+      "issue": 6761,
+      "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
+    },
+    {
+      "path": "tests/o8-next-bundle-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: node:internal/modules/esm/resolve:275"
+    },
+    {
+      "path": "tests/o8-serve-governed-loop-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: ENOENT: no such file or directory, open '<tmp>"
+    },
+    {
+      "path": "tests/o8d-composer-admission-real-path.test.ts",
+      "issue": 6761,
+      "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
+    },
+    {
+      "path": "tests/o8d-composer-queue-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { Object (error) } to deeply equal { items: [], canSteer: false, \u2026(1) }"
+    },
+    {
+      "path": "tests/o8d-cortex-writes-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'typescript' to be 'o8d'"
+    },
+    {
+      "path": "tests/o8d-file-assets-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Native route selection drifted: AssertionError: Native route was not reached: /api/panel/file-io?path=%2Ftmp%2Fo8g-oWLdql%2Fo8-test-data-run-d"
+    },
+    {
+      "path": "tests/o8d-lane-review-diff-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Native route selection drifted: AssertionError: Native route was not reached: case=0 /api/lanes/lane-42eb9ef9-c28/diff counts=[{\"nonce\":22,\"ph"
+    },
+    {
+      "path": "tests/o8d-mcp-receipts-corrections-native-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [ 'GET', \u2026(2) ] to deeply equal [ 'GET', \u2026(2) ]"
+    },
+    {
+      "path": "tests/o8d-parity-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Native route selection drifted: Error: Flag-off request unexpectedly served natively"
+    },
+    {
+      "path": "tests/o8d-repo-spec-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Native route selection drifted: AssertionError: Native route was not reached: /api/repo-spec?repoPath=%2Ftmp%2Fo8g-DVin8b%2Fo8-test-data-run-U"
+    },
+    {
+      "path": "tests/o8d-repository-parity-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Native route selection drifted: Error: Flag-off repository request unexpectedly served natively"
+    },
+    {
+      "path": "tests/o8d-rust-projects-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: node --import ./scripts/register-server-only-stub.mjs --import tsx tests/fixtures/o8d-projects-parity.mts crates/o8d/target/debug/o"
+    },
+    {
+      "path": "tests/o8d-rust-settings-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: node --import ./scripts/register-server-only-stub.mjs --import tsx tests/fixtures/o8d-settings-parity.mts crates/o8d/target/debug/o"
+    },
+    {
+      "path": "tests/o8d-rust-write-path-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: node scripts/o8d/build-write-fixture.mjs /home/runner/work/o8/o8 crates/o8d/target <tmp>"
+    },
+    {
+      "path": "tests/o8d-session-rule-reads-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Native route selection drifted: AssertionError: Native route was not reached: /api/orchestrator/session-rules: expected null to be '1'"
+    },
+    {
+      "path": "tests/o8d-setup-writes-native-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 404 to be 200"
+    },
+    {
+      "path": "tests/o8d-sidebar-mutations-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: cargo run --quiet --locked --manifest-path native/o8-next/test-support/sidebar-client/Cargo.toml -- http://127.0.0.1:39527 <tmp> co"
+    },
+    {
+      "path": "tests/o8d-supervisor-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Fixture route refused: 500 {\"error\":\"Worker supervisor refused: disconnected\"}"
+    },
+    {
+      "path": "tests/o8d-verified-peer-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 403 to be 200"
+    },
+    {
+      "path": "tests/o8d-window-owner-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 401 to be 200"
+    },
+    {
+      "path": "tests/operator-defaults-mcp-routing.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected +0 to be 1"
+    },
+    {
+      "path": "tests/operator-mcp-review-merge-freshness-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Expects a direct merge; new projects are PR-first since #6185, so the fixture needs the explicit direct opt-in."
+    },
+    {
+      "path": "tests/orchestrator-error-text-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for turn settlement: codex-orchestrator-12a524f4-thoughts-error-turn-1795577874708 for <tmp> (thoughts-error-turn-1795577874708)"
+    },
+    {
+      "path": "tests/orchestrator-handoff-transport-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Error: Timed out waiting for persisted Measured work is ready. Independent review remains pending; do not merge or reset retry counters.: es, recovered 0"
+    },
+    {
+      "path": "tests/orchestrator-mcp-owned-root-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { \u2026(10) } to match object { \u2026(3) }"
+    },
+    {
+      "path": "tests/orchestrator-model-attribution-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'The composer queue owner request was \u2026' to contain 'PNG, JPEG, GIF, or WebP'"
+    },
+    {
+      "path": "tests/orchestrator-replay-restart-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Test timed out in 60000ms."
+    },
+    {
+      "path": "tests/orchestrator-stop-turn-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for turn to start: ortex-codex-orchestrator-2271d758-thoughts-stop-turn-1795577471855 for <tmp> (thoughts-stop-turn-1795577471855)"
+    },
+    {
+      "path": "tests/packaging-preflight-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected '[sign-and-notarize] refusing non-univ\u2026' to contain 'appBundleBytes'"
+    },
+    {
+      "path": "tests/packet-launch-budget-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Needs the built application CLI, which the full-suite lane does not build."
+    },
+    {
+      "path": "tests/pi-builtin-worker-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/pi-outside-workspace-ws-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for completed turn: none) \u00b7 concurrency 4 \u00b7 next-due <tmp>"
+    },
+    {
+      "path": "tests/pi-sdk-approved-write-races-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [Function] to throw error including 'Approved file commit refused' but got 'Pi write helper is missing from this \u2026'"
+    },
+    {
+      "path": "tests/postship-prebuild-lifecycle.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: error: rustup could not choose a version of cargo to run, because one wasn't specified explicitly, and no default is configured."
+    },
+    {
+      "path": "tests/prepared-mission-dispatch-guidance-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { \u2026(56) } to match object { \u2026(3) }"
+    },
+    {
+      "path": "tests/project-verification-dispatch-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'blocked' to be 'launching'"
+    },
+    {
+      "path": "tests/provider-key-refresh-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: sibling exit=13; Warning: Detected unsettled top-level await at file://[eval1]:29"
+    },
+    {
+      "path": "tests/queued-composer-execution-real-path.test.ts",
+      "issue": 6761,
+      "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
+    },
+    {
+      "path": "tests/real-path-seams.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 400 to be 201"
+    },
+    {
+      "path": "tests/realtime-session-history-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for first quiet safety read. Server output: tal)"
+    },
+    {
+      "path": "tests/release-native-cache.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: [tauri-prebuild] rebuilding artifact: manifest_missing"
+    },
+    {
+      "path": "tests/remote-governed-squash-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Expects a direct merge; new projects are PR-first since #6185, so the fixture needs the explicit direct opt-in."
+    },
+    {
+      "path": "tests/remote-release-app.test.ts",
+      "issue": 6761,
+      "reason": "Error: Contents/MacOS/o8d is missing from the macOS app bundle"
+    },
+    {
+      "path": "tests/require-approval-merge-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { \u2026(2) } to match object { packet: { \u2026(3) } }"
+    },
+    {
+      "path": "tests/retained-completion-handoff-real-path.test.ts",
+      "issue": 6761,
+      "reason": "EffortPinRejectionError: Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started."
+    },
+    {
+      "path": "tests/review-author-handoff-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [ { file: 'answer.txt', \u2026(6) }, \u2026(1) ] to deeply equal [ ObjectContaining{\u2026} ]"
+    },
+    {
+      "path": "tests/review-file-previews.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/review-head-integrity.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/review-idle-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for authenticated commentary poll: [telemetry] crash capture installed for \"ws-server\""
+    },
+    {
+      "path": "tests/review-outcome-reuse-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected '<context>\\n## Project Scope\\n- Projec\u2026' to contain '## Relevant Review Outcomes'"
+    },
+    {
+      "path": "tests/review-run-evidence-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Expects a direct merge; new projects are PR-first since #6185, so the fixture needs the explicit direct opt-in."
+    },
+    {
+      "path": "tests/security-scanner-ci-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: Secret scanner evidence unavailable or invalid"
+    },
+    {
+      "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Packaged bundle did not answer its protocol"
+    },
+    {
+      "path": "tests/shared-checkout-control-errors-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'Checkout review is stale. Inspect and\u2026' to contain 'cortex_reconcile_shared_team'"
+    },
+    {
+      "path": "tests/telemetry-default-on.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected '[operator]\\nparallel_cap = 3\\n' to contain 'product_enabled = \"\"'"
+    },
+    {
+      "path": "tests/terminal-release-durable-mission-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 0 to be greater than 0"
+    },
+    {
+      "path": "tests/update-merge-reservation-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true"
+    },
+    {
+      "path": "tests/visualization-mcp-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [] to deeply equal [ 'o8_result_page' ]"
+    },
+    {
+      "path": "tests/wake-triage-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'idle' to be 'awaiting_orchestrator'"
+    },
+    {
+      "path": "tests/warm-packet-receipts-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Warm Git administration changed; retaining the tree."
+    },
+    {
+      "path": "tests/worker-corrections-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: {\"error\":\"Worker ownership changed.\",\"notAdmitted\":true}: expected 409 to be 200"
+    },
+    {
+      "path": "tests/worker-environment-launch-call-sites.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [ \u2026(2) ] to deeply equal []"
+    },
+    {
+      "path": "tests/workspace-manifest-lifecycle-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected Error: Managed worktree was prepared with\u2026 { cleanup: { \u2026(2) } } to match object { message: StringContaining{\u2026}, \u2026(1) }"
+    },
+    {
+      "path": "tests/workspace-park-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Owned session storage refuses the fixture session (metadata does not match its owned directory)."
+    },
+    {
+      "path": "tests/workspace-review-linked-issues-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [] to deeply equal [ 8 ]"
+    },
+    {
+      "path": "tests/workspace-services-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Command failed: tmux display-message -p #{pid}"
+    },
+    {
+      "path": "tests/worktree-side-merge-real-git.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { ok: false, \u2026(3) } to match object { ok: false, \u2026(2) }"
+    },
+    {
+      "path": "tests/ws-lag-evidence-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for lag CPU evidence"
+    },
+    {
+      "path": "tests/ws-parity-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 'parity failed at actions/1/entries/2/\u2026' to contain 'parity passed'"
+    },
+    {
+      "path": "tests/ws-work-soak-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Needs the built application CLI, which the full-suite lane does not build."
+    }
+  ]
+}

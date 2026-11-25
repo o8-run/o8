@@ -18,8 +18,6 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
   const cliEntry = join(directory, 'o8-cli.mjs');
   const device = 'task-lane-fixture-device-0123456789abcdef';
   const worker = 'task-lane-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     await buildCliBundle(cliEntry, 'test-fixture');
@@ -45,6 +43,9 @@ it.skipIf(process.platform === 'win32')('creates tasks and reaps stale lanes nat
     const { repoPath } = JSON.parse(seededRepo.stdout.split('\n').find(line => line.startsWith('seed '))!.slice(5)) as { repoPath: string };
 
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const apiPort = new URL(origin).port;

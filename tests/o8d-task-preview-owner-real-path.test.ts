@@ -15,8 +15,6 @@ it.skipIf(process.platform === 'win32')('serves task preview with operator auth 
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-task-preview-owner-')));
   const device = 'preview-fixture-device-0123456789abcdef';
   const worker = 'preview-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   // Seed only owned close callbacks, not the handler or its auth. The real preview
   // module must find these in the WS process for native and forwarded DELETEs.
   const log = join(directory, 'closed.jsonl');
@@ -31,6 +29,9 @@ it.skipIf(process.platform === 'win32')('serves task preview with operator auth 
   try {
     server = await startParityReference({ o8d: true, nativeHttp: true, directory, preload, startupTimeoutMs: 120_000,
       binary });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     expect((await (await fetch(`${origin}/health`)).json()).delivery.transport).toBe('o8d');

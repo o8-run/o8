@@ -29,9 +29,10 @@ beforeAll(async () => {
   createLane({ packetId: 'fixture-packet', repoPath: directory, runtime: 'codex', branch: 'main', baseBranch: 'main' });
   mkdirSync(join(directory, 'chat-history'), { recursive: true });
   writeFileSync(join(directory, 'chat-history', 'thoughts-fixture.json'), JSON.stringify({ title: 'Native history', messages: [{ id: 'm1', role: 'user', content: 'Saved on disk', timestamp: 1 }] }));
+  server = await startParityReference({ o8d: true, nativeHttp: true, startupTimeoutMs: 120_000, directory });
+  // Boot rebuilds the device projection and the local worker token, so seed both after it.
   writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
   writeFileSync(join(directory, 'worker-token'), worker);
-  server = await startParityReference({ o8d: true, nativeHttp: true, startupTimeoutMs: 120_000, directory });
   await server.stopNext();
   origin = server.url.replace('ws:', 'http:').replace('/ws', '');
 }, 180_000);

@@ -18,12 +18,13 @@ it.skipIf(process.platform === 'win32')('serves operator status and agent setup 
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-operator-status-')));
   const device = 'operator-status-fixture-device-0123456789abcdef';
   const worker = 'operator-status-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   const saved = { ...process.env };
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const operator = { authorization: `Bearer ${server.token}` };

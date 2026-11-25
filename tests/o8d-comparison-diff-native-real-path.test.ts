@@ -13,8 +13,6 @@ it.skipIf(process.platform === 'win32')('serves the comparison diff natively wit
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'o8-comparison-diff-')));
   const device = 'comparison-diff-fixture-device-0123456789abcdef';
   const worker = 'comparison-diff-fixture-worker-0123456789abcdef';
-  writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
-  writeFileSync(join(directory, 'worker-token'), worker);
   const repo = join(directory, 'candidate');
   mkdirSync(repo);
   const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -35,6 +33,9 @@ it.skipIf(process.platform === 'win32')('serves the comparison diff natively wit
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
+    // Boot rebuilds the device projection and the local worker token, so seed both after it.
+    writeFileSync(join(directory, 'mobile-device-tokens'), createHash('sha256').update(device).digest('hex'));
+    writeFileSync(join(directory, 'worker-token'), worker);
     await server.stopNext();
     const origin = server.url.replace('ws:', 'http:').replace('/ws', '');
     const read = (query: string, bearer?: string) => fetch(`${origin}/api/orchestrator/comparison-diff?${query}`,

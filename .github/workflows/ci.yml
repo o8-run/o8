@@ -395,8 +395,12 @@ jobs:
     name: Weekly Integration Tests (shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-24.04
     needs: test
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == '')
-    timeout-minutes: 60
+    # The explicit result check replaces the implicit success(), which reads the
+    # always-skipped reuse job upstream of test and skipped every full run from
+    # 2026-11-15 on.
+    if: cancelled() == false && needs.test.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.schedule == '17 5 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.integration_base == ''))
+    # Run 45536677599 (2026-11-25): shard 5 reached file 186 of 203 at 60 minutes.
+    timeout-minutes: 75
     # A newer main push supersedes an older full-suite shard; the Sunday run is never cancelled.
     concurrency:
       group: integration-weekly-${{ github.event_name }}-${{ matrix.shard }}
@@ -426,7 +430,9 @@ jobs:
       - run: npm run test:integration
         env:
           O8_INTEGRATION_SHARD: ${{ matrix.shard }}/6
-          O8_INTEGRATION_BASELINE: tests/integration-linux-baseline.json
+          # Files red on unmodified main, each with its reason (#6761). The
+          # per-pull-request lane keeps the empty baseline above.
+          O8_INTEGRATION_BASELINE: tests/integration-quarantine.json
 
   integration-weekly-report:
     name: Weekly Integration Report
