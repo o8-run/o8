@@ -295,6 +295,10 @@ impl Window {
             .env("O8_NEXT_PARENT_PIPE", "1")
             // Quit belongs to this launcher, not to the window process (#6532).
             .env("O8_NEXT_QUIT_VIA_PARENT", "1");
+        // Hands pages the window freed after start-up back to macOS; the window
+        // drops it before it starts anything else.
+        #[cfg(target_os = "macos")]
+        command.env(o8_launch_core::server_env::MALLOC_SPACE_EFFICIENT, "1");
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(_) => {

@@ -281,6 +281,7 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 fn main() -> ExitCode {
+    unsafe { std::env::remove_var("MallocSpaceEfficient") }; // SAFETY: runs before any thread.
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

@@ -4,6 +4,7 @@
 import http.client,json,os,signal,socket,sys,threading
 from http.server import ThreadingHTTPServer,BaseHTTPRequestHandler
 args=sys.argv[1:]
+open(os.path.join(os.path.dirname(os.path.abspath(__file__)),'o8d-env'),'w').write(json.dumps({'MallocSpaceEfficient':os.environ.get('MallocSpaceEfficient')}))
 path=args[args.index('--producer-socket')+1]
 port=int(args[args.index('--listen')+1].rsplit(':',1)[1])
 upstream=None

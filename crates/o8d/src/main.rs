@@ -16,8 +16,20 @@ use tokio::{
 #[cfg(feature = "experimental-ws")]
 use uuid::Uuid;
 
-#[tokio::main(worker_threads = 2)]
-async fn main() {
+fn main() {
+    // The launcher starts o8d with macOS's space-efficient allocator; it is read
+    // at process start, so drop it here, before any thread exists, and the
+    // workers and tools o8d starts keep the default allocator.
+    std::env::remove_var("MallocSpaceEfficient");
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("o8d runtime");
+    runtime.block_on(start());
+}
+
+async fn start() {
     if run().await.is_err() {
         eprintln!("o8d failed: verify opt-in, listener, credential, and producer input");
         std::process::exit(1);

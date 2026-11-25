@@ -162,6 +162,18 @@ fn next_off_window_survives_a_ws_restart_and_keeps_browser_control() {
     assert_eq!(env["O8_NEXT_API_TOKEN"], "fixture-token");
     assert_eq!(env["O8_NEXT_PARENT_PIPE"], "1");
     assert_eq!(env["O8_DATA_DIR"], serde_json::Value::Null);
+    // On macOS the window and o8d both start with the allocator that returns
+    // freed pages, as the Node servers do.
+    let space_efficient = if cfg!(target_os = "macos") {
+        serde_json::json!("1")
+    } else {
+        serde_json::Value::Null
+    };
+    assert_eq!(env["MallocSpaceEfficient"], space_efficient);
+    assert_eq!(
+        self::env(&f, "o8d-env")["MallocSpaceEfficient"],
+        space_efficient
+    );
     let args: Vec<String> =
         serde_json::from_slice(&fs::read(f.root.join("window-args")).unwrap()).unwrap();
     let api = f.port("api-port");
