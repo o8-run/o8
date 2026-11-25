@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { platform } from 'node:os';
-import { localMachineName } from '@/lib/mobile/machine-name';
 import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 
@@ -13,6 +12,7 @@ import {
   type MachineRegistryError,
 } from '@/lib/connect/machine-registry';
 import { writeConnectAttachEnabled } from '@/lib/connect/attach-settings';
+import { accountMachineLabel, normalizeMachineLabel, saveMachineLabel } from '@/lib/connect/machine-label';
 import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
 
@@ -77,20 +77,43 @@ function disableAttachAfterDisconnect(): void {
   }
 }
 
+/** An optional `{ name }` body renames this computer before it registers. */
+async function requestedLabel(request: Request): Promise<{ label: string | null } | { invalid: true }> {
+  const text = await request.text().catch(() => '');
+  if (!text.trim()) return { label: null };
+  let body: unknown;
+  try { body = JSON.parse(text); } catch { return { invalid: true }; }
+  const name = (body as { name?: unknown } | null)?.name;
+  if (name === undefined) return { label: null };
+  const label = normalizeMachineLabel(name);
+  return label ? { label } : { invalid: true };
+}
+
 export async function POST(request: Request) {
   try {
     const options = registryOptions(request);
     if (!options) return authRequired();
+    const requested = await requestedLabel(request);
+    if ('invalid' in requested) {
+      return NextResponse.json({
+        ok: false,
+        error: { code: 'invalid_name', status: 400, message: 'Give this computer a name of 1 to 80 characters.' },
+        hint: null,
+      }, { status: 400 });
+    }
+    if (requested.label) saveMachineLabel(requested.label);
     const installId = getOrCreateInstallId();
+    const name = accountMachineLabel();
     const result = await registerMachine({
       installId,
-      name: localMachineName(),
+      name,
       platform: platform(),
       appVersion: appVersion(),
     }, options);
     if (!result.ok) return registryFailure(result.error);
     return NextResponse.json({
       ok: true,
+      name,
       machineId: result.data.machineId,
       deviceCap: result.data.deviceCap,
       devices: result.data.devices,

@@ -228,7 +228,7 @@ commands:
   lead status          read a compact persisted receipt without calling the model
   lead wait            bounded wait for receipt updates or a terminal state
   lead stop            durably stop the lead; recovery cannot auto-resume it
-  connect [--status|--sign-in]  register this signed-in machine, list connected machines, or sign in with a code
+  connect [--name <name>|--status|--sign-in]  register this signed-in machine under a name, list connected machines, or sign in with a code
   disconnect           remove this machine from the operator's connected devices
   run-heavy -- <cmd>   queue a native build or full suite on this machine
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
@@ -407,7 +407,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'lead':
       return runLead(args.mode, secondary, args.rest);
     case 'connect':
-      return runConnect(args.mode, 'connect', secondary ? [secondary, ...args.rest] : args.rest);
+      return runConnect(args.mode, 'connect', singleLevelArgs(secondary, args.rest, args.secondaryBeforeRest));
     case 'disconnect':
       return runConnect(args.mode, 'disconnect', secondary ? [secondary, ...args.rest] : args.rest);
     case 'run':

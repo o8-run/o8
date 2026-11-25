@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -216,6 +216,30 @@ describe('o8 connect CLI real path', () => {
       machineId: 'machine_current',
     });
     expect(devices).toEqual([]);
+  }, 30_000);
+
+  it('registers under a generic name by default and under a name the user chose, never the host name', async () => {
+    registryMode = 'normal';
+    devices = [];
+    rmSync(path.join(dataDir, 'computer-name'), { force: true });
+
+    const connected = await runCli(['connect']);
+    expect(connected.exitCode, connected.stderr).toBe(0);
+    const generic = ({ darwin: 'Mac', win32: 'Windows PC', linux: 'Linux computer' } as Record<string, string>)[process.platform] ?? 'Computer';
+    expect(JSON.parse(connected.stdout)).toMatchObject({ ok: true, name: generic });
+    expect(devices[0]?.name).toBe(generic);
+    expect(devices[0]?.name).not.toBe(os.hostname());
+
+    const renamed = await runCli(['connect', '--name', 'Studio']);
+    expect(renamed.exitCode, renamed.stderr).toBe(0);
+    expect(JSON.parse(renamed.stdout)).toMatchObject({ ok: true, name: 'Studio', machineId: 'machine_current' });
+    expect(devices.map((device) => device.name)).toEqual(['Studio']);
+    expect(readFileSync(path.join(dataDir, 'computer-name'), 'utf8')).toBe('Studio\n');
+
+    const blank = await runCli(['connect', '--name', '   ']);
+    expect(blank.exitCode).not.toBe(0);
+    expect(devices.map((device) => device.name)).toEqual(['Studio']);
+    rmSync(path.join(dataDir, 'computer-name'), { force: true });
   }, 30_000);
 
   it('renders the three-device cap with the device list and recovery command', async () => {
