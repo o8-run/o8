@@ -18,7 +18,7 @@ import { APPROVE_TOOLS, handleApprove, handleApproveAndMerge, handleMergePreview
 import { AGENT_MESSAGE_TOOLS, handleAgentMessageAgents, handleAgentMessageInbox, handleAgentMessageSend } from '@/lib/mcp/operator-handlers/agents';
 import { CANVAS_TOOLS, handleCanvas, handleRender } from '@/lib/mcp/operator-handlers/canvas';
 import { VISUALIZATION_TOOLS, handleHtmlPreview, handleHtmlRender, handleVisualizationRead } from '@/lib/mcp/operator-handlers/visualization';
-import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastSay, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
+import { BROADCAST_TOOLS, handleBroadcastPost, handleBroadcastToken } from '@/lib/mcp/operator-handlers/broadcast';
 import { CLOSE_PACKET_TOOLS, handleClosePacketUnmerged } from '@/lib/mcp/operator-handlers/close-packet';
 import { CORTEX_TOOLS, CORTEX_HANDLERS } from '@/lib/mcp/operator-handlers/cortex';
 import { DIGEST_TOOLS, handleDigest, handleFetchRaw } from '@/lib/mcp/operator-handlers/digest';
@@ -280,7 +280,6 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_msg_inbox: handleAgentMessageInbox,
   o8_msg_agents: handleAgentMessageAgents,
   o8_broadcast_post: handleBroadcastPost,
-  o8_broadcast_say: handleBroadcastSay,
   o8_broadcast_token: handleBroadcastToken,
   o8_update_apply: handleUpdateApply,
   o8_list_repos: handleListRepos,

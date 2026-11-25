@@ -612,7 +612,6 @@
     "shared:entry:src/app/api/bots/route.ts": 2744,
     "shared:entry:src/app/api/broadcast/calendar/route.ts": 5685,
     "shared:entry:src/app/api/broadcast/commentary/route.ts": 3696,
-    "shared:entry:src/app/api/broadcast/say/route.ts": 3128,
     "shared:entry:src/app/api/broadcast/why/route.ts": 4135,
     "shared:entry:src/app/api/browser/agent/route.ts": 10920,
     "shared:entry:src/app/api/browser/engine/capture/route.ts": 1155,

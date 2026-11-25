@@ -386,14 +386,14 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     // stamps the peer before the gate; Origin checks and target restrictions stay unchanged. (#5243)
     route('/api/browser/proxy', 'GET HEAD', () => import('@/app/api/browser/proxy/route')),
     route('/api/broadcast/why', 'GET', () => import('@/app/api/broadcast/why/route')),
-    // Symon's commentary reader (lib/broadcast/speaker.ts) and broadcast spectators. GET only. The
+    // Broadcast spectators. GET only. The
     // middleware admits the operator ws-token and an active spectator token (SPECTATOR_CAPABILITIES,
     // GET/HEAD), and requireBroadcastReader re-checks the principal from the bearer, never the client
     // address. Spectators read the whole commentary feed by design (repo grants scope only truth); actor
     // and text go through the broadcast projection's read-time redaction, the same as on Next.
     route('/api/broadcast/commentary', 'GET', () => import('@/app/api/broadcast/commentary/route')),
     route('/api/broadcast/calendar', 'POST', () => import('@/app/api/broadcast/calendar/route')),
-    // Operator-principal writes (resolveRequestPrincipal / handleBroadcastSay refuse any other role), never
+    // Operator-principal writes (resolveRequestPrincipal refuses any other role), never
     // x-o8-client-addr or loopback. Both store in SQLite; pull-request-context reads conversations from disk
     // and its refresh=1 / refresh=missing reads call the GitHub broker's single-PR sync (ensureGitHubPullRequest),
     // which shares its token and request-budget caches with the open-PR sync the native /api/panel/prs uses. (#5422)
@@ -401,7 +401,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/broadcast/automation-say', 'POST', () => import('@/lib/broadcast/automation-say-route')),
     route('/api/broadcast/post', 'POST', () => import('@/lib/broadcast/post-route')),
     route('/api/broadcast/tokens', 'POST', () => import('@/lib/broadcast/tokens-route')),
-    route('/api/broadcast/say', 'POST', () => import('@/app/api/broadcast/say/route')),
     // o8 team presence, messages and tell for Symon: operator-only through the
     // middleware (none is on a device, worker or loopback list), principal from the
     // bearer. They read and append the files under each registered repo's

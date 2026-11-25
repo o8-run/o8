@@ -6,42 +6,30 @@ import {
   resolveBroadcastCommentaryDefaults,
 } from './broadcast-commentary-defaults';
 
-describe('Broadcast voice operator defaults', () => {
-  it('starts with safe quiet hours and every high-signal subscription enabled', () => {
+describe('Broadcast operator defaults', () => {
+  it('starts with the feed off and the Calendar and check-in posts enabled', () => {
     expect(resolveBroadcastCommentaryDefaults({})).toMatchObject({
       broadcastVoice: 'off',
-      broadcastVoiceQuietHours: 'on',
-      broadcastVoiceQuietStart: '22:00',
-      broadcastVoiceQuietEnd: '08:00',
-      broadcastVoiceAttention: true,
-      broadcastVoiceApprovals: true,
-      broadcastVoiceReviews: true,
-      broadcastVoiceFailures: true,
-      broadcastVoiceCompletions: true,
       broadcastVoiceCalendar: true,
       broadcastVoiceCalendarLeadMinutes: 15,
       broadcastVoiceTimeCheckins: true,
     });
   });
 
-  it('round-trips valid policy updates and rejects malformed local times', () => {
+  it('round-trips valid policy updates and rejects an out-of-range lead time', () => {
     const stored = { ...BROADCAST_COMMENTARY_FALLBACK };
     applyBroadcastCommentaryUpdate(stored, {
       broadcastVoice: 'on',
-      broadcastVoiceQuietStart: '21:30',
-      broadcastVoiceQuietEnd: '07:15',
-      broadcastVoiceCompletions: false,
+      broadcastVoiceTimeCheckins: false,
       broadcastVoiceCalendarLeadMinutes: 20,
     });
     expect(stored).toMatchObject({
       broadcastVoice: 'on',
-      broadcastVoiceQuietStart: '21:30',
-      broadcastVoiceQuietEnd: '07:15',
-      broadcastVoiceCompletions: false,
+      broadcastVoiceTimeCheckins: false,
       broadcastVoiceCalendarLeadMinutes: 20,
     });
     expect(() => applyBroadcastCommentaryUpdate(stored, {
-      broadcastVoiceQuietStart: '25:00',
-    })).toThrow(/HH:MM/);
+      broadcastVoiceCalendarLeadMinutes: 1_441,
+    })).toThrow(/1 through 1440/);
   });
 });

@@ -9,18 +9,6 @@ import {
 
 export const BROADCAST_TOOLS: McpTool[] = [
   {
-    name: 'o8_broadcast_say',
-    description: 'Post one Symon commentary line and put it next in the Broadcast voice queue.',
-    inputSchema: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        text: { type: 'string', minLength: 1, maxLength: 2000 },
-      },
-      required: ['text'],
-    },
-  },
-  {
     name: 'o8_broadcast_post',
     description: 'Set or clear the live Broadcast focus, or post commentary and conversation lines.',
     inputSchema: {
@@ -56,20 +44,6 @@ export const BROADCAST_TOOLS: McpTool[] = [
     },
   },
 ];
-
-export async function handleBroadcastSay(args: Record<string, unknown>): Promise<McpToolResult> {
-  if (typeof args.text !== 'string' || !args.text.trim()) {
-    return textResult('text is required.', true);
-  }
-  try {
-    return jsonResult(await apiFetch('/api/broadcast/say', {
-      method: 'POST',
-      body: JSON.stringify({ text: args.text.trim() }),
-    }));
-  } catch (error) {
-    return textResult(`o8_broadcast_say failed: ${errorText(error)}`, true);
-  }
-}
 
 export async function handleBroadcastPost(args: Record<string, unknown>): Promise<McpToolResult> {
   if (args.kind !== 'commentary' && args.kind !== 'conversation' && args.kind !== 'focus') {

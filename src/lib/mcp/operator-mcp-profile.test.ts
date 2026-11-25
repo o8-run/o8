@@ -59,12 +59,5 @@ describe('operator MCP process profiles', () => {
       required: ['kind'],
     });
     expect(restrictedNames).not.toContain('o8_broadcast_post');
-    expect(fullTools.find((tool) => tool.name === 'o8_broadcast_say')?.inputSchema).toMatchObject({
-      type: 'object',
-      additionalProperties: false,
-      properties: { text: { maxLength: 2000 } },
-      required: ['text'],
-    });
-    expect(restrictedNames).not.toContain('o8_broadcast_say');
   });
 });

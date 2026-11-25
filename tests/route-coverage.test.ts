@@ -278,7 +278,6 @@ const EXPLICIT_GATED = [
   /^\/api\/orchestrator\/receipts\/?$/,
   /^\/api\/broadcast\/tokens\/?$/,
   /^\/api\/broadcast\/post\/?$/,
-  /^\/api\/broadcast\/say\/?$/,
 ];
 const SPECTATOR_READ = [
   /^\/api\/broadcast\/events\/?$/,

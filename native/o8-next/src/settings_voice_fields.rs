@@ -1,4 +1,5 @@
-//! Classic Voice > Proactive attention, using its shared persisted settings.
+//! Classic Voice > Proactive attention: Broadcast commentary and the automation and Calendar
+//! posts, using their shared persisted settings.
 use super::*;
 pub(super) const FIELDS: &[Field] = &[
     field(
@@ -10,93 +11,37 @@ pub(super) const FIELDS: &[Field] = &[
     ),
     field(
         "broadcastVoice",
-        "Spoken updates",
+        "Automation and Calendar posts",
         "voice",
-        "Read commentary and subscribed work notifications aloud. This sound setting does not enable automatic AI commentary.",
+        "Let scheduled automation check-ins and upcoming Calendar events post to the Broadcast feed.",
         Kind::WordToggle("on"),
     ),
     field(
         "broadcastCommentaryMaxPerHour",
         "Hourly budget",
         "voice",
-        "Maximum automatic commentary and spoken updates in any rolling hour (1–60).",
+        "Maximum automatic commentary in any rolling hour (1–60).",
         NUMBER,
-    ),
-    field(
-        "broadcastVoiceQuietHours",
-        "Quiet hours",
-        "voice",
-        "Automatic callouts stay silent; a line you explicitly request can still play.",
-        Kind::WordToggle("on"),
-    ),
-    field(
-        "broadcastVoiceQuietStart",
-        "Quiet hours start",
-        "voice",
-        "Uses this computer's local time and may cross midnight (HH:MM).",
-        Kind::Time,
-    ),
-    field(
-        "broadcastVoiceQuietEnd",
-        "Quiet hours end",
-        "voice",
-        "Uses this computer's local time and may cross midnight (HH:MM).",
-        Kind::Time,
-    ),
-    field(
-        "broadcastVoiceAttention",
-        "Work needs you",
-        "voice",
-        "A current lane is waiting for operator input.",
-        BOOL,
-    ),
-    field(
-        "broadcastVoiceApprovals",
-        "Approvals",
-        "voice",
-        "A new approval is still pending when Symon is ready to speak.",
-        BOOL,
-    ),
-    field(
-        "broadcastVoiceReviews",
-        "Review verdicts",
-        "voice",
-        "Review approved the packet or requested changes.",
-        BOOL,
-    ),
-    field(
-        "broadcastVoiceFailures",
-        "Failures and limits",
-        "voice",
-        "A packet failed, reached a spending cap or timed out.",
-        BOOL,
-    ),
-    field(
-        "broadcastVoiceCompletions",
-        "Completed work",
-        "voice",
-        "A packet completed or merged.",
-        BOOL,
     ),
     field(
         "broadcastVoiceCalendar",
         "Calendar events",
         "voice",
-        "An upcoming timed event is still in the future when Symon is ready to speak.",
+        "Post an upcoming timed event once, before it starts.",
         BOOL,
     ),
     field(
         "broadcastVoiceCalendarLeadMinutes",
         "Calendar lead time",
         "voice",
-        "Minutes before an event becomes eligible for one deduplicated callout (1–1440).",
+        "Minutes before an event becomes eligible for one deduplicated post (1–1440).",
         NUMBER,
     ),
     field(
         "broadcastVoiceTimeCheckins",
         "Time check-ins",
         "voice",
-        "After a quiet interval, summarize the active focus once; use Automations for scheduled summaries.",
+        "Let a scheduled automation post one focus-aware check-in.",
         BOOL,
     ),
 ];

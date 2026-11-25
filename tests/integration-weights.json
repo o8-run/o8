@@ -255,8 +255,6 @@
   "tests/broadcast-commentary-settings-real-path.test.ts": 3,
   "tests/broadcast-director-real-path.test.ts": 3,
   "tests/broadcast-followup-real-path.test.ts": 3,
-  "tests/broadcast-speaker-real-path.test.ts": 3,
-  "tests/broadcast-voice-repetition-real-path.test.ts": 3,
   "tests/browser-prerequisites-real-path.test.ts": 1,
   "tests/build-heap.test.ts": 3,
   "tests/build-output-writer.test.ts": 2,
