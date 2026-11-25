@@ -12,23 +12,19 @@
  * are both future enhancements — see the TODO markers below for the
  * plug-in points.
  *
- * Results are cached on disk keyed by file-content hash under
- * `${CORTEX_IDE_DATA_DIR}/cache/edge-case-sites/`. Cache misses re-scan
- * from the live file; cache hits skip disk I/O. Content hashes are taken
- * from the skeleton cache so invalidation happens automatically on the
- * next skeleton scan.
+ * Candidate files are read fresh at dispatch time: the targets' own imports
+ * plus the files that import them (one bounded `git grep`; see
+ * `@/lib/repo-files/lookup`). Nothing is cached between dispatches.
  *
  * Used by the dispatch pipeline to populate `packet.edgeCaseSites` which
  * the packet-prompt composer then renders as a "Watch for these" block.
  */
 
-import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 
-import { getAllCached, getCached, getImportGraph, getInboundImporters } from '@/lib/skeleton';
+import { findImporters, outboundImports, readFileFacts, REPO_LOOKUP_TIMEOUT_MS, trackedFiles } from '@/lib/repo-files/lookup';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { getDataDir } from '@/lib/data-dir-migration';
 
 type EdgeCaseKind = NonNullable<NonNullable<OrchestratorPacket['edgeCaseSites']>[number]['kind']>;
 
@@ -42,56 +38,6 @@ export interface SurfaceEdgeCasesResult {
   sites: EdgeCaseSite[];
   /** Non-empty when the surfacer bailed — e.g. `'parse-failed'`, `'no-targets'`. */
   reason?: string;
-}
-
-// ── Cache layer ──
-
-const CACHE_ROOT = join(
-  getDataDir(),
-  'cache',
-  'edge-case-sites',
-);
-
-function ensureCacheDir() {
-  try {
-    if (!existsSync(CACHE_ROOT)) mkdirSync(CACHE_ROOT, { recursive: true });
-  } catch {
-    // Ignore — cache is best-effort. The surfacer returns live results when
-    // the cache dir can't be created.
-  }
-}
-
-function cacheKeyFor(repoPath: string, filePath: string, contentHash: string): string {
-  const digest = createHash('sha256').update(`${repoPath}::${filePath}`).digest('hex').slice(0, 16);
-  return `${digest}.${contentHash.slice(0, 12)}.json`;
-}
-
-interface CacheEntry {
-  version: 1;
-  repoPath: string;
-  filePath: string;
-  sites: EdgeCaseSite[];
-  cachedAt: string;
-}
-
-function readCachedSites(cacheKey: string): EdgeCaseSite[] | null {
-  try {
-    const raw = readFileSync(join(CACHE_ROOT, cacheKey), 'utf-8');
-    const parsed = JSON.parse(raw) as CacheEntry;
-    if (parsed.version !== 1 || !Array.isArray(parsed.sites)) return null;
-    return parsed.sites;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedSites(cacheKey: string, entry: CacheEntry) {
-  try {
-    ensureCacheDir();
-    writeFileSync(join(CACHE_ROOT, cacheKey), JSON.stringify(entry, null, 2), 'utf-8');
-  } catch {
-    // Best-effort cache writes — ignore failures.
-  }
 }
 
 // ── Pattern-based extraction (v0) ──
@@ -172,18 +118,9 @@ const PATTERN_RULES: PatternRule[] = [
 ];
 
 function scanFileForSites(
-  repoPath: string,
   filePath: string,
+  content: string,
 ): EdgeCaseSite[] {
-  const absolutePath = join(repoPath, filePath);
-
-  let content: string;
-  try {
-    content = readFileSync(absolutePath, 'utf-8');
-  } catch {
-    return [];
-  }
-
   const lines = content.split('\n');
   const sites: EdgeCaseSite[] = [];
   const seenLines = new Set<number>();
@@ -218,8 +155,6 @@ function scanFileForSites(
 export interface SurfaceEdgeCasesInput {
   repoPath: string;
   targetFiles: string[];
-  /** Depth-1 graph walks all direct outbound imports + direct inbound callers. */
-  depth?: 1 | 2;
   /** Maximum distinct sites to return across the whole walk. */
   maxSites?: number;
 }
@@ -240,9 +175,9 @@ export interface SurfaceEdgeCasesInput {
  * model version so invalidations line up with both source changes and
  * prompt-engineering tweaks.
  */
-export function surfaceEdgeCases(input: SurfaceEdgeCasesInput): SurfaceEdgeCasesResult {
+export async function surfaceEdgeCases(input: SurfaceEdgeCasesInput): Promise<SurfaceEdgeCasesResult> {
   try {
-    const { repoPath, depth = 1, maxSites = 12 } = input;
+    const { repoPath, maxSites = 12 } = input;
 
     const targets = Array.from(new Set(
       (input.targetFiles ?? [])
@@ -254,58 +189,42 @@ export function surfaceEdgeCases(input: SurfaceEdgeCasesInput): SurfaceEdgeCases
       return { sites: [], reason: 'no-targets' };
     }
 
-    // Gather candidate files: outbound graph (what the target imports) +
-    // inbound importers (callers that could break). Both are capped via
-    // the final site slice so prompt size stays bounded.
+    // Gather candidate files: what each target imports + the files that
+    // import it (callers that could break). Capped so prompt size stays bounded.
+    const deadline = Date.now() + REPO_LOOKUP_TIMEOUT_MS;
     const candidates = new Set<string>();
-    for (const target of targets) {
-      const graph = getImportGraph(repoPath, target, depth);
-      if (!graph.root) continue;
-
-      for (const node of graph.nodes) {
-        candidates.add(node.filePath);
-      }
-
-      for (const importer of getInboundImporters(repoPath, target)) {
-        candidates.add(importer);
+    const tracked = await trackedFiles(repoPath, deadline);
+    if (tracked) {
+      const [facts, importers] = await Promise.all([
+        readFileFacts(repoPath, targets, deadline),
+        findImporters(repoPath, targets, tracked.set, deadline),
+      ]);
+      for (const target of targets) {
+        for (const imported of outboundImports(target, facts.get(target), tracked.set)) candidates.add(imported);
+        for (const importer of importers.get(target) ?? []) {
+          candidates.add(importer);
+          if (candidates.size >= 24) break;
+        }
         if (candidates.size >= 24) break;
       }
-
-      if (candidates.size >= 24) break;
     }
 
-    // Fall back to the target files themselves when the graph is empty.
+    // Fall back to the target files themselves when nothing is adjacent.
     // Weak models still benefit from seeing risk-sites in the file they
     // were explicitly told to modify.
     if (candidates.size === 0) {
       for (const target of targets) candidates.add(target);
     }
 
-    const allSites: EdgeCaseSite[] = [];
-    for (const candidate of candidates) {
-      const cached = getCached(repoPath, candidate);
-      if (!cached) continue;
-
-      const cacheKey = cacheKeyFor(repoPath, candidate, cached.contentHash);
-      const cachedSites = readCachedSites(cacheKey);
-      if (cachedSites) {
-        allSites.push(...cachedSites);
-        if (allSites.length >= maxSites) break;
-        continue;
+    const scans = await Promise.all([...candidates].slice(0, 24).map(async (candidate) => {
+      if (isAbsolute(candidate) || candidate.split('/').includes('..')) return [];
+      try {
+        return scanFileForSites(candidate, await readFile(join(repoPath, candidate), 'utf-8'));
+      } catch {
+        return [];
       }
-
-      const scanned = scanFileForSites(repoPath, candidate);
-      writeCachedSites(cacheKey, {
-        version: 1,
-        repoPath,
-        filePath: candidate,
-        sites: scanned,
-        cachedAt: new Date().toISOString(),
-      });
-
-      allSites.push(...scanned);
-      if (allSites.length >= maxSites) break;
-    }
+    }));
+    const allSites = scans.flat();
 
     // Dedupe by location + description, then slice to cap.
     const seen = new Set<string>();
@@ -323,18 +242,6 @@ export function surfaceEdgeCases(input: SurfaceEdgeCasesInput): SurfaceEdgeCases
     // Surfacer must NEVER throw — dispatch pipeline will fall back to
     // legacy prompt when `edgeCaseSites` is undefined.
     return { sites: [], reason: 'parse-failed' };
-  }
-}
-
-/**
- * Quickly probe whether the skeleton cache has anything useful for this
- * repo — lets the caller skip the whole surfacer when the cache is empty.
- */
-export function skeletonCachePrimed(repoPath: string): boolean {
-  try {
-    return getAllCached(repoPath).length > 0;
-  } catch {
-    return false;
   }
 }
 

@@ -292,7 +292,7 @@ export async function createMission(input: CreateMissionInput) {
         : {}),
     } satisfies OrchestratorPacket;
   });
-  const packets = packetDrafts.map((packet) => applyPacketScopePolicy(packet, computePredictedFiles(packet)));
+  const packets = await Promise.all(packetDrafts.map(async (packet) => applyPacketScopePolicy(packet, await computePredictedFiles(packet))));
   const missionBase = normalizeOrchestratorMissionState({
     version: 2,
     missionId,

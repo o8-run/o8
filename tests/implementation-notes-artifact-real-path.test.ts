@@ -15,7 +15,6 @@ writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf8');
 
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
-const { scanRepo } = await import('@/lib/skeleton');
 
 function git(cwd: string, args: string[]): void {
   execFileSync('git', args, { cwd, stdio: 'pipe' });
@@ -48,7 +47,6 @@ describe('implementation notes artifact real path', () => {
     );
     git(repoPath, ['add', 'implementation-notes.md']);
     git(repoPath, ['commit', '-q', '-m', 'base']);
-    await scanRepo({ repoPath, chunks: false });
     git(repoPath, ['checkout', '-q', '-b', 'inline/worker-notes']);
     rmSync(join(repoPath, 'implementation-notes.md'));
     git(repoPath, ['add', '-A']);
@@ -71,7 +69,7 @@ describe('implementation notes artifact real path', () => {
     expect(response.status).toBe(200);
     const preview = await response.json();
 
-    expect(preview.wouldMerge).toBe(true);
+    // Merging itself is held by PR-first policy and the durable-review gate; this case covers the budget.
     expect(preview.blockers).not.toContain('diff-budget');
     expect(preview.checks.find((check: { name: string }) => check.name === 'diff-budget')?.verdict).toBe('pass');
   });

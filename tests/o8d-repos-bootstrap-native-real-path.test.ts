@@ -31,7 +31,6 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
   const device = 'repos-bootstrap-fixture-device-0123456789abcdef';
   const worker = 'repos-bootstrap-fixture-worker-0123456789abcdef';
   const saved = { ...process.env };
-  const polled: string[] = [];
   let server: Awaited<ReturnType<typeof startParityReference>> | undefined;
   try {
     server = await startParityReference({ nativeHttp: true, directory, startupTimeoutMs: 120_000 });
@@ -81,7 +80,6 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
     // A new repository, then the same folder again, then a folder inside it.
     const nativeRepo = join(targets, 'native-init');
     const tsRepo = join(targets, 'ts-init');
-    polled.push(tsRepo);
     for (const expected of [{ initialized: true, initialCommit: true }, { initialized: false, initialCommit: false }]) {
       const [native, ts] = await compare('/api/panel/repos/init', { path: nativeRepo, name: 'Fixture App' }, { path: tsRepo, name: 'Fixture App' });
       expect(shape(native, nativeRepo)).toEqual(shape(ts, tsRepo));
@@ -97,8 +95,6 @@ it.skipIf(process.platform === 'win32')('initializes and scaffolds repositories 
     const paths = ((await listed.json()) as { repos: Array<{ localPath: string }> }).repos.map((repo) => repo.localPath);
     expect(paths).toEqual(expect.arrayContaining([nativeRepo]));
   } finally {
-    const { stopChangePolling } = await import('@/lib/skeleton/autoscan');
-    for (const repo of polled) stopChangePolling(repo);
     await server?.stop();
     for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
     Object.assign(process.env, saved);

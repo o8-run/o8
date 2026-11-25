@@ -169,9 +169,6 @@ describe('GitHub issue packet scope real path', () => {
       console.error(`[packet-scope-fixture] incomplete stage: ${stage}`);
     });
     const repoPath = createRepo();
-    enterStage('skeleton scan');
-    const { scanRepo } = await import('@/lib/skeleton');
-    await scanRepo({ repoPath, chunks: false });
 
     const { createLane } = await import('@/lib/lane/registry');
     launchPacket.mockImplementation(async ({ packet, workerRouting }) => {

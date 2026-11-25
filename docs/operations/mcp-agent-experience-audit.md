@@ -154,7 +154,6 @@ records discovery coverage, not a successful execution of every action.
 | `o8_spec_reply` | repoPath, parentId, message | none | author | none | missing |
 | `o8_spec_resolve` | repoPath, targetId | none | none explicit | none | missing |
 | `o8_spec_suggest` | repoPath, kind | kind | by | none | missing |
-| `o8_targets` | repoPath | none | limit, rationales | none | missing |
 | `o8_lease_acquire` | resource | none | none explicit | resource, ttlMs, wait | missing |
 | `o8_lease_release` | resource | none | none explicit | resource | missing |
 | `o8_lease_status` | resource | none | none explicit | resource | missing |

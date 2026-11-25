@@ -1,11 +1,9 @@
-import { dirname } from 'node:path';
-
 import {
   PRESERVATION_ADD_BUDGET_RATIO,
   PRESERVATION_DELETE_BUDGET_RATIO,
   PRESERVATION_MIN_DELETE_BUDGET,
 } from '@/lib/lane/merge-gate';
-import { getAllCached, getCachedFilePaths, type FileSkeleton } from '@/lib/skeleton';
+import { readFileFacts, trackedFiles } from '@/lib/repo-files/lookup';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
 
@@ -65,29 +63,13 @@ function includesPathToken(text: string, candidate: string): boolean {
   return false;
 }
 
-function packetMentionsSkeletonFile(scopeText: string, file: FileSkeleton): boolean {
-  const normalizedPath = file.relativePath.toLowerCase();
-  if (includesPathToken(scopeText, normalizedPath)) {
-    return true;
-  }
-
-  let directoryPath = dirname(file.relativePath).replace(/\\/g, '/').toLowerCase();
-  while (directoryPath && directoryPath !== '.') {
-    if (includesPathToken(scopeText, `${directoryPath}/`)) {
-      return true;
-    }
-
-    const parentDirectory = dirname(directoryPath).replace(/\\/g, '/').toLowerCase();
-    if (parentDirectory === directoryPath) {
-      break;
-    }
-    directoryPath = parentDirectory;
-  }
-
-  return false;
+interface NamedFile {
+  relativePath: string;
+  lineCount: number;
+  exports: string[];
 }
 
-function formatThresholdFiles(files: FileSkeleton[]): string {
+function formatThresholdFiles(files: NamedFile[]): string {
   if (files.length === 0) {
     return '';
   }
@@ -103,18 +85,17 @@ function formatThresholdFiles(files: FileSkeleton[]): string {
   return `${sorted.slice(0, MAX_THRESHOLD_GUIDANCE_FILES).map((file) => `${file.relativePath} (${file.lineCount}L)`).join(', ')} (+${sorted.length - MAX_THRESHOLD_GUIDANCE_FILES} more)`;
 }
 
-function formatExportList(symbols: FileSkeleton['symbols']): string {
-  const exported = symbols.filter((s) => s.exported);
-  if (exported.length === 0) {
+function formatExportList(exports: string[]): string {
+  if (exports.length === 0) {
     return '';
   }
 
-  const lines = exported
+  const lines = exports
     .slice(0, PRESERVATION_MAX_EXPORTS)
-    .map((s) => `  - ${truncateText(s.signature, 120)}`);
+    .map((signature) => `  - ${truncateText(signature, 120)}`);
 
-  if (exported.length > PRESERVATION_MAX_EXPORTS) {
-    lines.push(`  - (+${exported.length - PRESERVATION_MAX_EXPORTS} more exports)`);
+  if (exports.length > PRESERVATION_MAX_EXPORTS) {
+    lines.push(`  - (+${exports.length - PRESERVATION_MAX_EXPORTS} more exports)`);
   }
 
   return lines.join('\n');
@@ -123,41 +104,52 @@ function formatExportList(symbols: FileSkeleton['symbols']): string {
 // ── Pre-dispatch file overlap gate (#380) ──
 
 /**
- * Predict which files a packet will touch using the skeleton heuristic.
- * Same matching logic as the preservation envelope — file-level only,
- * no directory-level matches to avoid over-serialization.
+ * Predict which files a packet will touch: tracked paths its title or summary
+ * names. File-level matches only — directory mentions would over-serialize.
+ * Reads `git ls-files` (cached until HEAD or the index changes); an unreadable
+ * repository predicts nothing.
  */
-export function computePredictedFiles(packet: OrchestratorPacket): string[] {
+export async function computePredictedFiles(packet: OrchestratorPacket): Promise<string[]> {
   const repoPath = packet.workspaceTargetPath;
   if (!repoPath) return [];
 
   const scopeText = buildPacketScopeText(packet);
   if (!scopeText) return [];
 
-  return getCachedFilePaths(repoPath)
-    .filter((filePath) => {
-      // File-level matches only — skip directory-level to avoid false overlap
-      const normalizedPath = filePath.toLowerCase();
-      return includesPathToken(scopeText, normalizedPath);
-    });
+  const tracked = await trackedFiles(repoPath);
+  if (!tracked) return [];
+  return tracked.files.filter((filePath) => includesPathToken(scopeText, filePath.toLowerCase()));
+}
+
+/** Facts for the existing files a packet names, read fresh from the checkout. */
+async function namedFiles(packet: OrchestratorPacket): Promise<NamedFile[]> {
+  const repoPath = packet.workspaceTargetPath;
+  if (!repoPath) return [];
+  const files = packet.predictedFiles ?? await computePredictedFiles(packet);
+  if (files.length === 0) return [];
+  const facts = await readFileFacts(repoPath, files);
+  return files.flatMap((relativePath) => {
+    const fact = facts.get(relativePath);
+    return fact ? [{ relativePath, lineCount: fact.lineCount, exports: fact.exports }] : [];
+  });
 }
 
 /**
  * Filter a list of dispatchable packets to avoid parallel dispatch of packets
  * that touch the same files. Returns one packet per overlapping cluster.
- * Non-overlapping packets all pass through.
+ * Non-overlapping packets all pass through. Reads `predictedFiles`, which the
+ * dispatch tick fills from `computePredictedFiles` first.
  */
 export function filterOverlappingPackets(
   packets: OrchestratorPacket[],
   activePackets: OrchestratorPacket[],
 ): OrchestratorPacket[] {
-  if (packets.length <= 1) return packets;
+  if (packets.length === 0 || (packets.length === 1 && activePackets.length === 0)) return packets;
 
   // Compute predicted files for each candidate and active packet
   const predictions = new Map<string, Set<string>>();
   for (const p of [...packets, ...activePackets]) {
-    const files = p.predictedFiles ?? computePredictedFiles(p);
-    predictions.set(p.id, new Set(files));
+    predictions.set(p.id, new Set(p.predictedFiles ?? []));
   }
 
   // Files already claimed by active (running) packets
@@ -199,18 +191,8 @@ export function filterOverlappingPackets(
   return result;
 }
 
-export function checkFileSizeThresholds(packet: OrchestratorPacket): string[] {
-  const repoPath = packet.workspaceTargetPath;
-  if (!repoPath) {
-    return [];
-  }
-
-  const scopeText = buildPacketScopeText(packet);
-  if (!scopeText) {
-    return [];
-  }
-
-  const matchedFiles = getAllCached(repoPath).filter((file) => packetMentionsSkeletonFile(scopeText, file));
+export async function checkFileSizeThresholds(packet: OrchestratorPacket): Promise<string[]> {
+  const matchedFiles = await namedFiles(packet);
   if (matchedFiles.length === 0) {
     return [];
   }
@@ -247,18 +229,8 @@ export function checkFileSizeThresholds(packet: OrchestratorPacket): string[] {
  * Injects diff budgets + structural contracts so agents don't rewrite files.
  * (#482) — Proved effective in Round 2 dogfooding: P3 was a clean merge.
  */
-export function buildPreservationEnvelope(packet: OrchestratorPacket): string[] {
-  const repoPath = packet.workspaceTargetPath;
-  if (!repoPath) {
-    return [];
-  }
-
-  const scopeText = buildPacketScopeText(packet);
-  if (!scopeText) {
-    return [];
-  }
-
-  const matchedFiles = getAllCached(repoPath).filter((file) => packetMentionsSkeletonFile(scopeText, file));
+export async function buildPreservationEnvelope(packet: OrchestratorPacket): Promise<string[]> {
+  const matchedFiles = await namedFiles(packet);
   if (matchedFiles.length === 0) {
     return [];
   }
@@ -274,7 +246,7 @@ export function buildPreservationEnvelope(packet: OrchestratorPacket): string[] 
   for (const file of existingFiles.slice(0, MAX_THRESHOLD_GUIDANCE_FILES)) {
     const addBudget = Math.ceil(file.lineCount * PRESERVATION_ADD_BUDGET_RATIO);
     const deleteBudget = Math.max(PRESERVATION_MIN_DELETE_BUDGET, Math.ceil(file.lineCount * PRESERVATION_DELETE_BUDGET_RATIO));
-    const exportList = formatExportList(file.symbols);
+    const exportList = formatExportList(file.exports);
 
     sections.push(
       `${file.relativePath} (${file.lineCount} lines):`,

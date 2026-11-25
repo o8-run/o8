@@ -10,11 +10,11 @@
  * toolset-shaping wrapper is exposed for future runtimes that do surface a
  * pluggable tool list.
  *
- * This module is intentionally pure — no I/O, no promises — so it can be
- * called from both the delegate API route and the scheduling hot path.
+ * Adjacent files come from the targets' own import statements, read fresh at
+ * dispatch time (bounded; see `@/lib/repo-files/lookup`).
  */
 
-import { getImportGraph } from '@/lib/skeleton';
+import { outboundImports, readFileFacts, REPO_LOOKUP_TIMEOUT_MS, trackedFiles } from '@/lib/repo-files/lookup';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 /**
@@ -129,7 +129,7 @@ export interface ComputeReadBudgetInput {
  * files, codex-strong tier with an empty import graph — the explicit skip
  * keeps legacy packets behaviour-identical when `readBudget` is absent).
  */
-export function computeReadBudget(input: ComputeReadBudgetInput): ReadBudget | null {
+export async function computeReadBudget(input: ComputeReadBudgetInput): Promise<ReadBudget | null> {
   const { repoPath, tier } = input;
   const preset = BUDGET_PRESETS[tier];
 
@@ -143,27 +143,28 @@ export function computeReadBudget(input: ComputeReadBudgetInput): ReadBudget | n
     return null;
   }
 
-  // Breadth-first graph walk across ALL targets, depth=1. Two-hop would blow
-  // the prompt token budget for wide leaves.
+  // One hop across ALL targets: the files each target imports. Two hops would
+  // blow the prompt token budget for wide leaves.
   const seen = new Set<string>(targets);
   const requiredReads: string[] = [...(input.extraReads ?? []).filter(Boolean)];
+  const deadline = Date.now() + REPO_LOOKUP_TIMEOUT_MS;
+  const tracked = await trackedFiles(repoPath, deadline);
+  const facts = tracked ? await readFileFacts(repoPath, targets, deadline) : new Map();
 
   for (const target of targets) {
-    const graph = getImportGraph(repoPath, target, 1);
-    if (!graph.root) continue;
-
-    for (const node of graph.nodes) {
-      if (seen.has(node.filePath)) continue;
-      seen.add(node.filePath);
-      requiredReads.push(node.filePath);
+    if (!tracked) break;
+    for (const imported of outboundImports(target, facts.get(target), tracked.set)) {
+      if (seen.has(imported)) continue;
+      seen.add(imported);
+      requiredReads.push(imported);
       if (requiredReads.length >= preset.maxRequiredReads) break;
     }
 
     if (requiredReads.length >= preset.maxRequiredReads) break;
   }
 
-  // No adjacent files resolved — the target is a leaf (or the skeleton cache
-  // hasn't seen it yet). Only emit a budget for tiers that need one anyway.
+  // No adjacent files resolved — the target is a leaf (or Git could not
+  // answer in time). Only emit a budget for tiers that need one anyway.
   if (requiredReads.length === 0 && tier === 'codex-strong') {
     return null;
   }

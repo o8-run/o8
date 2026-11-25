@@ -368,6 +368,19 @@ export function mergeDispatchTickOutcome(
   fresh.updatedAt = afterDispatch.updatedAt ?? fresh.updatedAt;
 }
 
+// Dispatch-time file checks read the repository once per packet and target
+// list. A queued packet whose checks found nothing is not searched again on
+// every headless tick.
+const fileCheckAttempts = new Map<string, string>();
+function firstFileCheck(kind: string, packetId: string, repoPath: string, targetFiles: string[]): boolean {
+  const key = `${kind}\0${packetId}`;
+  const value = `${repoPath}\0${targetFiles.join('\0')}`;
+  if (fileCheckAttempts.get(key) === value) return false;
+  if (fileCheckAttempts.size >= 2_000) fileCheckAttempts.clear();
+  fileCheckAttempts.set(key, value);
+  return true;
+}
+
 export const runDispatchTick = observeWsHealthHandler('dispatch', async function runDispatchTick(
   state: OrchestratorMissionState,
   options: {
@@ -423,10 +436,10 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
   // Compute predicted files for all packets (used by overlap gate + dashboard)
   nextState = {
     ...nextState,
-    packets: nextState.packets.map((packet) => {
-      const files = packet.predictedFiles ?? computePredictedFiles(packet);
+    packets: await Promise.all(nextState.packets.map(async (packet) => {
+      const files = packet.predictedFiles ?? await computePredictedFiles(packet);
       return applyPacketScopePolicy(packet, files);
-    }),
+    })),
   };
 
   // #535 — Populate `readBudget` for any queued packet that doesn't already
@@ -437,7 +450,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
   // the packet field stays undefined and legacy behaviour is preserved.
   nextState = {
     ...nextState,
-    packets: nextState.packets.map((packet) => {
+    packets: await Promise.all(nextState.packets.map(async (packet) => {
       if (packet.readBudget) return packet;
       if (packet.status !== 'queued' && packet.status !== 'recovering' && packet.status !== 'draft') {
         return packet;
@@ -453,9 +466,11 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
         source: 'scheduler-enrichment',
       });
       const tier = resolveModelTier({ runtime: routing.selectedRuntime, assignedModel: routing.selectedModel });
-      const budget = computeReadBudget({ repoPath, targetFiles, tier });
+      const budget = firstFileCheck('read-budget', packet.id, repoPath, targetFiles)
+        ? await computeReadBudget({ repoPath, targetFiles, tier })
+        : null;
       return budget ? { ...packet, runtime: routing.selectedRuntime, workerIntent: routing.workerIntent, workerRouting: routing, readBudget: budget } : { ...packet, runtime: routing.selectedRuntime, workerIntent: routing.workerIntent, workerRouting: routing };
-    }),
+    })),
   };
 
   // #536 — Populate `edgeCaseSites` on the same enrichment gate so any
@@ -464,7 +479,7 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
   // which collapses to an undefined field (legacy-identical).
   nextState = {
     ...nextState,
-    packets: nextState.packets.map((packet) => {
+    packets: await Promise.all(nextState.packets.map(async (packet) => {
       if (packet.edgeCaseSites && packet.edgeCaseSites.length > 0) return packet;
       if (packet.status !== 'queued' && packet.status !== 'recovering' && packet.status !== 'draft') {
         return packet;
@@ -472,9 +487,10 @@ export const runDispatchTick = observeWsHealthHandler('dispatch', async function
       const repoPath = packet.workspaceTargetPath;
       const targetFiles = packet.predictedFiles ?? [];
       if (!repoPath || targetFiles.length === 0) return packet;
-      const { sites } = surfaceEdgeCases({ repoPath, targetFiles, depth: 1 });
+      if (!firstFileCheck('edge-cases', packet.id, repoPath, targetFiles)) return packet;
+      const { sites } = await surfaceEdgeCases({ repoPath, targetFiles });
       return sites.length > 0 ? { ...packet, edgeCaseSites: sites } : packet;
-    }),
+    })),
   };
 
   // Strict is the default: hold predicted file overlaps with active tasks or

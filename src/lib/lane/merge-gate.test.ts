@@ -5,7 +5,6 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { scanRepo } from '@/lib/skeleton';
 import { runMergeGate } from './merge-gate';
 import type { Lane } from './types';
 
@@ -126,7 +125,6 @@ describe('merge gate governance invariants', () => {
 
   it('downgrades approved budget overruns while keeping security blocks hard-blocking', async () => {
     const repoPath = initRepo();
-    await scanRepo({ repoPath, chunks: false });
     git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
     writeFileSync(join(repoPath, 'safe.ts'), [
       'export function first() { return 1; }',
@@ -173,7 +171,6 @@ describe('merge gate governance invariants', () => {
 
   it('passes an oversized extract-to-new-module relocation through the real merge gate', async () => {
     const repoPath = initExtractionRepo();
-    await scanRepo({ repoPath, chunks: false });
     git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
     const extractedLines = Array.from(
       { length: 60 },
@@ -202,7 +199,6 @@ describe('merge gate governance invariants', () => {
 
   it('still blocks a genuine oversized deletion with no relocated module', async () => {
     const repoPath = initExtractionRepo();
-    await scanRepo({ repoPath, chunks: false });
     git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
     const retainedLines = Array.from(
       { length: 60 },
