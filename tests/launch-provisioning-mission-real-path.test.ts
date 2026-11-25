@@ -22,7 +22,6 @@ vi.mock('@/lib/pi/sdk/scripts', async original => {
   return { ...actual, nativeProcessHelperPath: resolve, piWriteHelperPath: resolve };
 });
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => undefined) }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn(async () => undefined) }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => undefined) }));
 vi.mock('@/lib/orchestrator/capacity-snapshots', () => ({ capturePacketCapacitySnapshot: vi.fn(async () => undefined) }));
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({

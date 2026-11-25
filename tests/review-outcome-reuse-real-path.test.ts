@@ -6,7 +6,6 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { ORCHESTRATOR_RUNTIME_IDS } from '@/lib/orchestrator/runtime-capabilities';
 
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true), publishCortexChange: vi.fn(async () => {}) }));
 vi.mock('@/lib/codebase-memory/client', () => ({ extractGraphResolvedSymbols: vi.fn(async () => ({ edges: [], unavailable: true })) }));
 

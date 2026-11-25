@@ -170,7 +170,7 @@ async function merge(lane: ReturnType<typeof createLane>) {
 const laneStatus = (laneId: string) => (getSqlite().prepare('SELECT status FROM lanes WHERE id = ?').get(laneId) as { status: string }).status;
 
 beforeAll(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
   fixture = await startJudgmentEndpointFixture();
   // The fixture shares this process's event loop with the merge's git work.
   setWakeTriageTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 15_000, maxAttempts: 1 });

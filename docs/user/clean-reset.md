@@ -92,5 +92,4 @@ afterwards. The native window state under `~/.o8/next*`, the update settings
 in Application Support, the cache and the keychain items stay shared with the
 normal profile in this mode.
 
-To turn off updates and telemetry for the run, see
-[Telemetry privacy](product-telemetry-privacy.md).
+To turn off update checks and the phone relay for the run, set `O8_NO_PHONE_HOME=1`.

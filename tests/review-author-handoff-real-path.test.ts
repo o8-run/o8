@@ -29,7 +29,6 @@ vi.mock('@/lib/lane/packet-explainer-queue', () => ({ drainPacketExplainerQueue:
   enqueuePacketExplainer: vi.fn(async () => {}), notifyCorrectnessReviewQueued: vi.fn(), startPacketExplainerQueueDrain: vi.fn(() => () => {}) }));
 vi.mock('@/lib/runtimes/shared/auth-detect', () => ({ assertRuntimeDispatchable: vi.fn(async () => {}) }));
 vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({ ensureDispatchBackendReady: readiness }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => true) }));
 // Keep dashboard discovery and quota polling inside the fixture boundary.
 // Inventory still comes from the real owned-session store, including process

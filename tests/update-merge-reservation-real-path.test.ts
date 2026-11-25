@@ -23,7 +23,7 @@ afterAll(() => { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
 
 async function makeLane(name: string) {
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
   const repo = join(root, `${name}-repo`);
   const origin = join(root, `${name}-origin.git`);
   git(root, 'init', '--bare', origin);

@@ -88,7 +88,6 @@ impl Field {
             "presentationQuietMode" | "notificationsReviewReady" => "Presentation",
             "launchAtLogin" => "Startup",
             "editorCommand" => "Editor",
-            "productTelemetryEnabled" | "crashReportsEnabled" | "telemetryOptIn" => "Privacy",
             "parallelCap" | "overlapGate" => "Fleet",
             "healBotEnabled"
             | "supervisorAutoEscalate"
@@ -331,27 +330,6 @@ pub const FIELDS: &[Field] = &[
         "general",
         "Held off while quiet mode is on.",
         Kind::Choice(&[("off", "Off"), ("on", "On")]),
-    ),
-    field(
-        "productTelemetryEnabled",
-        "Share usage data",
-        "general",
-        "Optional feature-use events. Does not include prompts, code or file paths.",
-        BOOL,
-    ),
-    field(
-        "crashReportsEnabled",
-        "Share crash reports",
-        "general",
-        "Share scrubbed errors and stack traces. Required for bug reports.",
-        BOOL,
-    ),
-    field(
-        "telemetryOptIn",
-        "Automatically upload local crash logs",
-        "general",
-        "Upload saved crash logs when a destination is configured. Local logging continues when off.",
-        BOOL,
     ),
     field(
         "parallelCap",

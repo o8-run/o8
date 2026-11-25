@@ -24,9 +24,6 @@ vi.mock('@/lib/worktree/launch', () => ({
   }),
 }));
 
-vi.mock('@/lib/analytics/server', () => ({
-  emitProductEvent: vi.fn(async () => undefined),
-}));
 
 const root = mkdtempSync(path.join(os.tmpdir(), 'o8-automation-setup-real-path-'));
 const dataDir = path.join(root, 'data');

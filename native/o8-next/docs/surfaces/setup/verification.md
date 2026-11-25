@@ -26,10 +26,6 @@ inventory, not a claim that onboarding acceptance is complete.
 | Connect GitHub / device flow | None | Missing |
 | Select and clone repositories | None | Missing |
 | Start without a project | Start without a project | Ported |
-| Product analytics choice | Product analytics toggle | Ported |
-| Crash report choice | Crash reports toggle | Ported |
-| Save privacy choices | Save and continue | Ported |
-| Expand telemetry sample / privacy details | None | Missing |
 | Open workspace with lead conversation | Persisted thread and existing Surface/composer | Ported |
 | Agent setup request claim / renew / acknowledgement | None | Missing |
 | Resume onboarding progress after restart | None | Missing |

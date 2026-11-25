@@ -43,7 +43,7 @@ console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:100,output
 `); chmodSync(binary, 0o700);
   writeFileSync(join(directory, 'repos.json'), JSON.stringify([{ id: 'fixture', name: 'Sample', path: repoPath }]));
   writeFileSync(join(directory, 'operator-defaults.json'), JSON.stringify({ inAppOrchestratorEnabled: true,
-    judgmentProvider: 'off', autoTitleInferenceEnabled: false, productTelemetryEnabled: false }));
+    judgmentProvider: 'off', autoTitleInferenceEnabled: false }));
   vi.stubEnv('O8_DATA_DIR', directory); vi.stubEnv('CORTEX_IDE_DATA_DIR', directory);
   vi.stubEnv('CORTEX_IDE_DB_PATH', join(directory, 'data.db')); vi.stubEnv('O8_CODEX_BIN', binary);
   vi.stubEnv('WS_TOKEN', '');

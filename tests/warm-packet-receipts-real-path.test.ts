@@ -5,7 +5,6 @@ import { delimiter, dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { buildPiWriteHelper } from './helpers/pi-write-helper';
 
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
 // Receipt transitions do not depend on a host-wide process census. The adjacent
 // warm-packet-safety suite exercises the real live-process retention guard.

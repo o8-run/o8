@@ -343,11 +343,6 @@ export const OPERATOR_DEFAULTS_TOML_MAPPING = {
   targetingAction: targetingTierField('targeting', 'action'),
   updateAutoApply: enumField('operator', 'update_auto_apply', '"off" or "idle"', (value): value is OperatorDefaults['updateAutoApply'] => value === 'off' || value === 'idle'),
   collideAggregator: enumField('orchestrator', 'collide_aggregator', 'one of "auto", "claude", or "codex"', isCollideAggregator),
-  productTelemetryEnabled: nullableField('telemetry', 'product_enabled', 'a boolean', (value): value is boolean => typeof value === 'boolean'),
-  telemetryConsentAnswered: booleanField('telemetry', 'consent_answered'),
-  telemetryOptIn: booleanField('telemetry', 'crash_log_opt_in'),
-  telemetryIngestUrl: credentialSafeUrlField('telemetry', 'ingest_url'),
-  crashReportsEnabled: booleanField('telemetry', 'sentry_enabled'),
   branchPrefix: branchPrefixField('git', 'branch_prefix'),
   commitAttributionEnabled: booleanField('git', 'commit_attribution_enabled'),
   prLinkDestination: enumField('git', 'pr_link_destination', '"in-app" or "browser"', isPrLinkDestination),
@@ -368,9 +363,6 @@ const EXPLICIT_OPT_IN_FLAG_KEYS = [
   'apfsDependencyImages',
   'mergeTestReplayEnabled',
   'buyinDocEnabled',
-  'productTelemetryEnabled',
-  'telemetryOptIn',
-  'crashReportsEnabled',
 ] as const satisfies ReadonlyArray<keyof OperatorDefaults>;
 
 /** Settings-backed feature switches whose off state can hide shipped behavior. */

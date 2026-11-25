@@ -83,7 +83,7 @@ if(args[0]==='exec'){
 `, { mode: 0o700 });
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
   await updateOperatorDefaults({ workerRuntimes: ['muse'], defaultDispatchRuntime: 'muse', defaultDispatchModel: 'muse-fixture',
-    subscriptionProfile: 'both', productTelemetryEnabled: false, storageReserveFloorGb: 0.001, storageReserveRatio: 0.0001 });
+    subscriptionProfile: 'both', storageReserveFloorGb: 0.001, storageReserveRatio: 0.0001 });
   await (await import('@/lib/repos/registry')).addRepo(repo);
 });
 beforeEach(() => {

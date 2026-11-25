@@ -145,7 +145,6 @@ async function previewSettled(packetId: string, laneId: string) {
 }
 
 beforeAll(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
   writeOrchestratorControlPlaneState(createEmptyOrchestratorMissionState());
   fixture = await startJudgmentEndpointFixture();
   setDirectiveCitationsTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 2_000, maxAttempts: 1 });

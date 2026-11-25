@@ -2,7 +2,7 @@
   "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). A listed file still runs and its failure is reported, not gating. The full-suite lane reads this file; the changed-files lane reads it as committed at the merge base, so a change cannot add itself. Remove a file when it passes; tracked in #6761.",
   "sourceRun": 45536677599,
   "issue": 6761,
-  "count": 126,
+  "count": 125,
   "files": [
     {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
@@ -553,11 +553,6 @@
       "path": "tests/shared-checkout-control-errors-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 'Checkout review is stale. Inspect and\u2026' to contain 'cortex_reconcile_shared_team'"
-    },
-    {
-      "path": "tests/telemetry-default-on.test.ts",
-      "issue": 6761,
-      "reason": "AssertionError: expected '[operator]\\nparallel_cap = 3\\n' to contain 'product_enabled = \"\"'"
     },
     {
       "path": "tests/terminal-release-durable-mission-real-path.test.ts",

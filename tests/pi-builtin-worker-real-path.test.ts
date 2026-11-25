@@ -140,7 +140,6 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
     freeBytes: 90_000_000_000, totalBytes: 100_000_000_000, error: null,
   })),
 }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn(async () => undefined) }));
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => undefined),
   requestRealtimeRefresh: vi.fn(async () => undefined),

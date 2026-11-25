@@ -143,7 +143,6 @@ const eventsOf = (laneId: string, verb: string) => laneEvents(laneId).filter((ev
 const loopItems = (packetId: string) => listInboxItems().filter((item) => item.kind === 'possible_loop' && item.packetId === packetId);
 
 beforeAll(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
   fixture = await startJudgmentEndpointFixture();
   writeFileSync(judgmentKeyPath(), `${KEY}\n`);
   chmodSync(judgmentKeyPath(), 0o600);

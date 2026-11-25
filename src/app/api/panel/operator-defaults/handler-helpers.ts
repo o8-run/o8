@@ -573,47 +573,6 @@ export function normalizeUpdate(body: Record<string, unknown>): Partial<Operator
     update.collideAggregator = raw;
   }
 
-  if (body.productTelemetryEnabled !== undefined) {
-    if (body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') {
-      throw new Error('productTelemetryEnabled must be boolean or null.');
-    }
-    update.productTelemetryEnabled = body.productTelemetryEnabled;
-  }
-
-  if (body.telemetryConsentAnswered !== undefined) {
-    if (typeof body.telemetryConsentAnswered !== 'boolean') {
-      throw new Error('telemetryConsentAnswered must be boolean.');
-    }
-    if (
-      body.telemetryConsentAnswered
-      && ((body.productTelemetryEnabled !== null && typeof body.productTelemetryEnabled !== 'boolean') || typeof body.crashReportsEnabled !== 'boolean')
-    ) {
-      throw new Error('Answering telemetry consent requires both productTelemetryEnabled and crashReportsEnabled.');
-    }
-    update.telemetryConsentAnswered = body.telemetryConsentAnswered;
-  }
-
-  if (body.telemetryOptIn !== undefined) {
-    if (typeof body.telemetryOptIn !== 'boolean') {
-      throw new Error('telemetryOptIn must be boolean.');
-    }
-    update.telemetryOptIn = body.telemetryOptIn;
-  }
-
-  if (body.telemetryIngestUrl !== undefined) {
-    if (typeof body.telemetryIngestUrl !== 'string') {
-      throw new Error('telemetryIngestUrl must be a string.');
-    }
-    update.telemetryIngestUrl = validateCredentialSafeUrl(body.telemetryIngestUrl, 'telemetryIngestUrl');
-  }
-
-  if (body.crashReportsEnabled !== undefined) {
-    if (typeof body.crashReportsEnabled !== 'boolean') {
-      throw new Error('crashReportsEnabled must be boolean.');
-    }
-    update.crashReportsEnabled = body.crashReportsEnabled;
-  }
-
   if (body.branchPrefix !== undefined) {
     // Any string is accepted; the store sanitizes it to a branch-safe segment
     // and rejects a value that cleans to empty.

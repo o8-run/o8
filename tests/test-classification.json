@@ -1577,14 +1577,6 @@
       ]
     },
     {
-      "path": "tests/analytics-activation-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "process-signal",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/apfs-dependency-image-real-path.test.ts",
       "reasons": [
         "apfs",
@@ -4590,13 +4582,6 @@
       ]
     },
     {
-      "path": "tests/metrics-daily-real-path.test.ts",
-      "reasons": [
-        "child-process",
-        "real-path"
-      ]
-    },
-    {
       "path": "tests/mission-cost-real-path.test.ts",
       "reasons": [
         "real-path"
@@ -5159,6 +5144,12 @@
       "path": "tests/no-project-thread-send-real-path.test.ts",
       "reasons": [
         "real-path"
+      ]
+    },
+    {
+      "path": "tests/no-telemetry-clients.test.ts",
+      "reasons": [
+        "native-build"
       ]
     },
     {
@@ -6938,19 +6929,6 @@
       ]
     },
     {
-      "path": "tests/product-telemetry-entry-points.test.ts",
-      "reasons": [
-        "child-process",
-        "git-cli"
-      ]
-    },
-    {
-      "path": "tests/product-telemetry-toggle.test.ts",
-      "reasons": [
-        "child-process"
-      ]
-    },
-    {
       "path": "tests/production-http-boundary-real-path.test.ts",
       "reasons": [
         "child-process",
@@ -8487,12 +8465,6 @@
         "child-process",
         "git-cli",
         "real-path"
-      ]
-    },
-    {
-      "path": "tests/telemetry-default-on.test.ts",
-      "reasons": [
-        "child-process"
       ]
     },
     {

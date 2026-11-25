@@ -90,11 +90,6 @@ export function seedFixtureState(sessionCount, runPrefix) {
   fs.mkdirSync(path.join(dataDir, 'terminal-states'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'setup.json'), JSON.stringify({ setupComplete: true, skippedSteps: [] }));
   fs.writeFileSync(path.join(dataDir, 'settings.toml'), [
-    '[telemetry]',
-    'consent_answered = true',
-    'product_enabled = false',
-    'sentry_enabled = false',
-    'crash_log_opt_in = false',
     '',
   ].join('\n'));
   fs.writeFileSync(path.join(dataDir, 'repos.json'), JSON.stringify({ version: 1, repos: [repoEntry(repoDir, now)] }));

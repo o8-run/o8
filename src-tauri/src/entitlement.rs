@@ -83,8 +83,7 @@ pub fn read_license_token() -> Option<String> {
 
 /// The effective plan string from `~/.o8/entitlement.json` (`plan` field), or
 /// None when absent/invalid. Read-only; never panics. Honors the "View as Free"
-/// dev override for parity with the TS entitlement resolver. Used to tag Sentry
-/// events (telemetry) — never any richer identity.
+/// dev override for parity with the TS entitlement resolver.
 pub fn read_plan() -> Option<String> {
     if dev_override_forces_free() {
         return Some("free".to_string());
@@ -97,23 +96,6 @@ pub fn read_plan() -> Option<String> {
         return None;
     }
     Some(plan)
-}
-
-/// True when a Founding Operator record exists (`~/.o8/founder.json` carries an
-/// `operatorNumber`). BOOLEAN ONLY — the operator number itself is NEVER read or
-/// surfaced. Never panics.
-pub fn is_founder() -> bool {
-    let path = o8_data_dir().join("founder.json");
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return false;
-    };
-    value
-        .get("operatorNumber")
-        .and_then(|n| n.as_i64())
-        .is_some()
 }
 
 /// Where a Gemini `generateContent` call should go.

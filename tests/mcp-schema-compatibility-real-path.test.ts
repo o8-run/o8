@@ -6,7 +6,6 @@ import { NextRequest } from 'next/server';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn(async () => {}) }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn(async () => {}) }));
 
 const { POST } = await import('@/app/api/mcp/route');
 const reviewRoute = await import('@/app/api/orchestrator/review/route');

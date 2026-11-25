@@ -4,8 +4,6 @@
   "githubOAuthClientId": "",
   "//clerkPublishableKey": "Public Clerk publishable key for optional o8 account sign-in and the managed GitHub App. This is baked into the packaged web UI before Next builds. A NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY env var at build time overrides this. Absent → the desktop remains accountless and managed GitHub App sign-in is hidden.",
   "clerkPublishableKey": "",
-  "//sentryDsn": "Sentry crash/error reporting DSN (telemetry ruling). DSNs are ingest-only (not a secret) but treat them as deployment config. Baked into the packaged server + native shell so the desktop app reports crashes tagged with the app version + plan. Copy this file to o8.release.json (gitignored) and paste the DSN. A SENTRY_DSN env var at build time overrides this. Absent → Sentry stays fully dormant (no init, no network). Respect the in-app 'Crash & error reports' toggle regardless.",
-  "sentryDsn": "",
   "//feedbackChannelId": "NON-SECRET private intake channel id used only by maintainer reconciliation scripts. Set O8_FEEDBACK_CHANNEL_ID to override. The desktop does not read this value; it sends authenticated reports to the hosted relay, whose downstream credential remains server-side.",
   "feedbackChannelId": "",
   "//releasesWebhookUrl": "PUBLIC #releases channel webhook used by scripts/release.mjs only after a release is publicly installable. Set O8_RELEASES_WEBHOOK_URL to override. It is release-operator configuration and is not embedded in the desktop app.",

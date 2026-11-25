@@ -66,7 +66,7 @@ it('discovers the MCP tool and reports evidence without accepting a provider or 
   const status = await mcp({ action: 'status' });
   expect(status.error).not.toBe(true);
   expect(status.data.runtimes[0]).toMatchObject({ installed: true, credentialEvidence: true, providerAcceptance: 'not_checked' });
-  expect(status.data.incompleteSteps).toContain('privacy');
+  expect(status.data.incompleteSteps).not.toContain('privacy');
   expect(existsSync(join(data, 'agent-setup-request.json'))).toBe(false);
   for (const bearer of ['', 'local-worker-token-setup-fixture']) {
     const response = await fetch(`http://127.0.0.1:${port}/api/setup/agent`, { headers: bearer ? { authorization: `Bearer ${bearer}` } : {} });
@@ -74,15 +74,14 @@ it('discovers the MCP tool and reports evidence without accepting a provider or 
   }
 });
 
-it('saves role-specific models and the pool through MCP without touching privacy; rejects unsupported choices', async () => {
+it('saves role-specific models and the pool through MCP; rejects unsupported choices', async () => {
   expect((await mcp({ action: 'configure', orchestratorRuntime: 'claude-code', workerRuntimes: [] })).error).toBe(true);
-  expect((await mcp({ action: 'configure', orchestratorRuntime: 'claude-code', workerRuntimes: ['claude-code'], telemetryConsentAnswered: true })).error).toBe(true);
   const result = await mcp({ action: 'configure', orchestratorRuntime: 'claude-code', workerRuntimes: ['claude-code', 'codex'], leadModel: MODEL_IDS.orchestratorDefault, workerModel: MODEL_IDS.claudeWorkerDefault });
   expect(result.error, result.text).not.toBe(true);
   expect(result.data.result).toBe('saved');
   expect(result.data.choices.orchestratorModel).toMatchObject({ value: MODEL_IDS.orchestratorDefault, source: 'file' });
   expect(result.data.choices.workerRuntimes.value).toEqual(['claude-code', 'codex']);
-  expect(result.data.privacyAnswered).toBe(false);
+  expect(result.data).not.toHaveProperty('privacyAnswered');
   expect(readFileSync(join(data, 'settings.toml'), 'utf8')).toContain(MODEL_IDS.claudeWorkerDefault);
   const opencode = await mcp({ action: 'configure', orchestratorRuntime: 'opencode', workerRuntimes: ['opencode'], leadModel: 'provider/lead', workerModel: 'provider/worker' });
   expect(opencode.error, opencode.text).not.toBe(true);

@@ -5,7 +5,6 @@ import { assertOwnedActionGuard } from '@/lib/runtimes/shared/owned-session/acti
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { emitProductEvent } from '@/lib/analytics/server';
 import { getLanePolicy } from '@/lib/lane/policy';
 import { appendEvent, attachSession, getLane, getLaneEvents, setLaneStatus, updateLane } from '@/lib/lane/registry';
 import {
@@ -302,7 +301,6 @@ async function launchSessionInner(
         setLaneStatus(command.laneId, 'awaiting_input', actor, CODEX_AUTH_RECOVERY_LANE_LABEL);
       }
     }
-    void emitProductEvent('dispatch.started', { runtime: lane.runtime });
 
     if (lane.runtime !== 'cloud' && !authExit) {
       const { wsPort } = resolvePortInfo();

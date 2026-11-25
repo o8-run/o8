@@ -11,7 +11,7 @@ import { resolveReleaseConfig } from './release-config.mjs';
 
 export const REMOTE_RELEASE_APP_SCHEMA = 'o8/remote-release-app/v1';
 export const REMOTE_RELEASE_APP_IMPORT_SCHEMA = 'o8/remote-release-app-import/v1';
-const PUBLIC_ENV = /^(NEXT_PUBLIC_|CLERK_PUBLISHABLE_KEY$|O8_APP_VERSION$|O8_BYOK_REQUIRED$|O8_EXPERIMENTAL_|O8_LICENSE_PUBKEY$|O8_SENTRY_DSN$|SENTRY_DSN$)/;
+const PUBLIC_ENV = /^(NEXT_PUBLIC_|CLERK_PUBLISHABLE_KEY$|O8_APP_VERSION$|O8_BYOK_REQUIRED$|O8_EXPERIMENTAL_|O8_LICENSE_PUBKEY$)/;
 const BUILD_OPTIONS = Object.freeze({
   target: 'universal-apple-darwin', nodeEnv: 'production',
   nextBundler: 'webpack', tauriFeatures: ['dev-mcp-plugin'], signing: 'unsigned-or-adhoc',

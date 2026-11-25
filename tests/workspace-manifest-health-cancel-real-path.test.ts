@@ -14,7 +14,7 @@ beforeAll(async () => {
   process.env.CORTEX_IDE_DATA_DIR = path.join(root, 'data');
   process.env.O8_DATA_DIR = path.join(root, 'data');
   const { updateOperatorDefaults } = await import('@/lib/operator/defaults');
-  await updateOperatorDefaults({ productTelemetryEnabled: false, workspaceManifestPolicy: 'auto' });
+  await updateOperatorDefaults({ workspaceManifestPolicy: 'auto' });
 });
 
 afterAll(async () => {

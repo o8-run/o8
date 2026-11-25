@@ -347,7 +347,6 @@ mode = "keep-me"
 
   it.each([
     ['userinfo', 'local_models', 'inference_base_url', 'localInferenceBaseUrl', 'http://user:secret@localhost:11434'],
-    ['signed query token', 'telemetry', 'ingest_url', 'telemetryIngestUrl', 'https://telemetry.example/ingest?X-Amz-Signature=secret'],
   ])('rejects credential-bearing URL %s through TOML and field APIs', async (_shape, section, key, apiKey, url) => {
     const tomlResponse = await POST(postDefaults({
       settingsToml: `[${section}]\n${key} = ${JSON.stringify(url)}\n`,

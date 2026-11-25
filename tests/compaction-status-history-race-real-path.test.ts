@@ -29,7 +29,7 @@ const { closeDb } = await import('@/lib/db');
 afterAll(() => { closeDb(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 it('preserves a follow-up and its completed turn admitted while the real compactor process holds an older history snapshot', async () => {
-  await updateOperatorDefaults({ inAppOrchestratorEnabled: true, productTelemetryEnabled: false });
+  await updateOperatorDefaults({ inAppOrchestratorEnabled: true });
   const threadId = 'thoughts-compaction-turn-race';
   const messages = Array.from({ length: 12 }, (_, index) => ({ id: `before-${index}`, role: index % 2 ? 'assistant' : 'user',
     content: `Sample turn ${index}`, timestamp: Date.now() - 12_000 + index * 100 }));

@@ -94,7 +94,7 @@ if(args[0]==='app-server'){
   identityA = await identities.registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture A', configHomeRef: accountA });
   identityB = await identities.registerRuntimeIdentity({ runtime: 'codex', label: 'Fixture B', configHomeRef: accountB });
   await updateOperatorDefaults({ defaultDispatchRuntime: 'codex', defaultDispatchModel: '', subscriptionProfile: 'both',
-    codexWorkerEffort: 'adaptive', productTelemetryEnabled: false, storageReserveFloorGb: 0.001, storageReserveRatio: 0.0001 });
+    codexWorkerEffort: 'adaptive', storageReserveFloorGb: 0.001, storageReserveRatio: 0.0001 });
 });
 beforeEach(async () => {
   sessionRoot = join(sessions, crypto.randomUUID());

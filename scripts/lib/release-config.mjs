@@ -4,7 +4,6 @@ import { join } from 'node:path';
 const FILE_KEYS = Object.freeze([
   'githubOAuthClientId',
   'clerkPublishableKey',
-  'sentryDsn',
 ]);
 
 /**
@@ -29,7 +28,6 @@ export function resolveReleaseConfig(root, env = process.env) {
   const overrides = {
     githubOAuthClientId: env.GITHUB_OAUTH_CLIENT_ID,
     clerkPublishableKey: env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    sentryDsn: env.SENTRY_DSN,
   };
   for (const [key, value] of Object.entries(overrides)) {
     if (typeof value === 'string' && value.trim()) config[key] = value.trim();

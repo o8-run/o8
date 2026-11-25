@@ -94,7 +94,6 @@ async function agentPush(sessionName: string) {
 const withoutId = (payload: unknown, id: string) => JSON.stringify(payload).split(id).join('<id>');
 
 beforeAll(async () => {
-  await updateOperatorDefaults({ productTelemetryEnabled: false });
   fixture = await startJudgmentEndpointFixture();
   setPushGateTransportForTests({ endpoint: fixture.endpoint, timeoutMs: 2_000, maxAttempts: 1 });
   writeFileSync(judgmentKeyPath(), `${KEY}\n`);

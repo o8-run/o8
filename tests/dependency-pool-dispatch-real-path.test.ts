@@ -12,7 +12,6 @@ vi.mock('@/lib/runtimes/shared/dispatch-readiness', () => ({
   ensureDispatchBackendReady: vi.fn(async () => ({ ready: true })),
 }));
 vi.mock('@/lib/realtime/publisher', () => ({ publishRealtimeMutation: vi.fn() }));
-vi.mock('@/lib/analytics/server', () => ({ emitProductEvent: vi.fn() }));
 vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/worktree/storage-telemetry')>(),
   measureHostVolume: vi.fn(async () => ({

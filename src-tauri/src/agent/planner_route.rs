@@ -428,8 +428,7 @@ pub(crate) fn preferred_provider() -> &'static PlannerAdapter {
     preferred_provider_from(read_operator_defaults().as_ref())
 }
 
-/// `~/.o8/operator-defaults.json`, the same file the native shell already reads
-/// for the crash-report toggle (`telemetry.rs`). Reading it here keeps the
+/// `~/.o8/operator-defaults.json`. Reading it here keeps the
 /// planner's provider choice aligned with the operator's orchestrator backend
 /// without an HTTP hop into the Next server. Missing or malformed resolves to
 /// `None` and the Codex fallback below.

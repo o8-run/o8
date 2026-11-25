@@ -43,9 +43,6 @@ vi.mock('@/lib/worktree/storage-telemetry', async (importOriginal) => ({
   })),
 }));
 
-vi.mock('@/lib/analytics/server', () => ({
-  emitProductEvent: vi.fn(async () => undefined),
-}));
 
 vi.mock('@/lib/codex/service-tier-catalogue', () => ({ getCodexSpeedCatalogue: async () => ({ models: { 'gpt-5.6-terra': [], 'gpt-5.6-sol': [] } }) }));
 vi.mock('@/lib/realtime/publisher', () => ({

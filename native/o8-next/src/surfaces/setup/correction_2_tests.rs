@@ -19,33 +19,31 @@ fn fresh_opencode_first_send(cx: &mut TestAppContext, change_workers: bool) {
     click(cx, "setup-project-0");
     refresh_tools(cx);
     use_only_opencode(cx);
+    if change_workers {
+        // Workers switch to Codex only; the OpenCode lead keeps its own default.
+        click(cx, "setup-customize");
+        click(cx, "setup-worker-codex");
+        click(cx, "setup-worker-opencode");
+        click(cx, "setup-customize");
+    }
     click(cx, "setup-use");
     let recommendation: Value = fixture
         .client
         .get("/api/panel/operator-defaults", &[("include", "setup")])
         .unwrap();
-    // With no saved model or CLI model configuration, this comes from the
-    // production runtime capability registry, rather than a copied model ID.
-    assert_eq!(
-        recommendation["setupRecommendation"]["workerRuntimes"][0],
-        "opencode"
-    );
-    let default_model = recommendation["setupRecommendation"]["workerModel"]
+    let worker_model = recommendation["setupRecommendation"]["workerModel"]
         .as_str()
         .unwrap()
         .to_owned();
-    assert!(default_model.contains('/'));
-    if change_workers {
-        click(cx, "setup-back");
-        click(cx, "setup-change-tools");
-        click(cx, "setup-customize");
-        click(cx, "setup-worker-codex");
-        click(cx, "setup-worker-opencode");
-        click(cx, "setup-use");
+    if !change_workers {
+        // With no saved model or CLI model configuration, this comes from the
+        // production runtime capability registry, rather than a copied model ID.
+        assert_eq!(
+            recommendation["setupRecommendation"]["workerRuntimes"][0],
+            "opencode"
+        );
+        assert!(worker_model.contains('/'));
     }
-    scroll_privacy(cx);
-    click(cx, "setup-crashes-off");
-    click(cx, "setup-consent");
     assert!(shell.read_with(cx, |s, _| s.surfaces.setup.view.is_none()));
     let session = shell.read_with(cx, |s, _| {
         let Some(Tab::Session(id)) = s.active() else {
@@ -62,10 +60,15 @@ fn fresh_opencode_first_send(cx: &mut TestAppContext, change_workers: bool) {
         .get("/api/v2/chat-history", &[("tabId", &session.id)])
         .unwrap();
     assert_eq!(history["backend"], "opencode");
-    assert_eq!(
-        history["model"], default_model,
-        "fresh OpenCode setup must use its own runtime default, independently of the worker pool"
-    );
+    let default_model = history["model"].as_str().unwrap().to_owned();
+    if change_workers {
+        assert!(
+            default_model.contains('/') && default_model != worker_model,
+            "fresh OpenCode setup must use its own runtime default, independently of the worker pool"
+        );
+    } else {
+        assert_eq!(default_model, worker_model);
+    }
     click(cx, "composer-input");
     cx.simulate_input("Fresh OpenCode first send");
     cx.simulate_keystrokes("enter");

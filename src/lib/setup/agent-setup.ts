@@ -50,15 +50,13 @@ export async function agentSetupStatus() {
       credentialEvidence: Object.values(data.cliAuth.statuses).find((auth) => auth.runtime === item.id)?.authenticated ?? null,
       providerAcceptance: 'not_checked',
     })),
-    privacyAnswered: data.values.telemetryConsentAnswered,
     incompleteSteps: [
       ...(!config.setupComplete && !request ? ['project'] : []),
       ...(!toolsReady ? ['tools'] : []),
-      ...(!data.values.telemetryConsentAnswered ? ['privacy'] : []),
       ...((request ? request.status !== 'opened' : !config.setupComplete) ? ['workspace'] : []),
     ],
     request,
-    humanHandoffs: ['Sign in through the runtime when credentials are missing.', 'Grant operating-system permissions yourself.', 'Choose privacy settings in the app.'],
+    humanHandoffs: ['Sign in through the runtime when credentials are missing.', 'Grant operating-system permissions yourself.'],
   };
 }
 function fields(body: Record<string, unknown>, allowed: string[]) {

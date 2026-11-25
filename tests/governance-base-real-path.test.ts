@@ -79,7 +79,7 @@ afterAll(() => {
 
 describe('governance uses the persisted packet base', () => {
   it('shows only packet changes and their base on a file-size approval card', async () => {
-    await updateOperatorDefaults({ requireApproval: 'high-risk', productTelemetryEnabled: false,
+    await updateOperatorDefaults({ requireApproval: 'high-risk',
       storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
     const { lane, packetId, base } = await fixture('oversized', true);
     const result = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });

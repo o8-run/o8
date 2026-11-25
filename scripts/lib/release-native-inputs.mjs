@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
-import { resolveReleaseBuildEnvironment, resolveReleaseConfig } from './release-config.mjs';
+import { resolveReleaseBuildEnvironment } from './release-config.mjs';
 
 export const NATIVE_ARTIFACT = 'src-tauri/target/.release-native-artifact';
 export const SPEECH_HELPERS = ['', '-aarch64-apple-darwin', '-universal-apple-darwin', '-x86_64-apple-darwin']
@@ -53,7 +53,7 @@ export function nativeSourceInputs(root) {
 }
 
 const hash = value => createHash('sha256').update(value).digest('hex');
-const COMPILER_ENV = /^(CARGO_|RUST|CC($|_)|CXX($|_)|AR($|_)|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|LIBRARY_PATH$|PKG_CONFIG|CMAKE|BINDGEN_|SDKROOT$|DEVELOPER_DIR$|MACOSX_DEPLOYMENT_TARGET$|IPHONEOS_DEPLOYMENT_TARGET$|SWIFT|TAURI_|O8_SENTRY_DSN$|SENTRY_DSN$|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY$)/;
+const COMPILER_ENV = /^(CARGO_|RUST|CC($|_)|CXX($|_)|AR($|_)|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|LIBRARY_PATH$|PKG_CONFIG|CMAKE|BINDGEN_|SDKROOT$|DEVELOPER_DIR$|MACOSX_DEPLOYMENT_TARGET$|IPHONEOS_DEPLOYMENT_TARGET$|SWIFT|TAURI_|NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY$)/;
 
 
 function parseConfig(contents, toml = false) {
@@ -129,7 +129,6 @@ export function nativeBuildSettings(root, buildOptions = {}, env = process.env) 
 
 export function compilerEnvironment(root, phase, env) {
   const effective = resolveReleaseBuildEnvironment(root, env);
-  effective.SENTRY_DSN = resolveReleaseConfig(root, env).sentryDsn;
   // Operational cache locations/receipts do not change executable bytes.
   const names = Object.keys(effective).filter(name => (phase === 'speech'
     ? /^(SWIFT|SDKROOT$|DEVELOPER_DIR$|MACOSX_DEPLOYMENT_TARGET$|O8_TAURI_BUILD_TARGET$|TAURI_ENV_TARGET_TRIPLE$)/.test(name)

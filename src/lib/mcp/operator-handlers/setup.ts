@@ -3,7 +3,7 @@ import { apiFetch, errorText, jsonResult, textResult, type McpTool, type McpTool
 
 export const SETUP_TOOLS: McpTool[] = [{
   name: 'o8_setup',
-  description: 'Help the operator set up o8. status is read-only and separates installation, credential evidence, provider acceptance, saved choices, and incomplete steps. configure saves lead/worker choices through onboarding validation; workers[0] is the default. open registers an absolute project path without a folder dialog and asks visible onboarding to open it. Read status until the app reports opened or a handoff; pending is not completion. cancel requires the current requestId and never removes a repo or saved choices. Never choose privacy consent or grant OS permissions for the user; sign-in and those choices are human handoffs.',
+  description: 'Help the operator set up o8. status is read-only and separates installation, credential evidence, provider acceptance, saved choices, and incomplete steps. configure saves lead/worker choices through onboarding validation; workers[0] is the default. open registers an absolute project path without a folder dialog and asks visible onboarding to open it. Read status until the app reports opened or a handoff; pending is not completion. cancel requires the current requestId and never removes a repo or saved choices. Never grant OS permissions for the user; sign-in and permissions are human handoffs.',
   inputSchema: {
     type: 'object',
     properties: {

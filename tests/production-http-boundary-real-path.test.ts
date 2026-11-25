@@ -81,7 +81,7 @@ async function prepareFixture() {
   const end = source.indexOf("\nconsole.log('📦 Wrote server.js wrapper", start);
   const template = source.slice(start, end).trim().replace(/\);$/, '');
   const wrapper = runInNewContext(template, Object.fromEntries([
-    'RELEASE_ENV_STANZA', 'SENTRY_ENV_STANZA', 'APP_VERSION_STANZA', 'BUILD_GIT_SHA_STANZA', 'BOOT_CAPTURE_STANZA',
+    'RELEASE_ENV_STANZA', 'APP_VERSION_STANZA', 'BUILD_GIT_SHA_STANZA', 'BOOT_CAPTURE_STANZA',
   ].map(name => [name, ''])));
   writeFileSync(join(root, 'server.js'), wrapper);
   stagePackagedNativeAddons({ projectRoot: process.cwd(), serverRoot: root, platform: 'darwin' });

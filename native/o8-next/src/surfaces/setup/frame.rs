@@ -19,13 +19,13 @@ pub(super) fn rail(setup: &Setup) -> (Vec<Part>, usize) {
     let step = progress::step_name(setup.step);
     let current = match step {
         "dispatch" => 1,
-        "privacy" | "permissions" | "mobile" => 2,
+        "permissions" | "mobile" => 2,
         _ => 0,
     };
     let workspace = match step {
         "permissions" => "Optional voice setup",
         "mobile" => "Optional iPhone app",
-        _ => "Privacy choices",
+        _ => "Open your workspace",
     };
     let agent_ready = setup
         .snapshot

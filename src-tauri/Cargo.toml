@@ -38,8 +38,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.6", features = [] }
-# Parse o8.release.json at build time to bake the Sentry DSN (release only).
-serde_json = "1.0"
 
 [features]
 default = []
@@ -92,42 +90,6 @@ tokio = { version = "1.54.1", features = ["rt", "net", "time", "sync"] }
 tauri-plugin-mcp = { path = "../tauri-plugin-mcp", optional = true }
 window-vibrancy = "0.6"
 rusqlite = { version = "0.41", features = ["bundled"] }
-
-# Crash/error reporting for the native shell (telemetry ruling). DORMANT unless a
-# RELEASE build baked a DSN (build.rs → cargo:rustc-env=O8_SENTRY_DSN). Keep
-# reqwest/rustls support and the debug images previously enabled by minidump.
-# Shared reqwest features can also enable native TLS. This SDK/minidump pair
-# removes the legacy bundled roots without changing certificate-verification options.
-sentry = { version = "0.42", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
-
-# Native crash capture — the class of crash the `panic` hook above CANNOT see:
-# hardware faults + aborts (SIGSEGV / SIGABRT / SIGBUS / SIGILL / SIGFPE and
-# stack-overflow). Version 0.13 depends on `sentry ^0.42` without enabling its
-# default transport, so these two pins advance together. It keeps `crash-handler 0.6` +
-# `minidumper 0.8` via `minidumper-child 0.2`.
-#
-# How it works (see telemetry::init_minidump_handler): `init()` re-execs THIS
-# same signed binary with `--crash-reporter-server=<uuid>` to run an
-# out-of-process reporter sibling. On a native crash the main process hands its
-# OWN Mach task/thread ports to that sibling over Mach IPC; the sibling writes a
-# minidump from those ports and uploads it AS A SENTRY ATTACHMENT at crash time
-# (out-of-process ⇒ a stack-overflow crash is captured on a fresh stack).
-#
-# macOS notes: crash-handler installs a Mach exception port (EXC_BAD_ACCESS ⇒
-# SEGV/BUS, EXC_BAD_INSTRUCTION ⇒ ILL, EXC_ARITHMETIC ⇒ FPE, EXC_BREAKPOINT ⇒
-# TRAP) PLUS an explicit SIGABRT signal handler (abort has no Mach exception).
-# Tonight's crash class — stack-overflow → EXC_BAD_ACCESS in Rust's stack-guard
-# handler → abort/SIGABRT — is caught on BOTH the Mach and the SIGABRT paths.
-# No `ipc` feature: the static scope tags (app_version/plan/founder/surface) are
-# set by telemetry::init, which runs in the reporter process too, so the
-# minidump event already carries them without cross-process scope sync.
-#
-# Signing/notarization: the reporter is a re-exec of the SAME Developer-ID,
-# hardened-runtime binary — it inherits the identical code signature +
-# entitlements, so there is NOTHING extra to sign or notarize. Memory is read
-# via the explicitly-handed Mach port, NOT task_for_pid, so no debugger
-# entitlement (com.apple.security.cs.debugger / get-task-allow) is required.
-sentry-rust-minidump = "0.13"
 
 # Issue #755: runtime-download for codebase-memory-mcp static binary.
 # All three crates are already in the transitive lock graph (reqwest pulled

@@ -102,7 +102,7 @@ const ran = () => (existsSync(marker) ? readFileSync(marker, 'utf8').trim().spli
 
 beforeAll(async () => {
   // The storage governor is not under test; keep its reserve out of the way.
-  await updateOperatorDefaults({ productTelemetryEnabled: false, storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
+  await updateOperatorDefaults({ storageReserveRatio: 0.0001, storageReserveFloorGb: 0.001 });
 });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 

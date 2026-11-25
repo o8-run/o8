@@ -1,4 +1,4 @@
-//! Native first-run project, runtime and privacy flow. All writes use desktop routes.
+//! Native first-run project and runtime flow. All writes use desktop routes.
 use crate::{
     client::{Client, Session},
     composer::Composer,
@@ -32,8 +32,6 @@ mod look;
 mod new_project;
 #[path = "permissions.rs"]
 pub(crate) mod permissions;
-#[path = "privacy.rs"]
-mod privacy;
 #[path = "progress.rs"]
 mod progress;
 #[path = "repos.rs"]
@@ -57,7 +55,6 @@ enum Step {
     Projects,
     Folder,
     Tools,
-    Privacy,
     NewProject,
     /// The optional voice step: Symon and its macOS permissions.
     Permissions,
@@ -155,12 +152,6 @@ pub struct Setup {
     session_id: String,
     busy: bool,
     error: Option<String>,
-    /// Usage analytics: None until chosen, which the server reads as on.
-    telemetry: Option<bool>,
-    /// Crash reports: None until the person chooses, as on the desktop.
-    crashes: Option<bool>,
-    /// Whether the sample crash report is shown.
-    crash_sample: bool,
     /// Saved with progress, as on the desktop.
     tools_configured: bool,
     task: String,
@@ -213,9 +204,6 @@ enum Action {
     Create(Value),
     Import(Vec<String>),
     Use,
-    /// Save the usage analytics choice as soon as it changes.
-    Usage(bool),
-    Consent,
 }
 struct ResultState {
     snapshot: Snapshot,
@@ -235,7 +223,6 @@ impl Setup {
             Step::Projects => "projects",
             Step::Folder => "folder",
             Step::Tools => "tools",
-            Step::Privacy => "privacy",
             Step::NewProject => "new-project",
             Step::Permissions => "permissions",
             Step::Repos => "repos",
@@ -316,9 +303,6 @@ impl Setup {
             ),
             busy: false,
             error: None,
-            telemetry: None,
-            crashes: None,
-            crash_sample: false,
             tools_configured: resume.tools_configured,
             task: resume.task,
             saved: saved.cloned(),
@@ -390,8 +374,6 @@ impl Setup {
         let backend = self.backend.clone();
         let workers = self.workers.clone();
         let model = self.model.read(cx).text.trim().to_owned();
-        let telemetry = self.telemetry;
-        let crashes = self.crashes;
         let step = self.step;
         let id = self.session_id.clone();
         let used = matches!(action, Action::Use);
@@ -450,19 +432,8 @@ impl Setup {
                     next = Some(Snapshot::load(&client, false)?);
                     if selected.is_some() {
                         if next.as_ref().unwrap().model(&model).is_none() { target = Step::Tools; }
-                        else if next.as_ref().unwrap().setup["values"]["telemetryConsentAnswered"] == true { finish = true; }
-                        else { target = Step::Privacy; }
+                        else { finish = true; }
                     } else { target = Step::Projects; }
-                }
-                Action::Usage(enabled) => {
-                    let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":enabled}))?;
-                    if response["values"]["productTelemetryEnabled"] != enabled { return Err("Your usage choice could not be saved.".into()); }
-                }
-                Action::Consent => {
-                    let crashes = crashes.ok_or("Choose whether to share crash reports to continue.")?;
-                    let response = client.setup_request("POST", "/api/panel/operator-defaults", &json!({"productTelemetryEnabled":telemetry,"crashReportsEnabled":crashes,"telemetryConsentAnswered":true}))?;
-                    if response["values"]["telemetryConsentAnswered"] != true { return Err("Privacy choices could not be confirmed. Try again.".into()); }
-                    finish = true;
                 }
             }
             let loaded = next.ok_or("Setup has not loaded. Try again.")?;
@@ -495,12 +466,6 @@ impl Setup {
                                 this.model.update(cx, |model, cx| model.clear(cx));
                             }
                             (this.backend, this.workers) = result.snapshot.recommendation();
-                        }
-                        // Privacy opens with any earlier choices, as on the desktop.
-                        if result.step == Step::Privacy
-                            && (this.step != Step::Privacy || this.snapshot.is_none())
-                        {
-                            this.privacy_choices(&result.snapshot.setup["values"]);
                         }
                         this.snapshot = Some(result.snapshot);
                         this.project = result.project;
@@ -539,7 +504,7 @@ impl Setup {
         cx.notify();
     }
     /// Opening a project, or starting without one: tools first when they are
-    /// not ready, then privacy, then the first conversation.
+    /// not ready, then the first conversation.
     fn proceed(
         client: &Client,
         selected: Option<&Project>,
@@ -561,11 +526,7 @@ impl Setup {
                     &Self::selection(&loaded, &lead, &pool),
                 )?;
             }
-            if loaded.setup["values"]["telemetryConsentAnswered"] != true {
-                target = Step::Privacy;
-            } else {
-                finish = true;
-            }
+            finish = true;
         }
         Ok((Some(loaded), target, finish))
     }
@@ -669,13 +630,6 @@ impl Setup {
             });
         })
         .detach();
-    }
-    /// Earlier choices: usage analytics when one was saved, and crash
-    /// reports only when the combined choice was answered.
-    fn privacy_choices(&mut self, values: &Value) {
-        let answered = values["telemetryConsentAnswered"] == true;
-        self.telemetry = values["productTelemetryEnabled"].as_bool();
-        self.crashes = values["crashReportsEnabled"].as_bool().filter(|_| answered);
     }
     fn navigate(&mut self, step: Step, cx: &mut Context<Self>) {
         if self.busy {
@@ -804,9 +758,8 @@ impl Render for Setup {
         let revision = self.revision;
         let width = f32::from(window.viewport_size().width);
         let home = self.step == Step::Projects;
-        let privacy = self.step == Step::Privacy;
         // Pages with a docked action row fill the frame and scroll inside it.
-        let docked = privacy || self.step == Step::Tools;
+        let docked = self.step == Step::Tools;
         // Pages that show their own progress and errors.
         let own = docked || self.step == Step::Repos;
         let body = div()
@@ -899,9 +852,6 @@ impl Render for Setup {
                 v.child(new_project::page(self, busy, cx))
             })
             .when(self.step == Step::Tools, |v| v.child(self.tools_page(cx)))
-            .when(self.step == Step::Privacy, |v| {
-                v.child(privacy::page(self, busy, cx))
-            })
             .when(self.step == Step::Permissions, |v| {
                 v.child(self.permissions_page(cx))
             })
