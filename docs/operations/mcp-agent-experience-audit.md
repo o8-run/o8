@@ -127,7 +127,6 @@ records discovery coverage, not a successful execution of every action.
 | `o8_packet_transcript` | packetId | none | limit | none | yes |
 | `steer_packet` | packetId, message | none | none explicit | none | missing |
 | `o8_operator_defaults` | none declared | 18 enum-bearing settings | includeReceipts, includeAuth, includeDetails, broadcastCommentaryIntervalMinutes, broadcastCommentaryMinNewEvents, broadcastCommentaryMaxPerHour, broadcastVoice, broadcastVoiceLullMinutes, meteredPacketCostCapUsd, meteredPacketInputTokenCap, uiLoopMaxIterations, uiLoopMaxMinutes, uiLoopMaxDiffBytes, uiLoopMaxDiffFiles, uiLoopPreviewTimeoutMs, defaultDispatchRuntime, defaultDispatchModel, requireApproval | none | yes |
-| `cortex_knowledge_sources` | action | action | none explicit | action, path, name, id, include, exclude | missing |
 | `cortex_propose_observation` | packetId, kind, text | kind, scope | scope | none | missing |
 | `cortex_ask` | question | none | projectId, bypassCache, terse | none | missing |
 | `o8_feature_list` | repoPath | status | none explicit | status, limit | missing |

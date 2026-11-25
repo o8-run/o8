@@ -446,7 +446,6 @@
   "tests/knowledge-source-direct-writers-real-path.test.ts": 7,
   "tests/knowledge-source-metadata-inodes-real-path.test.ts": 8,
   "tests/knowledge-source-write-boundaries-real-path.test.ts": 11,
-  "tests/knowledge-sources-real-path.test.ts": 12,
   "tests/lane-branch-binding-diff.test.ts": 6,
   "tests/lane-completion-presentation-real-path.test.ts": 3,
   "tests/lane-confined-verification-real-path.test.ts": 4,

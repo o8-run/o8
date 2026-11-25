@@ -105,7 +105,6 @@ Live native actions and destructive commands were not exercised.
 | `o8 broadcast --help` | 0 | missing | missing | missing |
 | `o8 msg --help` | 0 | missing | missing | missing |
 | `o8 presence --help` | 0 | missing | missing | missing |
-| `o8 brain sources --help` | 0 | missing | missing | missing |
 | `o8 cortex observe --help` | 0 | missing | missing | missing |
 | `o8 lane touches --help` | 0 | missing | missing | missing |
 | `o8 artifact create --help` | 0 | missing | missing | missing |

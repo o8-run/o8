@@ -1,4 +1,3 @@
-import { knowledgeProvenance } from '@/lib/cortex/knowledge';
 /**
  * Facts retriever — Engineering Brain Indexer surface (#915 north star #1).
  *
@@ -150,7 +149,7 @@ function factsFtsSearch(
              snippet(facts_fts, -1, '«', '»', '…', 8) AS excerpt
       FROM facts_fts
       WHERE facts_fts MATCH ?
-        AND EXISTS (SELECT 1 FROM facts f WHERE f.id = facts_fts.fact_id
+        AND EXISTS (SELECT 1 FROM facts f WHERE f.id = facts_fts.fact_id AND f.source_kind != 'knowledge'
           AND (f.source_kind != 'outcome' OR EXISTS (
             SELECT 1 FROM session_outcomes so WHERE ('outcome:' || so.id = f.source_id OR so.id = f.source_id)
               AND so.project_id IS ?)))
@@ -302,8 +301,7 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
       if (!record) continue;
       if (record.source_kind === 'outcome' && !sqlite.prepare(`SELECT 1 FROM session_outcomes
         WHERE (id = ? OR 'outcome:' || id = ?) AND project_id IS ?`).get(record.source_id, record.source_id, scopedRepoScope.projectId)) continue;
-      const knowledge = record.source_kind === 'knowledge' ? knowledgeProvenance(record.source_id) : null;
-      if (record.source_kind === 'knowledge' ? !knowledge : !factRepoInScope(record.repo_path, scopedRepoScope.repoPaths)) continue;
+      if (record.source_kind === 'knowledge' || !factRepoInScope(record.repo_path, scopedRepoScope.repoPaths)) continue;
       if (record.confidence < CONFIDENCE_FLOOR) continue;
 
       const hit = hits.get(id)!;
@@ -314,11 +312,9 @@ export async function retrieveFacts(input: RetrieverInput): Promise<RetrieverRes
           kind: 'fact',
           rowId: record.id,
           table: 'facts',
-          ...(knowledge ? { sourcePath: knowledge.sourcePath, title: knowledge.title } : {}),
           excerpt,
         },
         fields: {
-          ...(knowledge ?? {}),
           factKind: record.kind,
           content: record.content,
           sourceKind: record.source_kind,

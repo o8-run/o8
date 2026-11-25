@@ -1,5 +1,4 @@
 import * as conversationDefaults from './conversation-defaults';
-import { reconcileKnowledgeSources } from '@/lib/cortex/knowledge/reconcile';
 import { parseKnowledgeSources, type KnowledgeSourceDefaults } from './knowledge-source-defaults';
 import { parseOperatorDefaultsToml } from '@/lib/settings/toml';
 import { validateKnowledgeSourceRoots } from '@/lib/cortex/knowledge/sources';
@@ -1091,12 +1090,7 @@ async function updateOperatorDefaultsOnce(update: Partial<OperatorDefaults>, exp
 }
 
 export async function updateOperatorDefaults(update: Partial<OperatorDefaults>, expectedRevision?: string): Promise<OperatorDefaultsWithSources> {
-  const apply = async () => {
-    const before = getOperatorDefaultsSync().values.knowledgeSources;
-    const result = await updateOperatorDefaultsOnce(update, expectedRevision);
-    await reconcileKnowledgeSources(before, result.values.knowledgeSources);
-    return result;
-  };
+  const apply = () => updateOperatorDefaultsOnce(update, expectedRevision);
   return expectedRevision ? withOperatorDefaultsWriteLock(apply) : withOperatorDefaultsUpdateRetry(apply);
 }
 
@@ -1104,12 +1098,7 @@ export async function applyOperatorDefaultsToml(raw: string, expectedRevision: s
   return withOperatorDefaultsWriteLock(async () => {
     const knowledge = parseOperatorDefaultsToml(raw).knowledgeSources;
     if (knowledge !== undefined) validateKnowledgeSourceRoots(knowledge);
-    const before = getOperatorDefaultsSync().values.knowledgeSources;
-    return applyOperatorDefaultsTomlFile(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, async () => {
-      const result = await getOperatorDefaults();
-      await reconcileKnowledgeSources(before, result.values.knowledgeSources);
-      return result;
-    });
+    return applyOperatorDefaultsTomlFile(raw, expectedRevision, OPERATOR_DEFAULTS_FALLBACK, getOperatorDefaults);
   });
 }
 

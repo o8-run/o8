@@ -14,7 +14,6 @@ const f = vi.hoisted(() => {
   return { root, launched: vi.fn(), spawned: vi.fn(), failGitProbe: false, gitCalls: 0 };
 });
 vi.mock('@/lib/skeleton/autoscan', () => ({ triggerScan: vi.fn() }));
-vi.mock('@/lib/cortex/knowledge/reconcile', () => ({ reconcileKnowledgeSources: async () => {} }));
 vi.mock('@/lib/runtime/actions', async original => ({ ...await original<typeof import('@/lib/runtime/actions')>(),
   launchRuntimeSurface: async (input: { cwd: string }) => {
     f.launched(input); writeFileSync(path.join(input.cwd, 'note.md'), 'runtime wrote');
@@ -222,11 +221,9 @@ it.each(['refs/heads', 'logs/refs/heads'])('refuses source admission when a regi
   const note = path.join(vault, 'note.md'); writeFileSync(note, '# Retained admission canary\n');
   const target = path.join(writable, '.git', storage); renameSync(target, `${target}-retained`); symlinkSync(vault, target, 'dir');
   await addRepo(writable);
-  const sourceApi = await import('@/app/api/cortex/sources/route');
   const retained = readFileSync(note);
-  const response = await sourceApi.POST(req('/api/cortex/sources', { action: 'add', path: vault }));
-  expect.soft(readFileSync(note)).toEqual(retained);
-  expect(response.status, await response.text()).toBe(400);
+  await expect(protect(vault)).rejects.toThrow(/separate from registered repositories/);
+  expect(readFileSync(note)).toEqual(retained);
 });
 
 it.each(['refs/heads', 'logs/refs/heads'])('allows Git %s symlinks whose physical storage remains separate from knowledge sources', async storage => {

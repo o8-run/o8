@@ -2,7 +2,6 @@ import { runIntegrationQueue } from './commands/integration-queue.js';
 import { runPacketPolicy } from './commands/packet/policy.js';
 import { runHeavy } from './commands/run-heavy.js';
 import { runPrStack } from './commands/pr-stack.js';
-import { runBrainSources } from './commands/brain-sources.js';
 import { runThreads } from './commands/threads.js';
 import { runWorkspaceCleanup } from './commands/workspace-cleanup.js';
 import { runNext } from './commands/next.js';
@@ -271,7 +270,6 @@ commands:
   broadcast automation-say|focus|post|token   post from an automation, set focus, post narration, or manage spectator bearers
   msg send|inbox       send a bounded agent message (--reply-to ID, --close) or read this session's inbox
   presence list|join   list live sessions or register an explicit external name
-  brain sources        manage read-only markdown knowledge folders
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   worker spawn         create + dispatch one governed worker from any Git repo (--title --body [--repo path] [--runtime id] [--model m] [--effort adaptive|low|medium|high|max|xhigh|ultra] [--caller label] [--read-only])
@@ -448,9 +446,6 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runMsg(args.mode, secondary, args.rest);
     case 'presence':
       return runPresence(args.mode, secondary, args.rest);
-    case 'brain':
-      if (secondary === 'sources') return runBrainSources(args.mode, args.rest);
-      throw unknownSubcommandError('brain', secondary);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);

@@ -1,4 +1,3 @@
-import { KnowledgeSourcesChangedError } from '@/lib/cortex/knowledge/answer-validity';
 import 'server-only';
 import { composeConnectedBrain } from './compose-connected';
 
@@ -128,7 +127,6 @@ export async function composeClassB(
 
     emit('done', {});
   } catch (err) {
-    if (err instanceof KnowledgeSourcesChangedError) throw err;
     noteBrainQuotaError(err, 'anthropic');
     flushBrainQuotaAlerts(emit);
     const message = err instanceof Error ? err.message : 'composer-B error';
@@ -177,7 +175,6 @@ async function composeClassBViaManaged(
     }
     emit('done', {});
   } catch (err) {
-    if (err instanceof KnowledgeSourcesChangedError) throw err;
     console.warn('[qa][composer-B] managed inference failed:', err instanceof Error ? err.message : err);
     recordManagedBrainReceipt(repoPath, 'failed', 'Managed inference was unavailable or its allowance was reached.');
     throw new ManagedBrainUnavailableError();
@@ -248,7 +245,6 @@ async function composeClassBViaCodex(
     }
     emit('done', {});
   } catch (err) {
-    if (err instanceof KnowledgeSourcesChangedError) throw err;
     noteBrainQuotaError(err, 'openai');
     flushBrainQuotaAlerts(emit);
     console.warn('[qa][composer-B] Codex CLI failed:', err instanceof Error ? err.message : err);
@@ -333,7 +329,6 @@ async function composeClassBViaSonnetAdapter(
 
     emit('done', {});
   } catch (err) {
-    if (err instanceof KnowledgeSourcesChangedError) throw err;
     noteBrainQuotaError(err, 'anthropic');
     flushBrainQuotaAlerts(emit);
     const message = err instanceof Error ? err.message : 'composer-B-eval error';

@@ -468,7 +468,6 @@ export const nativeSurfaceRoutes: Record<string, Route[]> = {
     route('/api/runtime/capabilities', 'GET', () => import('@/app/api/runtime/capabilities/route')),
     route('/api/worktrees/retention-usage', 'GET', () => import('@/app/api/worktrees/retention-usage/route')),
     route('/api/runtime/capacity', 'GET', () => import('@/app/api/runtime/capacity/route')),
-    route('/api/cortex/sources', 'GET POST', () => import('@/lib/cortex/knowledge/sources-route')),
     // Move the plan controls and inference together: OAuth attempts (including
     // their loopback listeners) and in-flight cancellation share one WS service.
     route('/api/panel/models/chatgpt', 'GET POST DELETE', () => import('@/app/api/panel/models/chatgpt/route')),
