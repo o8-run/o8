@@ -121,13 +121,26 @@ The iPhone app is a remote control for the desktop: approve work, steer an agent
 
 ## Your data
 
-o8 runs on your machine against your own subscriptions and keys; it is not in the path between your agents and their providers. Worktree isolation covers repository changes. On macOS, dispatched workers also run in an OS sandbox by default (`O8_WORKER_SANDBOX=off` turns it off); on Linux they run under your user account and can read what you can read unless you turn the sandbox on. Usage analytics default on after the first-run privacy screen, with one-click off and earlier choices preserved. Crash reports and error transmission remain off by default and opt-in. [`SECURITY.md`](./SECURITY.md) covers what dispatched workers can reach and what the sandbox does and does not do today.
+o8 runs on your machine against your own subscriptions and keys; it is not in the path between your agents and their providers. Worktree isolation covers repository changes. On macOS, dispatched workers also run in an OS sandbox by default (`O8_WORKER_SANDBOX=off` turns it off); on Linux they run under your user account and can read what you can read unless you turn the sandbox on. o8 sends no analytics or telemetry; see below. [`SECURITY.md`](./SECURITY.md) covers what dispatched workers can reach and what the sandbox does and does not do today.
 
 ### Telemetry
 
-o8 sends no usage analytics and no crash or error reports. Crash logs stay on this machine in `~/.o8/telemetry/crashes.jsonl`.
+o8 sends no usage analytics, telemetry, crash reports or error reports. Crash logs stay on this machine in `~/.o8/telemetry/crashes.jsonl` and are never uploaded.
 
-Each desktop update check sends a random device identifier, app version, target, chip architecture, macOS version (on macOS), and release channel to o8's update service, as described on the [privacy page](https://o8.run/privacy). The identifier is saved locally at first launch and is separate from sign-in and hosted-model identifiers. The ping is always on as part of checking for updates, independent of the usage-analytics toggle. It sends no code, paths, repository names, prompts, or account details. The service contract prohibits storing IP addresses or linking the identifier to an account. GitHub remains the fallback, and update signature verification stays the same.
+o8 still makes the network calls below on its own. Each one is part of updating the app or of a feature you turned on.
+
+| Call | When | What it sends |
+|---|---|---|
+| Update check: `api.o8.run`, with the GitHub release as fallback | At launch, then about once an hour. `O8_NO_PHONE_HOME=1` turns it off. | App version, platform, chip architecture and release channel |
+| Release notes and release status: `api.github.com`, `raw.githubusercontent.com` | When an update is offered | Only the request |
+| Account sign-in: `o8.run` | After you sign in | Your account session and the name you give this computer |
+| Phone relay: `relay.o8.run` | After you pair a phone. `O8_NO_PHONE_HOME=1` turns it off. | Encrypted traffic between your phone and this computer |
+| Live Activity updates: `api.push.apple.com` | When a paired phone has Live Activities on and a push key is set up | Work status, title, counts and repository name for the lock screen |
+| Hosted model: `api.o8.run` | When you use the hosted model | Your request. The first use also sends a random install ID to get a free account token. |
+| GitHub API: `api.github.com` | After you connect GitHub | Requests for the repositories and pull requests you work on |
+| Agent CLI update checks | When setup checks the agent CLIs you have installed | The package names it checks |
+| Model and price lists | When you open model settings or usage history | Only the request |
+| Chart libraries: `cdn.jsdelivr.net` | When a visualization needs a library that is not cached | Only the request |
 
 ## Free and open source
 

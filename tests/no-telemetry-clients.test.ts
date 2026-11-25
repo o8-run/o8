@@ -81,6 +81,12 @@ describe('no analytics or error-reporting clients', () => {
     expect(found).toEqual([]);
   });
 
+  it('says so in the README, with no leftover opt-in or device-identifier wording', () => {
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    expect(readme).toContain('o8 sends no usage analytics, telemetry, crash reports or error reports.');
+    expect(readme).not.toMatch(/analytics default on|opt-in|random device identifier|usage-analytics toggle/i);
+  });
+
   it('recognizes the clients it guards against', () => {
     for (const name of ['@sentry/node', '@sentry/react-native', 'posthog-node', 'posthog-js', '@amplitude/analytics-node', 'mixpanel', '@vercel/analytics', '@react-native-firebase/crashlytics']) {
       expect(NPM_CLIENT.test(name), name).toBe(true);
