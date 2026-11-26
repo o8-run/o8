@@ -111,6 +111,61 @@ it('records its shard execution', () => {
     }
   }, 60_000);
 
+  it('reruns a failed file alone only when asked, passes a flaky file and still fails one that is red twice', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'o8-integration-rerun-'));
+    roots.push(fixture);
+    const configPath = join(fixture, 'integration.config.mjs');
+    writeFileSync(configPath, `
+export default {
+  test: {
+    root: ${JSON.stringify(fixture)}, globals: true, include: ['*.test.js'],
+    reporters: [['json', { outputFile: process.env.O8_TEST_GATE_REPORT_PATH }]],
+  },
+};
+`);
+    const marker = join(fixture, 'ran-once');
+    const flakyFile = join(fixture, 'flaky.test.js');
+    const redFile = join(fixture, 'red.test.js');
+    writeFileSync(flakyFile, `
+import { existsSync, writeFileSync } from 'node:fs';
+it('fails on its first run only', () => {
+  const seen = existsSync(${JSON.stringify(marker)});
+  writeFileSync(${JSON.stringify(marker)}, '');
+  expect(seen).toBe(true);
+});
+`);
+    writeFileSync(redFile, `it('always fails', () => { expect(1).toBe(2); });
+`);
+    const run = (files: string[], rerun: boolean) => {
+      rmSync(marker, { force: true });
+      const planPath = join(fixture, 'plan.json');
+      writeFileSync(planPath, JSON.stringify({ config: configPath, files, weightsPath: join(fixture, 'weights.json') }));
+      writeFileSync(join(fixture, 'weights.json'), '{}');
+      const env: NodeJS.ProcessEnv = {
+        ...fixtureGateEnv(), O8_INTEGRATION_TEST_MODE: '1', O8_INTEGRATION_TEST_PLAN: planPath,
+        O8_TEST_GATE_HEARTBEAT_MS: '100000',
+      };
+      delete env.O8_INTEGRATION_RERUN_FAILED;
+      if (rerun) env.O8_INTEGRATION_RERUN_FAILED = '1';
+      return spawnSync(process.execPath, ['scripts/integration-test-gate.mjs'], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 60_000, env,
+      });
+    };
+
+    const strict = run([flakyFile], false);
+    expect(strict.status, strict.stdout + strict.stderr).toBe(1);
+    expect(strict.stdout).not.toContain('rerunning');
+
+    const flaky = run([flakyFile], true);
+    expect(flaky.status, flaky.stdout + flaky.stderr).toBe(0);
+    expect(flaky.stdout).toContain(`[integration-gate] flaky, passed when rerun alone: ${flakyFile}`);
+    expect(flaky.stdout).toContain('new red 0 · flaky 1');
+
+    const red = run([flakyFile, redFile], true);
+    expect(red.status, red.stdout + red.stderr).toBe(1);
+    expect(red.stdout).toContain('new red 1 · flaky 1');
+  }, 120_000);
+
   it('balances the committed weights across six shards within five percent without losing or duplicating files', () => {
     const weights = JSON.parse(readFileSync('tests/integration-weights.json', 'utf8')) as Record<string, number>;
     const manifest = JSON.parse(readFileSync('tests/test-classification.json', 'utf8')) as { resourceOwning: Array<{ path: string }> };

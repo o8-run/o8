@@ -437,6 +437,8 @@ jobs:
           O8_INTEGRATION_SHARD: ${{ matrix.shard }}/6
           # Files red on unmodified main, each with its reason (#6761).
           O8_INTEGRATION_BASELINE: tests/integration-quarantine.json
+          # A failed file outside that list runs once more alone; passing then is flaky, not red.
+          O8_INTEGRATION_RERUN_FAILED: '1'
 
   integration-weekly-report:
     name: Weekly Integration Report

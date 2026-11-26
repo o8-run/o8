@@ -332,7 +332,9 @@ describe('local CI verification through its command entry point', () => {
     expect(integration.every(call => !call.args.some((arg: string) => arg.endsWith('.test.mjs')))).toBe(true);
     expect(result.stderr).not.toContain('[resource-owning-changed]');
     expect(result.stdout).toContain('[integration-policy] ready ');
-    expect(readFileSync(path.join(result.directory, 'executed.jsonl'), 'utf8').trim().split('\n')).toEqual(['0', '1', '2', '3', '4', '5']);
+    // The full-suite lane runs a failed file once more alone before counting it.
+    expect(readFileSync(path.join(result.directory, 'executed.jsonl'), 'utf8').trim().split('\n'))
+      .toEqual(options.mainFailure ? ['0', '0', '1', '2', '3', '4', '5'] : ['0', '1', '2', '3', '4', '5']);
     expect(spawnSync('git', ['diff', '--exit-code', 'HEAD', '--', 'tests'], { cwd: result.directory }).status).toBe(0);
     if (options.mainFailure) expect(result.stdout).toContain('FAIL tests/unchanged-integration-0.test.mjs');
   }, 60_000);

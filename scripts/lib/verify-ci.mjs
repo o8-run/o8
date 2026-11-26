@@ -450,7 +450,7 @@ export function readVerificationPlan(root, workflowPath = path.join(root, '.gith
   const fullClassification = full.steps.find(step => step.run === 'npm run test:classification:check');
   requireCondition(fullRun && !fullRun.if && fullBrowser && !fullBrowser.if
     && fullClassification?.if === 'matrix.shard == 1'
-    && isDeepStrictEqual(fullRun.env, { O8_INTEGRATION_SHARD: '${{ matrix.shard }}/6', O8_INTEGRATION_BASELINE: 'tests/integration-quarantine.json' }),
+    && isDeepStrictEqual(fullRun.env, { O8_INTEGRATION_SHARD: '${{ matrix.shard }}/6', O8_INTEGRATION_BASELINE: 'tests/integration-quarantine.json', O8_INTEGRATION_RERUN_FAILED: '1' }),
   'full integration commands and prerequisites need a verify:ci equivalent');
   for (const step of full.steps.filter(step => step.run)) {
     requireCondition(!step['continue-on-error'] && !step.shell && !step['working-directory']

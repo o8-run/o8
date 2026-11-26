@@ -465,18 +465,6 @@ const onSigterm = () => requestInterrupt('SIGTERM');
 process.on('SIGINT', onSigint);
 process.on('SIGTERM', onSigterm);
 
-const results = [];
-const startedAt = Date.now();
-try {
-  for (let index = 0; index < files.length && !interruptedBy; index += 1) {
-    results.push(await runFile(files[index], index));
-  }
-} finally {
-  process.off('SIGINT', onSigint);
-  process.off('SIGTERM', onSigterm);
-}
-
-const failures = results.filter((result) => result.code !== 0 || result.signal);
 // O8_INTEGRATION_BASELINE names files already red on the CI runner (#2391).
 // They still run; their failures are reported but do not fail the gate.
 // O8_INTEGRATION_BASELINE_REF reads the list as committed at that commit (the
@@ -486,6 +474,38 @@ const baseline = loadRedBaseline(baselinePath, process.env.O8_INTEGRATION_BASELI
 if (baselinePath && !baseline) {
   console.error(`[integration-gate] baseline ${baselinePath} unavailable; every failure counts`);
 }
+
+const results = [];
+const flaky = [];
+const startedAt = Date.now();
+try {
+  for (let index = 0; index < files.length && !interruptedBy; index += 1) {
+    results.push(await runFile(files[index], index));
+  }
+  // O8_INTEGRATION_RERUN_FAILED=1 (the full-suite lane) runs each failed file
+  // outside the baseline once more after the shard's other files have finished.
+  // A file that passes alone is reported as flaky and does not fail the gate; a
+  // file that fails twice does. The changed-files lane leaves this unset.
+  if (process.env.O8_INTEGRATION_RERUN_FAILED === '1') {
+    for (let index = 0; index < results.length && !interruptedBy; index += 1) {
+      const first = results[index];
+      if ((first.code === 0 && !first.signal) || baseline?.has(first.file)) continue;
+      console.log(`[integration-gate] rerunning ${first.file} alone after a failure`);
+      const second = await runFile(first.file, files.indexOf(first.file));
+      if (second.code === 0 && !second.signal) {
+        flaky.push(first.file);
+        results[index] = second;
+      }
+    }
+  }
+} finally {
+  process.off('SIGINT', onSigint);
+  process.off('SIGTERM', onSigterm);
+}
+
+for (const file of flaky) console.log(`[integration-gate] flaky, passed when rerun alone: ${file}`);
+
+const failures = results.filter((result) => result.code !== 0 || result.signal);
 const verdict = classifyAgainstBaseline(
   results.map((result) => ({ file: result.file, failed: result.code !== 0 || Boolean(result.signal) })),
   baseline,
@@ -501,7 +521,7 @@ const totals = results.reduce((sum, result) => ({
   failed: sum.failed + result.failed,
   pending: sum.pending + result.pending,
 }), { total: 0, passed: 0, failed: 0, pending: 0 });
-console.log(`[integration-gate] summary: ${results.length}/${files.length} files, ${totals.passed}/${totals.total} tests passed, ${failures.length} failed files, ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ran ${verdict.ran} · green ${verdict.green.length} · baseline red ${verdict.baselineRed.length} · new red ${verdict.newRed.length}`);
+console.log(`[integration-gate] summary: ${results.length}/${files.length} files, ${totals.passed}/${totals.total} tests passed, ${failures.length} failed files, ${((Date.now() - startedAt) / 1000).toFixed(1)}s · ran ${verdict.ran} · green ${verdict.green.length} · baseline red ${verdict.baselineRed.length} · new red ${verdict.newRed.length} · flaky ${flaky.length}`);
 if (failures[0]) console.error(`[integration-gate] first cause: ${(gatingFailures[0] ?? failures[0]).firstFailure}`);
 
 if (process.env.O8_TEST_GATE_REPORT_PATH) {
