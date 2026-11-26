@@ -1,8 +1,8 @@
 {
-  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). A listed file still runs and its failure is reported, not gating. The full-suite lane reads this file; the changed-files lane reads it as committed at the merge base, so a change cannot add itself. Remove a file when it passes; tracked in #6761.",
+  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). A listed file still runs and its failure is reported, not gating. The full-suite lane reads this file; the changed-files lane reads it as committed at the merge base, so a change cannot add itself. Ten files that passed in main runs 45564538648 and 45700371551 were removed and six that failed in two or more main runs that day were added. Remove a file when it passes; tracked in #6761.",
   "sourceRun": 45536677599,
   "issue": 6761,
-  "count": 125,
+  "count": 121,
   "files": [
     {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
@@ -60,11 +60,6 @@
       "reason": "AssertionError: expected { ok: true, result: { \u2026(5) } } to match object { ok: true, result: { merged: true } }"
     },
     {
-      "path": "tests/bench-design-gesture-real-path.test.ts",
-      "issue": 6761,
-      "reason": "Error: Test timed out in 15000ms."
-    },
-    {
       "path": "tests/boot-stable-workspace-receipts-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected { merged: false, \u2026(4) } to match object { merged: true }"
@@ -78,11 +73,6 @@
       "path": "tests/brain-managed-routing-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 503 to be 500"
-    },
-    {
-      "path": "tests/ci-audit-tool-cache-real-path.test.ts",
-      "issue": 6761,
-      "reason": "AssertionError: expected 1 to be +0"
     },
     {
       "path": "tests/ci-reuse-green-tree.test.ts",
@@ -153,11 +143,6 @@
       "path": "tests/governance-base-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected undefined to be truthy"
-    },
-    {
-      "path": "tests/implementation-notes-artifact-real-path.test.ts",
-      "issue": 6761,
-      "reason": "AssertionError: expected false to be true"
     },
     {
       "path": "tests/inbox-preferences.integration.test.ts",
@@ -295,29 +280,9 @@
       "reason": "Error: ENOENT: no such file or directory, open '<tmp>"
     },
     {
-      "path": "tests/o8d-composer-admission-real-path.test.ts",
-      "issue": 6761,
-      "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
-    },
-    {
       "path": "tests/o8d-composer-queue-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected { Object (error) } to deeply equal { items: [], canSteer: false, \u2026(1) }"
-    },
-    {
-      "path": "tests/o8d-cortex-writes-real-path.test.ts",
-      "issue": 6761,
-      "reason": "AssertionError: expected 'typescript' to be 'o8d'"
-    },
-    {
-      "path": "tests/o8d-file-assets-real-path.test.ts",
-      "issue": 6761,
-      "reason": "Native route selection drifted: AssertionError: Native route was not reached: /api/panel/file-io?path=%2Ftmp%2Fo8g-oWLdql%2Fo8-test-data-run-d"
-    },
-    {
-      "path": "tests/o8d-lane-review-diff-real-path.test.ts",
-      "issue": 6761,
-      "reason": "Native route selection drifted: AssertionError: Native route was not reached: case=0 /api/lanes/lane-42eb9ef9-c28/diff counts=[{\"nonce\":22,\"ph"
     },
     {
       "path": "tests/o8d-mcp-receipts-corrections-native-real-path.test.ts",
@@ -355,11 +320,6 @@
       "reason": "Error: Command failed: node scripts/o8d/build-write-fixture.mjs /home/runner/work/o8/o8 crates/o8d/target <tmp>"
     },
     {
-      "path": "tests/o8d-session-rule-reads-real-path.test.ts",
-      "issue": 6761,
-      "reason": "Native route selection drifted: AssertionError: Native route was not reached: /api/orchestrator/session-rules: expected null to be '1'"
-    },
-    {
       "path": "tests/o8d-setup-writes-native-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 404 to be 200"
@@ -380,9 +340,19 @@
       "reason": "AssertionError: expected 403 to be 200"
     },
     {
+      "path": "tests/o8d-visualization-writes-native-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 401 to be 403; failed in two main runs on 2026-11-25"
+    },
+    {
       "path": "tests/o8d-window-owner-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 401 to be 200"
+    },
+    {
+      "path": "tests/o8d-worker-task-native-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected 401 to be 403; failed in two main runs on 2026-11-25"
     },
     {
       "path": "tests/operator-defaults-mcp-routing.test.ts",
@@ -500,11 +470,6 @@
       "reason": "Error: Contents/MacOS/o8d is missing from the macOS app bundle"
     },
     {
-      "path": "tests/require-approval-merge-real-path.test.ts",
-      "issue": 6761,
-      "reason": "AssertionError: expected { \u2026(2) } to match object { packet: { \u2026(3) } }"
-    },
-    {
       "path": "tests/retained-completion-handoff-real-path.test.ts",
       "issue": 6761,
       "reason": "EffortPinRejectionError: Cannot verify this model effort with the selected account. Refresh the model catalog or omit effort; no worker was started."
@@ -545,11 +510,6 @@
       "reason": "AssertionError: Secret scanner evidence unavailable or invalid"
     },
     {
-      "path": "tests/server-bundles-packaged-layout-real-path.test.ts",
-      "issue": 6761,
-      "reason": "Error: Packaged bundle did not answer its protocol"
-    },
-    {
       "path": "tests/shared-checkout-control-errors-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 'Checkout review is stale. Inspect and\u2026' to contain 'cortex_reconcile_shared_team'"
@@ -558,6 +518,11 @@
       "path": "tests/terminal-release-durable-mission-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 0 to be greater than 0"
+    },
+    {
+      "path": "tests/update-lease-clock-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Test timed out in 30000ms; failed in two main runs on 2026-11-25"
     },
     {
       "path": "tests/update-merge-reservation-real-path.test.ts",
@@ -610,6 +575,11 @@
       "reason": "Error: Command failed: tmux display-message -p #{pid}"
     },
     {
+      "path": "tests/worktree-pinned-read-startup-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected { ok: false, \u2026(3) } to match object { ok: false, \u2026(2) }; failed in three main runs on 2026-11-25"
+    },
+    {
       "path": "tests/worktree-side-merge-real-git.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected { ok: false, \u2026(3) } to match object { ok: false, \u2026(2) }"
@@ -620,9 +590,19 @@
       "reason": "Error: Timed out waiting for lag CPU evidence"
     },
     {
+      "path": "tests/ws-o8d-cutover-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: parity failed at actions/1/entries/2/timeout; failed in two main runs on 2026-11-25"
+    },
+    {
       "path": "tests/ws-parity-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected 'parity failed at actions/1/entries/2/\u2026' to contain 'parity passed'"
+    },
+    {
+      "path": "tests/ws-safety-net-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Timed out waiting for WS receipt; failed in two main runs on 2026-11-25"
     },
     {
       "path": "tests/ws-work-soak-real-path.test.ts",
