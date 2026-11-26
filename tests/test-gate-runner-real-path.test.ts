@@ -13,6 +13,8 @@ function fixtureGateEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.O8_INTEGRATION_SHARD;
   delete env.O8_INTEGRATION_BASELINE;
+  // The full-suite lane sets this for itself; a nested fixture gate must opt in on its own.
+  delete env.O8_INTEGRATION_RERUN_FAILED;
   return env;
 }
 
