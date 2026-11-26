@@ -1,8 +1,8 @@
 {
-  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). A listed file still runs and its failure is reported, not gating. The full-suite lane reads this file; the changed-files lane reads it as committed at the merge base, so a change cannot add itself. Ten files that passed in main runs 45564538648 and 45700371551 were removed and six that failed in two or more main runs that day were added. Remove a file when it passes; tracked in #6761.",
+  "note": "Files red on unmodified main in the full integration run 45536677599 (2026-11-25). A listed file still runs and its failure is reported, not gating. The full-suite lane reads this file; the changed-files lane reads it as committed at the merge base, so a change cannot add itself. Ten files that passed in main runs 45564538648 and 45700371551 were removed and six that failed in two or more main runs that day were added. Eight more that failed twice in each of main runs 45700371551 and 45844766698 were added on 2026-11-26. Remove a file when it passes; tracked in #6761.",
   "sourceRun": 45536677599,
   "issue": 6761,
-  "count": 121,
+  "count": 129,
   "files": [
     {
       "path": "src/components/desktop/onboarding/onboarding-projects.test.ts",
@@ -103,6 +103,11 @@
       "path": "tests/composer-next-worker-real-path.test.ts",
       "issue": 6761,
       "reason": "AssertionError: expected undefined to match object { status: 'held', payload: { \u2026(1) } }"
+    },
+    {
+      "path": "tests/dash-terminal-csi-s-scrollback-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected [ '128', '000', '001', '002', ...(37) ] to deeply equal [ '128', '000', '001', '002', ...(38) ]; failed alone and in the shard in main runs 45700371551 and 45844766698"
     },
     {
       "path": "tests/dev-session-startup-memory-real-path.test.ts",
@@ -265,6 +270,21 @@
       "reason": "AssertionError: expected +0 to be 2"
     },
     {
+      "path": "tests/next-parity-harness-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: Parity fixture exited; failed alone and in the shard in main runs 45700371551 and 45844766698"
+    },
+    {
+      "path": "tests/next-parity-render-failure-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: expected false to be true, 10 of 12 capture CLI cases; failed alone and in the shard in main runs 45700371551 and 45844766698"
+    },
+    {
+      "path": "tests/next-surface-registration-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Composer owner preflight failed (exited 1): o8d failed: verify opt-in, listener, credential, and producer input; failed alone and in the shard in main runs 45700371551 and 45844766698"
+    },
+    {
       "path": "tests/next-workers-real-path.test.ts",
       "issue": 6761,
       "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
@@ -290,6 +310,11 @@
       "reason": "AssertionError: expected [ 'GET', \u2026(2) ] to deeply equal [ 'GET', \u2026(2) ]"
     },
     {
+      "path": "tests/o8d-mobile-lane-overlays-real-path.test.ts",
+      "issue": 6761,
+      "reason": "AssertionError: Native route was not reached: /api/mobile/history; failed alone and in the shard in main runs 45700371551 and 45844766698"
+    },
+    {
       "path": "tests/o8d-parity-real-path.test.ts",
       "issue": 6761,
       "reason": "Native route selection drifted: Error: Flag-off request unexpectedly served natively"
@@ -305,6 +330,11 @@
       "reason": "Native route selection drifted: Error: Flag-off repository request unexpectedly served natively"
     },
     {
+      "path": "tests/o8d-rust-lane-live-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Error: daemon timeout in the lane live parity fixture; failed alone and in the shard in main runs 45700371551 and 45844766698"
+    },
+    {
       "path": "tests/o8d-rust-projects-real-path.test.ts",
       "issue": 6761,
       "reason": "Error: Command failed: node --import ./scripts/register-server-only-stub.mjs --import tsx tests/fixtures/o8d-projects-parity.mts crates/o8d/target/debug/o"
@@ -318,6 +348,11 @@
       "path": "tests/o8d-rust-write-path-real-path.test.ts",
       "issue": 6761,
       "reason": "Error: Command failed: node scripts/o8d/build-write-fixture.mjs /home/runner/work/o8/o8 crates/o8d/target <tmp>"
+    },
+    {
+      "path": "tests/o8d-session-rule-caller-real-path.test.ts",
+      "issue": 6761,
+      "reason": "TypeError: fetch failed, connect ECONNREFUSED to the fixture daemon; failed alone and in the shard in main runs 45700371551 and 45844766698"
     },
     {
       "path": "tests/o8d-setup-writes-native-real-path.test.ts",
@@ -443,6 +478,11 @@
       "path": "tests/queued-composer-execution-real-path.test.ts",
       "issue": 6761,
       "reason": "o8d composer owner preflight fails in the fixture (opt-in, listener, credential or producer input)."
+    },
+    {
+      "path": "tests/queued-route-refusal-real-path.test.ts",
+      "issue": 6761,
+      "reason": "Composer owner preflight failed (exited 1): o8d failed: verify opt-in, listener, credential, and producer input; failed alone and in the shard in main runs 45700371551 and 45844766698"
     },
     {
       "path": "tests/real-path-seams.test.ts",
